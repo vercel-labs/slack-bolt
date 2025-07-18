@@ -9,7 +9,6 @@ import type {
   StringIndexed,
 } from "@slack/bolt";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import type { VercelHandler, VercelReceiverOptions } from "./index.d";
 
 /**
  * Bolt Receiver for Vercel Fluid Compute
@@ -249,4 +248,14 @@ export function handler(app: App, receiver: VercelReceiver): VercelHandler {
       return res.status(500).json({ error: "Internal Server Error" });
     }
   };
+}
+
+export type VercelHandler = (
+  req: VercelRequest,
+  res: VercelResponse
+) => Promise<VercelResponse>;
+
+export interface VercelReceiverOptions {
+  signingSecret?: string;
+  signatureVerification?: boolean;
 }

@@ -16,19 +16,22 @@
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "files": [
+    "dist/"
+  ],
   "keywords": [],
-  "author": "",
+  "author": "Vercel",
   "license": "ISC",
   "packageManager": "pnpm@10.11.1",
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@vercel/functions": "^2.2.0"
+    "@vercel/functions": "^2.2.4",
+    "@vercel/node": "^5.3.6"
   },
   "peerDependencies": {
-    "@slack/bolt": "^4.0.0",
-    "@vercel/node": "^5.0.0"
+    "@slack/bolt": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
