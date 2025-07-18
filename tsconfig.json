@@ -1,20 +1,18 @@
 {
   "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
     "declarationMap": true,
-    "target": "ES2022", // modern enough for Node 18+ without down-leveling too far
-    "module": "NodeNext", // aligns with "type": "module" in package.json
-    "moduleResolution": "NodeNext", // for package-style exports/subpath support
-    "resolveJsonModule": true, // optional: if you import .json
-    "strict": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
+    "emitDeclarationOnly": false,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "skipLibCheck": true,
     "incremental": true
   },
-  "include": ["src"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
