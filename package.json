@@ -2,7 +2,8 @@
   "name": "@vercel/bolt",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -16,5 +17,8 @@
     "@slack/bolt": "^4.4.0",
     "@vercel/functions": "^2.2.4",
     "@vercel/node": "^5.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.14"
   }
 }
