@@ -9,18 +9,21 @@ importers:
   .:
     dependencies:
       '@slack/bolt':
-        specifier: ^4.4.0
+        specifier: ^4.0.0
         version: 4.4.0(@types/express@5.0.3)
       '@vercel/functions':
-        specifier: ^2.2.4
+        specifier: ^2.2.0
         version: 2.2.4
       '@vercel/node':
-        specifier: ^5.3.6
+        specifier: ^5.0.0
         version: 5.3.6
     devDependencies:
       '@types/node':
-        specifier: ^24.0.14
-        version: 24.0.14
+        specifier: ^18.0.0
+        version: 18.19.119
+      typescript:
+        specifier: ^5.0.0
+        version: 5.8.3
 
 packages:
 
@@ -174,8 +177,8 @@ packages:
   '@types/node@16.18.11':
     resolution: {integrity: sha512-3oJbGBUWuS6ahSnEq1eN2XrCyf4YsWI8OyCvo7c64zQJNplk3mO84t53o8lfTk+2ji59g5ycfc6qQ3fdHliHuA==}
 
-  '@types/node@24.0.14':
-    resolution: {integrity: sha512-4zXMWD91vBLGRtHK3YbIoFMia+1nqEz72coM42C5ETjnNCa/heoj7NT1G67iAfOqMmcfhuCZ4uNpyz8EjlAejw==}
+  '@types/node@18.19.119':
+    resolution: {integrity: sha512-d0F6m9itIPaKnrvEMlzE48UjwZaAnFW7Jwibacw9MNdqadjKNpUm9tfJYDwmShJmgqcoqYUX3EMKO1+RWiuuNg==}
 
   '@types/qs@6.14.0':
     resolution: {integrity: sha512-eOunJqu0K1923aExK6y8p6fsihYEn/BYuQ4g0CxAAgFc4b/ZLN4CrsRZ55srTdqoiLzU2B2evC+apEIxprEzkQ==}
@@ -1114,8 +1117,13 @@ packages:
     engines: {node: '>=4.2.0'}
     hasBin: true
 
-  undici-types@7.8.0:
-    resolution: {integrity: sha512-9UJ2xGDvQ43tYyVMpuHlsgApydB8ZKfVYTsLDhXkFL/6gfkp+U8xTGdh8pMJv1SpZna0zxG1DwsKZsreLbXBxw==}
+  typescript@5.8.3:
+    resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@5.26.5:
+    resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
 
   undici@5.28.4:
     resolution: {integrity: sha512-72RFADWFqKmUb2hmmvNODKL3p9hcB6Gt2DOQMis1SEBaV6a4MH8soBvzg+95CYhCKPFedut2JY9bMfrDl9D23g==}
@@ -1274,14 +1282,14 @@ snapshots:
 
   '@slack/logger@4.0.0':
     dependencies:
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
 
   '@slack/oauth@3.0.3':
     dependencies:
       '@slack/logger': 4.0.0
       '@slack/web-api': 7.9.3
       '@types/jsonwebtoken': 9.0.10
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
       jsonwebtoken: 9.0.2
       lodash.isstring: 4.0.1
     transitivePeerDependencies:
@@ -1291,7 +1299,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.0
       '@slack/web-api': 7.9.3
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
       '@types/ws': 8.18.1
       eventemitter3: 5.0.1
       ws: 8.18.3
@@ -1306,7 +1314,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.0
       '@slack/types': 2.15.0
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
       '@types/retry': 0.12.0
       axios: 1.10.0
       eventemitter3: 5.0.1
@@ -1337,17 +1345,17 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
 
   '@types/estree@1.0.8': {}
 
   '@types/express-serve-static-core@5.0.7':
     dependencies:
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 0.17.5
@@ -1365,7 +1373,7 @@ snapshots:
   '@types/jsonwebtoken@9.0.10':
     dependencies:
       '@types/ms': 2.1.0
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
 
   '@types/mime@1.3.5': {}
 
@@ -1373,9 +1381,9 @@ snapshots:
 
   '@types/node@16.18.11': {}
 
-  '@types/node@24.0.14':
+  '@types/node@18.19.119':
     dependencies:
-      undici-types: 7.8.0
+      undici-types: 5.26.5
 
   '@types/qs@6.14.0': {}
 
@@ -1386,17 +1394,17 @@ snapshots:
   '@types/send@0.17.5':
     dependencies:
       '@types/mime': 1.3.5
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
 
   '@types/serve-static@1.15.8':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
       '@types/send': 0.17.5
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 24.0.14
+      '@types/node': 18.19.119
 
   '@vercel/build-utils@10.6.7': {}
 
@@ -2292,7 +2300,9 @@ snapshots:
 
   typescript@4.9.5: {}
 
-  undici-types@7.8.0: {}
+  typescript@5.8.3: {}
+
+  undici-types@5.26.5: {}
 
   undici@5.28.4:
     dependencies:
