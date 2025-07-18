@@ -1,43 +1,27 @@
 {
   "name": "@vercel/bolt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "repository": "https://github.com/vercel/vercel-bolt",
-  "description": "Slack Bolt receiver for Vercel Fluid Compute",
-  "type": "module",
+  "description": "Bolt Receiver for Vercel Fluid Compute",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "files": [
-    "dist/"
+    "dist"
   ],
-  "keywords": [],
-  "author": "Vercel",
-  "license": "ISC",
-  "packageManager": "pnpm@10.11.1",
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "dependencies": {
     "@vercel/functions": "^2.2.4",
     "@vercel/node": "^5.3.6"
   },
   "peerDependencies": {
-    "@slack/bolt": "^4.0.0"
+    "@slack/bolt": "^4.4.0"
   },
   "devDependencies": {
-    "@types/node": "^18.0.0",
-    "typescript": "^5.0.0"
-  }
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.5"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "author": "Vercel",
+  "license": "ISC"
 }
