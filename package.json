@@ -1,7 +1,7 @@
 {
   "name": "@vercel/bolt",
-  "private": true,
   "version": "1.0.0",
+  "repository": "https://github.com/vercel/vercel-bolt",
   "description": "Slack Bolt receiver for Vercel Fluid Compute",
   "type": "module",
   "main": "./dist/index.js",
