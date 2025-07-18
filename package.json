@@ -1,0 +1,20 @@
+{
+  "name": "@vercel/bolt",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.11.1",
+  "peerDependencies": {
+    "@slack/bolt": "^4.4.0",
+    "@vercel/functions": "^2.2.4",
+    "@vercel/node": "^5.3.6"
+  }
+}
