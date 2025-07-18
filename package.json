@@ -1,5 +1,6 @@
 {
   "name": "@vercel/bolt",
+  "private": true,
   "version": "1.0.0",
   "description": "Slack Bolt receiver for Vercel Fluid Compute",
   "type": "module",
