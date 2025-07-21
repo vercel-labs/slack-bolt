@@ -1,5 +1,11 @@
 # @vercel/bolt
 
+## 1.0.5
+
+### Patch Changes
+
+- bd7331b: Add tests for all public methods on the VercelReceiver class.
+
 ## 1.0.4
 
 ### Patch Changes
