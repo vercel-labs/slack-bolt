@@ -24,6 +24,8 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
+    "prebuild": "npm run clean",
+    "clean": "rm -rf dist",
     "ci": "npm run build && npm run test",
     "test": "vitest run",
     "dev": "vitest watch",
