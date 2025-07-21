@@ -23,5 +23,6 @@
     "declarationMap": true,
     "lib": ["ES2022"]
   },
-  "include": ["src/index.ts"]
+  "include": ["src/index.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }
