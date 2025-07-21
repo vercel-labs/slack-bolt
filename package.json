@@ -1,15 +1,34 @@
 {
   "name": "@vercel/bolt",
   "version": "1.0.2",
-  "repository": "https://github.com/vercel/vercel-bolt",
-  "description": "Bolt Receiver for Vercel Fluid Compute",
+  "description": "Bolt Receiver for Vercel",
+  "keywords": [
+    "vercel",
+    "bolt",
+    "slack"
+  ],
+  "homepage": "https://github.com/vercel/vercel-bolt",
+  "bugs": {
+    "url": "https://github.com/vercel/vercel-bolt/issues"
+  },
+  "author": "Vercel",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/vercel-bolt.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": [
-    "dist",
-    "README.md",
-    "package.json"
-  ],
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "ci": "npm run build && npm run test",
+    "test": "vitest run",
+    "dev": "vitest watch"
+  },
   "dependencies": {
     "@vercel/functions": "^2.2.4",
     "@vercel/node": "^5.3.6"
@@ -18,12 +37,8 @@
     "@slack/bolt": "^4.4.0"
   },
   "devDependencies": {
+    "@types/node": "^22.10.5",
     "typescript": "^5.7.2",
-    "@types/node": "^22.10.5"
-  },
-  "scripts": {
-    "build": "tsc"
-  },
-  "author": "Vercel",
-  "license": "MIT"
+    "vitest": "^3.2.4"
+  }
 }

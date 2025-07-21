@@ -259,3 +259,5 @@ export interface VercelReceiverOptions {
   signingSecret?: string;
   signatureVerification?: boolean;
 }
+
+export { add } from "./utils.js";
