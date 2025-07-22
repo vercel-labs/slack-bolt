@@ -17,7 +17,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
 
 // Constants
-const SCOPE = ["@vercel/bolt", "VercelReceiver"];
+const SCOPE = ["@vercel/bolt"];
 const ACK_TIMEOUT_MS = 3001;
 const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
 const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
@@ -93,14 +93,11 @@ export class VercelReceiver implements Receiver {
           throw new VercelReceiverError("Slack app not initialized", 500);
         }
 
-        this.logger.debug("Processing incoming request", {
-          method: req.method,
-          url: req.url,
-          headers: req.headers,
-        });
-
-        // Parse request body
-        const { body, rawBody } = await this.parseRequestBody(req);
+        const rawBody = await this.getRawBody(req);
+        const body = await this.parseRequestBody(
+          rawBody,
+          req.headers["content-type"]
+        );
 
         // Verify signature if enabled
         if (this.signatureVerification) {
@@ -126,9 +123,7 @@ export class VercelReceiver implements Receiver {
     };
   }
 
-  private async parseRequestBody(
-    req: VercelRequest
-  ): Promise<ParsedRequestBody> {
+  private async getRawBody(req: VercelRequest): Promise<string> {
     try {
       let rawBody: string;
 
@@ -140,31 +135,49 @@ export class VercelReceiver implements Receiver {
       } else if (req.body && typeof req.body === "object") {
         // Body is already parsed
         rawBody = JSON.stringify(req.body);
-        return { body: req.body, rawBody };
       } else {
         // Read from stream
-        rawBody = await this.getRawBody(req);
+        const chunks: Buffer[] = [];
+
+        for await (const chunk of req) {
+          chunks.push(Buffer.from(chunk));
+        }
+
+        rawBody = Buffer.concat(chunks).toString("utf8");
       }
 
-      const contentType =
-        this.getHeaderValue(req.headers, "content-type") || "";
-      let body: StringIndexed;
-
-      if (contentType.includes("application/json")) {
-        body = JSON.parse(rawBody);
-      } else if (contentType.includes("application/x-www-form-urlencoded")) {
-        const urlParams = new URLSearchParams(rawBody);
-        const payload = urlParams.get("payload");
-        body = payload ? JSON.parse(payload) : Object.fromEntries(urlParams);
-      } else {
-        // Default to JSON parsing
-        body = JSON.parse(rawBody);
-      }
-
-      return { body, rawBody };
+      return rawBody;
     } catch (error) {
-      this.logger.error("Failed to parse request body", error);
-      throw new RequestParsingError(`Failed to parse request body: ${error}`);
+      this.logger.error("Error getting raw body", error);
+      throw error;
+    }
+  }
+
+  private async parseRequestBody(
+    rawBody: string,
+    contentType?: string
+  ): Promise<StringIndexed> {
+    if (contentType === "application/x-www-form-urlencoded") {
+      const parsedBody = JSON.parse(rawBody);
+
+      if (typeof parsedBody.payload === "string") {
+        return JSON.parse(parsedBody.payload);
+      }
+      return parsedBody;
+    }
+    if (contentType === "application/json") {
+      return JSON.parse(rawBody);
+    }
+
+    this.logger.warn(`Unexpected content-type detected: ${contentType}`);
+    try {
+      // Parse this body anyway
+      return JSON.parse(rawBody);
+    } catch (e) {
+      this.logger.error(
+        `Failed to parse body as JSON data for content-type: ${contentType}`
+      );
+      throw e;
     }
   }
 
@@ -282,16 +295,6 @@ export class VercelReceiver implements Receiver {
     }
   }
 
-  private async getRawBody(req: VercelRequest): Promise<string> {
-    const chunks: Buffer[] = [];
-
-    for await (const chunk of req) {
-      chunks.push(Buffer.from(chunk));
-    }
-
-    return Buffer.concat(chunks).toString("utf8");
-  }
-
   private createSlackReceiverEvent({
     body,
     headers,
@@ -307,13 +310,17 @@ export class VercelReceiver implements Receiver {
       ? this.customPropertiesExtractor(request!)
       : {};
 
+    const retryNum =
+      this.getHeaderValue(headers, SLACK_RETRY_NUM_HEADER) || "0";
+
+    const retryReason =
+      this.getHeaderValue(headers, SLACK_RETRY_REASON_HEADER) || "";
+
     return {
       body,
       ack,
-      retryNum: Number(
-        this.getHeaderValue(headers, SLACK_RETRY_NUM_HEADER) || "0"
-      ),
-      retryReason: this.getHeaderValue(headers, SLACK_RETRY_REASON_HEADER),
+      retryNum: Number(retryNum),
+      retryReason,
       customProperties,
     };
   }
@@ -405,9 +412,4 @@ export interface VercelReceiverOptions {
     event: ReceiverEvent,
     res: VercelResponse
   ) => Promise<VercelResponse>;
-}
-
-interface ParsedRequestBody {
-  body: StringIndexed;
-  rawBody: string;
 }
