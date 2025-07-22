@@ -499,7 +499,7 @@ describe("VercelReceiver", () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "SignatureVerificationError",
-          error: expect.stringContaining("replay attack"),
+          error: expect.stringMatching(/stale|differ.*system time.*minutes/i),
         })
       );
     });
