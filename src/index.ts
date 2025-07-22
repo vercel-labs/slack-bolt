@@ -1,16 +1,20 @@
-import { createHmac } from "node:crypto";
+import {
+  VercelReceiverError,
+  RequestParsingError,
+  SignatureVerificationError,
+} from "./errors";
 import { waitUntil } from "@vercel/functions";
 import type { IncomingHttpHeaders } from "node:http";
-import type {
-  AckFn,
-  App,
-  Receiver,
-  ReceiverEvent,
-  StringIndexed,
+import {
+  verifySlackRequest,
+  type AckFn,
+  type App,
+  type Receiver,
+  type ReceiverEvent,
+  type StringIndexed,
 } from "@slack/bolt";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
-import { verifySlackRequest, isValidSlackRequest } from "./utils.js";
 
 // Constants
 const SCOPE = ["@vercel/bolt", "VercelReceiver"];
@@ -19,51 +23,6 @@ const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
 const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
 const SLACK_TIMESTAMP_HEADER = "x-slack-request-timestamp";
 const SLACK_SIGNATURE_HEADER = "x-slack-signature";
-
-// Types
-export type VercelHandler = (
-  req: VercelRequest,
-  res: VercelResponse
-) => Promise<VercelResponse>;
-
-export interface VercelReceiverOptions {
-  signingSecret?: string;
-  signatureVerification?: boolean;
-  logger?: Logger;
-  logLevel?: LogLevel;
-  customPropertiesExtractor?: (req: VercelRequest) => StringIndexed;
-  customResponseHandler?: (
-    event: ReceiverEvent,
-    res: VercelResponse
-  ) => Promise<VercelResponse>;
-}
-
-interface ParsedRequestBody {
-  body: StringIndexed;
-  rawBody: string;
-}
-
-// Custom error types
-export class VercelReceiverError extends Error {
-  constructor(message: string, public readonly statusCode: number = 500) {
-    super(message);
-    this.name = "VercelReceiverError";
-  }
-}
-
-export class SignatureVerificationError extends VercelReceiverError {
-  constructor(message: string = "Invalid request signature") {
-    super(message, 401);
-    this.name = "SignatureVerificationError";
-  }
-}
-
-export class RequestParsingError extends VercelReceiverError {
-  constructor(message: string = "Failed to parse request") {
-    super(message, 400);
-    this.name = "RequestParsingError";
-  }
-}
 
 export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
@@ -78,7 +37,11 @@ export class VercelReceiver implements Receiver {
   ) => Promise<VercelResponse>;
   private app?: App;
 
-  constructor({
+  public getLogger(): Logger {
+    return this.logger;
+  }
+
+  public constructor({
     signingSecret = process.env.SLACK_SIGNING_SECRET,
     signatureVerification = true,
     logger,
@@ -401,10 +364,8 @@ export class VercelReceiver implements Receiver {
 // Convenience handler function
 export function createHandler(
   app: App,
-  options?: VercelReceiverOptions
+  receiver: VercelReceiver
 ): VercelHandler {
-  const receiver = new VercelReceiver(options);
-
   let initPromise: Promise<void> | null = null;
 
   return async (req: VercelRequest, res: VercelResponse) => {
@@ -418,13 +379,35 @@ export function createHandler(
       const handler = await receiver.start();
       return handler(req, res);
     } catch (error) {
-      const logger = new ConsoleLogger();
-      const prefix = SCOPE.map((s) => `[${s}]`).join(" ");
-      logger.error(prefix, "Error in createHandler:", error);
+      const logger = receiver.getLogger();
+      logger.error("Error in createHandler:", error);
       return res.status(500).json({
         error: "Internal Server Error",
         type: "HandlerError",
       });
     }
   };
+}
+
+// Types
+export type VercelHandler = (
+  req: VercelRequest,
+  res: VercelResponse
+) => Promise<VercelResponse>;
+
+export interface VercelReceiverOptions {
+  signingSecret?: string;
+  signatureVerification?: boolean;
+  logger?: Logger;
+  logLevel?: LogLevel;
+  customPropertiesExtractor?: (req: VercelRequest) => StringIndexed;
+  customResponseHandler?: (
+    event: ReceiverEvent,
+    res: VercelResponse
+  ) => Promise<VercelResponse>;
+}
+
+interface ParsedRequestBody {
+  body: StringIndexed;
+  rawBody: string;
 }
