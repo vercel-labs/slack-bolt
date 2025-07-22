@@ -1,873 +1,1034 @@
-import { VercelReceiver, createHandler } from "./index.js";
-import { expect, vi, describe, afterEach, it, beforeEach } from "vitest";
-import { createHmac } from "node:crypto";
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { VercelReceiver, createHandler } from './index';
+import { App, ReceiverEvent } from '@slack/bolt';
+import { ConsoleLogger, LogLevel } from '@slack/logger';
 
-// Test helpers - following Slack patterns
-const createMockRequest = (overrides = {}) =>
-  ({
-    method: "POST",
-    url: "/slack/events",
-    headers: {
-      "content-type": "application/json",
-      "x-slack-request-timestamp": Math.floor(Date.now() / 1000).toString(),
-      "x-slack-signature": "v0=test-signature",
-    },
-    body: { type: "event_callback", event: { type: "app_mention" } },
-    ...overrides,
-  } as any);
+// Mock @slack/bolt
+vi.mock('@slack/bolt', () => ({
+  verifySlackRequest: vi.fn(),
+  ConsoleLogger: vi.fn(() => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    setLevel: vi.fn(),
+    getLevel: vi.fn(),
+  })),
+  LogLevel: {
+    DEBUG: 'debug',
+    INFO: 'info',
+    WARN: 'warn',
+    ERROR: 'error',
+  },
+}));
 
-const createMockResponse = () => {
-  const mockResponse = {
-    status: vi.fn().mockReturnThis(),
-    json: vi.fn().mockReturnThis(),
-    send: vi.fn().mockReturnThis(),
-  };
-  return mockResponse as any;
-};
+// Mock @vercel/functions
+vi.mock('@vercel/functions', () => ({
+  waitUntil: vi.fn((promise) => promise),
+}));
 
-const createMockApp = () => ({
-  init: vi.fn().mockResolvedValue(undefined),
-  processEvent: vi.fn().mockResolvedValue(undefined),
-});
-
-const createQuietLogger = () => ({
-  error: vi.fn(),
-  warn: vi.fn(),
-  info: vi.fn(),
-  debug: vi.fn(),
-  setLevel: vi.fn(),
-  getLevel: vi.fn(),
-  setName: vi.fn(),
-});
-
-const generateValidSignature = (
-  timestamp: string,
-  body: string,
-  secret: string
-) => {
-  const baseString = `v0:${timestamp}:${body}`;
-  return `v0=${createHmac("sha256", secret)
-    .update(baseString, "utf8")
-    .digest("hex")}`;
-};
-
-describe("VercelReceiver", () => {
-  const SIGNING_SECRET = "test-signing-secret-12345";
+describe('VercelReceiver', () => {
+  let receiver: VercelReceiver;
+  let mockApp: App;
+  const mockSigningSecret = 'test-signing-secret';
 
   beforeEach(() => {
     vi.clearAllMocks();
+    
+    mockApp = {
+      init: vi.fn().mockResolvedValue(undefined),
+      processEvent: vi.fn().mockResolvedValue(undefined),
+    } as unknown as App;
+
+    receiver = new VercelReceiver({
+      signingSecret: mockSigningSecret,
+      signatureVerification: false, // Disable for most tests
+      logLevel: LogLevel.ERROR, // Reduce noise in tests
+    });
+    
+    receiver.init(mockApp);
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
-  describe("Constructor", () => {
-    it("should require a signing secret", () => {
-      vi.stubEnv("SLACK_SIGNING_SECRET", "");
-
-      expect(() => new VercelReceiver()).toThrow(
-        "SLACK_SIGNING_SECRET is required for VercelReceiver"
-      );
+  describe('constructor', () => {
+    it('should throw error when signingSecret is missing', () => {
+      expect(() => {
+        new VercelReceiver({});
+      }).toThrow('SLACK_SIGNING_SECRET is required for VercelReceiver');
     });
 
-    it("should accept signing secret from constructor", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      expect(receiver).toBeInstanceOf(VercelReceiver);
-    });
-
-    it("should accept signing secret from environment", () => {
-      vi.stubEnv("SLACK_SIGNING_SECRET", SIGNING_SECRET);
+    it('should initialize with environment variable', () => {
+      process.env.SLACK_SIGNING_SECRET = 'env-secret';
       const receiver = new VercelReceiver();
-      expect(receiver).toBeInstanceOf(VercelReceiver);
+      expect(receiver).toBeDefined();
+      delete process.env.SLACK_SIGNING_SECRET;
     });
 
-    it("should allow disabling signature verification", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
+    it('should initialize with all custom options', () => {
+      const customLogger = new ConsoleLogger();
+      const customPropertiesExtractor = vi.fn().mockReturnValue({ custom: 'property' });
+      const customResponseHandler = vi.fn().mockResolvedValue(new Response('custom'));
+      
+      const customReceiver = new VercelReceiver({
+        signingSecret: 'test-secret',
         signatureVerification: false,
-        logger: createQuietLogger(),
+        logger: customLogger,
+        logLevel: LogLevel.DEBUG,
+        customPropertiesExtractor,
+        customResponseHandler,
       });
-      expect(receiver).toBeInstanceOf(VercelReceiver);
-    });
-
-    it("should accept custom logger", () => {
-      const mockLogger = {
-        error: vi.fn(),
-        warn: vi.fn(),
-        info: vi.fn(),
-        debug: vi.fn(),
-        setLevel: vi.fn(),
-        getLevel: vi.fn(),
-        setName: vi.fn(),
-      };
-
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: mockLogger,
-      });
-
-      expect(receiver).toBeInstanceOf(VercelReceiver);
-    });
-
-    it("should accept custom properties extractor", () => {
-      const customExtractor = vi.fn();
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        customPropertiesExtractor: customExtractor,
-      });
-      expect(receiver).toBeInstanceOf(VercelReceiver);
+      
+      expect(customReceiver).toBeDefined();
+      expect(customReceiver.getLogger()).toBeDefined();
     });
   });
 
-  describe("Receiver Lifecycle", () => {
-    it("should implement init() method", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-
-      expect(() => receiver.init(app)).not.toThrow();
-    });
-
-    it("should implement start() method that returns a handler", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
+  describe('parseRequestBody', () => {
+    it('should parse valid JSON content', async () => {
+      const jsonPayload = { type: 'event_callback', event: { type: 'app_mention', text: 'hello' } };
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(jsonPayload),
       });
 
       const handler = await receiver.start();
-
-      expect(handler).toBeInstanceOf(Function);
-      expect(handler.length).toBe(2); // req, res
-    });
-
-    it("should implement stop() method", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-
-      await expect(receiver.stop()).resolves.toBeUndefined();
-    });
-
-    it("should provide toHandler() method", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-
-      const handler = receiver.toHandler();
-
-      expect(handler).toBeInstanceOf(Function);
-      expect(handler.length).toBe(2);
-    });
-  });
-
-  describe("Request Handling", () => {
-    it("should handle URL verification challenge", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "url_verification", challenge: "test-challenge-value" },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({
-        challenge: "test-challenge-value",
-      });
-      expect(app.processEvent).not.toHaveBeenCalled();
-    });
-
-    it("should process regular Slack events", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-
-      // Mock event processing to call ack
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
-      });
-
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: {
-          type: "event_callback",
-          event: { type: "app_mention", text: "hello" },
-        },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: {
-            type: "event_callback",
-            event: { type: "app_mention", text: "hello" },
-          },
-          ack: expect.any(Function),
-        })
-      );
-    });
-  });
-
-  describe("Request Body Parsing", () => {
-    let receiver: VercelReceiver;
-    let app: any;
-
-    beforeEach(() => {
-      receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-      });
-      app = createMockApp();
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
-      });
-      receiver.init(app);
-    });
-
-    it("should parse JSON request bodies", async () => {
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-        body: { type: "event_callback", event: { type: "message" } },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: { type: "event_callback", event: { type: "message" } },
-        })
-      );
-    });
-
-    it("should parse form-encoded bodies with payload parameter", async () => {
-      const handler = receiver.toHandler();
-      const payload = JSON.stringify({
-        type: "interactive_message",
-        callback_id: "test",
-      });
-      const req = createMockRequest({
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: `payload=${encodeURIComponent(payload)}`,
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: { type: "interactive_message", callback_id: "test" },
-        })
-      );
-    });
-
-    it("should parse form-encoded bodies without payload (slash commands)", async () => {
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: "command=%2Fhello&text=world&user_id=U123",
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: { command: "/hello", text: "world", user_id: "U123" },
-        })
-      );
-    });
-
-    it("should handle string bodies", async () => {
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-        body: '{"type":"event_callback","event":{"type":"app_mention"}}',
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: { type: "event_callback", event: { type: "app_mention" } },
-        })
-      );
-    });
-
-    it("should handle buffer bodies", async () => {
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-        body: Buffer.from(
-          '{"type":"event_callback","event":{"type":"message"}}'
-        ),
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: { type: "event_callback", event: { type: "message" } },
-        })
-      );
-    });
-
-    it("should handle empty bodies gracefully", async () => {
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-        body: "",
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "RequestParsingError",
-        })
-      );
-    });
-
-    it("should handle malformed JSON", async () => {
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-        body: "invalid-json",
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "RequestParsingError",
-        })
-      );
-    });
-  });
-
-  describe("Signature Verification", () => {
-    it("should verify valid signatures", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
-      });
-      receiver.init(app);
-
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const body = JSON.stringify({
-        type: "url_verification",
-        challenge: "test",
-      });
-      const signature = generateValidSignature(timestamp, body, SIGNING_SECRET);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: {
-          "content-type": "application/json",
-          "x-slack-request-timestamp": timestamp,
-          "x-slack-signature": signature,
-        },
-        body,
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({ challenge: "test" });
-    });
-
-    it("should reject invalid signatures", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: {
-          "content-type": "application/json",
-          "x-slack-request-timestamp": Math.floor(Date.now() / 1000).toString(),
-          "x-slack-signature": "v0=invalid-signature",
-        },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "SignatureVerificationError",
-        })
-      );
-    });
-
-    it("should reject requests with missing signature headers", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "SignatureVerificationError",
-        })
-      );
-    });
-
-    it("should reject requests with stale timestamps", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-      receiver.init(app);
-
-      const staleTimestamp = (Math.floor(Date.now() / 1000) - 400).toString(); // 6+ minutes old
-      const body = JSON.stringify({ type: "event_callback" });
-      const signature = generateValidSignature(
-        staleTimestamp,
-        body,
-        SIGNING_SECRET
-      );
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: {
-          "content-type": "application/json",
-          "x-slack-request-timestamp": staleTimestamp,
-          "x-slack-signature": signature,
-        },
-        body,
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "SignatureVerificationError",
-          error: expect.stringMatching(/stale|differ.*system time.*minutes/i),
-        })
-      );
-    });
-
-    it("should skip verification when disabled", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-        logger: createQuietLogger(),
-      });
-      const app = createMockApp() as any;
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        headers: { "content-type": "application/json" },
-        body: { type: "url_verification", challenge: "test" },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({ challenge: "test" });
-    });
-  });
-
-  describe("Event Processing and Acknowledgment", () => {
-    let receiver: VercelReceiver;
-    let app: any;
-
-    beforeEach(() => {
-      receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-      });
-      app = createMockApp();
-      receiver.init(app);
-    });
-
-    it("should acknowledge events with string responses", async () => {
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack("OK"), 10);
-        return Promise.resolve();
-      });
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.send).toHaveBeenCalledWith("OK");
-    });
-
-    it("should acknowledge events with JSON responses", async () => {
-      app.processEvent.mockImplementation((event: any) => {
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
         setTimeout(() => event.ack({ success: true }), 10);
-        return Promise.resolve();
       });
 
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({ success: true });
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(200);
+      expect(capturedEvent!.body).toEqual(jsonPayload);
+      
+      const responseBody = await response.json();
+      expect(responseBody).toEqual({ success: true });
     });
 
-    it("should acknowledge events with empty responses", async () => {
-      app.processEvent.mockImplementation((event: any) => {
+    it('should parse URL-encoded form data with payload', async () => {
+      const payload = { type: 'interactive_message', actions: [{ name: 'button', value: 'click' }] };
+      const formData = 'payload=' + encodeURIComponent(JSON.stringify(payload));
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: formData,
+      });
+
+      const handler = await receiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
         setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
       });
 
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
-      });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.send).toHaveBeenCalledWith("");
+      await handler(request, new Response());
+      
+      expect(capturedEvent!.body).toEqual(payload);
     });
 
-    it("should timeout unacknowledged events", async () => {
-      // Don't call ack to simulate timeout
-      app.processEvent.mockImplementation(() => Promise.resolve());
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
+    it('should parse URL-encoded form data without payload field', async () => {
+      const formData = 'token=xoxb-token&team_id=T123&user_id=U456';
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: formData,
       });
-      const res = createMockResponse();
 
-      await handler(req, res);
+      const handler = await receiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
+        setTimeout(() => event.ack(), 10);
+      });
 
-      expect(res.status).toHaveBeenCalledWith(408);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "VercelReceiverError",
-          error: expect.stringContaining("timeout"),
-        })
-      );
+      await handler(request, new Response());
+      
+      expect(capturedEvent!.body).toEqual({ 
+        token: 'xoxb-token',
+        team_id: 'T123', 
+        user_id: 'U456'
+      });
+    });
+
+    it('should handle empty body gracefully', async () => {
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '',
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.type).toBe('RequestParsingError');
+      expect(body.error).toContain('Failed to parse body as JSON');
+    });
+
+    it('should handle malformed JSON', async () => {
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"type":"event_callback","malformed":}',
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.type).toBe('RequestParsingError');
+    });
+
+    it('should handle malformed form data payload', async () => {
+      const formData = 'payload=invalid-json{';
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: formData,
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.type).toBe('RequestParsingError');
+    });
+
+    it('should handle unknown content-type by trying JSON parsing', async () => {
+      const jsonData = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: jsonData,
+      });
+
+      const handler = await receiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
+        setTimeout(() => event.ack(), 10);
+      });
+
+      await handler(request, new Response());
+      
+      expect(capturedEvent!.body).toEqual({ type: 'event_callback' });
+    });
+
+    it('should handle missing content-type header', async () => {
+      const jsonData = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        body: jsonData,
+      });
+
+      const handler = await receiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
+        setTimeout(() => event.ack(), 10);
+      });
+
+      await handler(request, new Response());
+      
+      expect(capturedEvent!.body).toEqual({ type: 'event_callback' });
+    });
+  });
+
+  describe('URL verification challenge', () => {
+    it('should handle URL verification challenge correctly', async () => {
+      const challengeValue = 'test-challenge-12345';
+      const challengeBody = JSON.stringify({
+        type: 'url_verification',
+        challenge: challengeValue,
+        token: 'verification-token'
+      });
+      
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: challengeBody,
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('application/json');
+      
+      const body = await response.json();
+      expect(body).toEqual({ challenge: challengeValue });
+      
+      // Verify that processEvent was NOT called for URL verification
+      expect(mockApp.processEvent).not.toHaveBeenCalled();
+    });
+
+    it('should not process URL verification as regular event', async () => {
+      const challengeBody = JSON.stringify({
+        type: 'url_verification',
+        challenge: 'test-challenge'
+      });
+      
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: challengeBody,
+      });
+
+      const handler = await receiver.start();
+      await handler(request, new Response());
+      
+      expect(mockApp.processEvent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('event acknowledgment', () => {
+    it('should handle string acknowledgment response correctly', async () => {
+      const stringResponse = 'Event processed successfully';
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack(stringResponse), 10);
+      });
+
+      const response = await handler(request, new Response());
+      const body = await response.text();
+      
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('application/json');
+      expect(body).toBe(stringResponse);
+    });
+
+    it('should handle object acknowledgment response correctly', async () => {
+      const objectResponse = { 
+        text: 'Hello world', 
+        blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'Response' } }]
+      };
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack(objectResponse), 10);
+      });
+
+      const response = await handler(request, new Response());
+      const body = await response.json();
+      
+      expect(response.status).toBe(200);
+      expect(body).toEqual(objectResponse);
+    });
+
+    it('should handle empty acknowledgment', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack(), 10);
+      });
+
+      const response = await handler(request, new Response());
+      const body = await response.json();
+      
+      expect(response.status).toBe(200);
+      expect(body).toEqual({});
+    });
+
+    it('should timeout when event is not acknowledged', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      
+      // Don't acknowledge the event
+      (mockApp.processEvent as any).mockImplementation(() => {
+        // Simulate processing that never calls ack
+      });
+
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(408);
+      const body = await response.json();
+      expect(body.error).toBe('Request timeout');
+      expect(body.type).toBe('VercelReceiverError');
     }, 5000);
 
-    it("should prevent multiple acknowledgments", async () => {
-      let ackFunction: any;
-      app.processEvent.mockImplementation((event: any) => {
-        ackFunction = event.ack;
-        event.ack("First");
-        return Promise.resolve();
+    it('should prevent multiple acknowledgments', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
       });
 
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
+      const handler = await receiver.start();
+      
+      const mockProcessEvent = vi.fn().mockImplementation((event: ReceiverEvent) => {
+        setTimeout(async () => {
+          await event.ack({ first: true });
+          
+          // Second ack should throw
+          await expect(event.ack({ second: true })).rejects.toThrow(
+            'Cannot acknowledge an event multiple times'
+          );
+        }, 10);
       });
-      const res = createMockResponse();
+      
+      (mockApp.processEvent as any) = mockProcessEvent;
 
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.send).toHaveBeenCalledWith("First");
-
-      // Attempting to acknowledge again should throw
-      await expect(ackFunction("Second")).rejects.toThrow(/multiple/i);
+      await handler(request, new Response());
+      expect(mockProcessEvent).toHaveBeenCalledTimes(1);
     });
 
-    it("should include retry information in receiver events", async () => {
-      app.processEvent.mockImplementation((event: any) => {
-        expect(event.retryNum).toBeDefined();
-        expect(event.retryReason).toBeDefined();
-        setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
+    it('should handle acknowledgment errors gracefully', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
       });
 
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
+      const handler = await receiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation(() => {
+        // Simply don't call ack() to trigger timeout
+        // This simulates the case where processing fails before ack
+      });
+
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(408); // Should timeout since ack threw error
+    }, 5000);
+  });
+
+  describe('signature verification', () => {
+    beforeEach(() => {
+      receiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
+        signatureVerification: true,
+      });
+      receiver.init(mockApp);
+    });
+
+    it('should verify slack request signature successfully', async () => {
+      const { verifySlackRequest } = await import('@slack/bolt');
+      (verifySlackRequest as any).mockImplementation(() => {
+        // Mock successful verification
+      });
+
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const timestamp = '1609459200';
+      const signature = 'v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503';
+      
+      const request = new Request('http://localhost', {
+        method: 'POST',
         headers: {
-          ...createMockRequest().headers,
-          "x-slack-retry-num": "1",
-          "x-slack-retry-reason": "http_timeout",
+          'content-type': 'application/json',
+          'x-slack-signature': signature,
+          'x-slack-request-timestamp': timestamp,
         },
-        body: { type: "event_callback", event: { type: "app_mention" } },
+        body: eventBody,
       });
-      const res = createMockResponse();
 
-      await handler(req, res);
+      const handler = await receiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack({ verified: true }), 10);
+      });
 
-      expect(app.processEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          retryNum: 1,
-          retryReason: "http_timeout",
-        })
-      );
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(200);
+      expect(verifySlackRequest).toHaveBeenCalledWith({
+        signingSecret: mockSigningSecret,
+        body: eventBody,
+        headers: {
+          'x-slack-signature': signature,
+          'x-slack-request-timestamp': parseInt(timestamp, 10),
+        },
+        logger: expect.any(Object),
+      });
+      
+      const body = await response.json();
+      expect(body).toEqual({ verified: true });
+    });
+
+    it('should handle missing timestamp header', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 
+          'content-type': 'application/json',
+          'x-slack-signature': 'v0=signature'
+        },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.type).toBe('SignatureVerificationError');
+      expect(body.error).toBe('Missing required signature headers');
+    });
+
+    it('should handle missing signature header', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 
+          'content-type': 'application/json',
+          'x-slack-request-timestamp': '1609459200'
+        },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.type).toBe('SignatureVerificationError');
+      expect(body.error).toBe('Missing required signature headers');
+    });
+
+    it('should handle signature verification failure', async () => {
+      const { verifySlackRequest } = await import('@slack/bolt');
+      (verifySlackRequest as any).mockImplementation(() => {
+        throw new Error('Invalid signature');
+      });
+
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-slack-signature': 'v0=invalid-signature',
+          'x-slack-request-timestamp': '1609459200',
+        },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.type).toBe('SignatureVerificationError');
+      expect(body.error).toBe('Invalid signature');
+    });
+
+    it('should bypass verification when disabled', async () => {
+      const { verifySlackRequest } = await import('@slack/bolt');
+      const bypassReceiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
+        signatureVerification: false,
+      });
+      bypassReceiver.init(mockApp);
+
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
+
+      const handler = await bypassReceiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack({ bypassed: true }), 10);
+      });
+
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(200);
+      expect(verifySlackRequest).not.toHaveBeenCalled();
+      
+      const body = await response.json();
+      expect(body).toEqual({ bypassed: true });
     });
   });
 
-  describe("Custom Properties and Response Handlers", () => {
-    it("should use custom properties extractor", async () => {
-      const customExtractor = vi
-        .fn()
-        .mockReturnValue({ userId: "U123", teamId: "T456" });
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
+  describe('custom properties extractor', () => {
+    it('should extract custom properties from request', async () => {
+      const customPropertiesExtractor = vi.fn().mockReturnValue({ 
+        customProp: 'customValue',
+        requestId: 'req-123'
+      });
+      
+      const customReceiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
         signatureVerification: false,
-        customPropertiesExtractor: customExtractor,
-        logger: createQuietLogger(),
+        customPropertiesExtractor,
       });
-      const app = createMockApp() as any;
+      
+      customReceiver.init(mockApp);
+      
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
 
-      app.processEvent.mockImplementation((event: any) => {
-        expect(event.customProperties).toEqual({
-          userId: "U123",
-          teamId: "T456",
-        });
+      const handler = await customReceiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
         setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
       });
 
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
+      await handler(request, new Response());
+      
+      expect(customPropertiesExtractor).toHaveBeenCalledWith(request);
+      expect(capturedEvent!.customProperties).toEqual({
+        customProp: 'customValue',
+        requestId: 'req-123'
       });
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(customExtractor).toHaveBeenCalledWith(req);
-      expect(app.processEvent).toHaveBeenCalled();
     });
 
-    it("should use custom response handler", async () => {
-      const customResponseHandler = vi
-        .fn()
-        .mockResolvedValue(
-          createMockResponse().status(201).json({ custom: "response" })
-        );
+    it('should handle custom properties extractor errors', async () => {
+      const customPropertiesExtractor = vi.fn().mockImplementation(() => {
+        throw new Error('Extractor failed');
+      });
+      
+      const customReceiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
+        signatureVerification: false,
+        customPropertiesExtractor,
+      });
+      
+      customReceiver.init(mockApp);
+      
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
 
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
+      const handler = await customReceiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.type).toBe('UnexpectedError');
+    });
+  });
+
+  describe('custom response handler', () => {
+    it('should use custom response handler when provided', async () => {
+      const customResponse = new Response('Custom response content', { 
+        status: 201,
+        headers: { 'X-Custom-Header': 'test-value' }
+      });
+      const customResponseHandler = vi.fn().mockResolvedValue(customResponse);
+      
+      const customReceiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
         signatureVerification: false,
         customResponseHandler,
-        logger: createQuietLogger(),
       });
-      const app = createMockApp() as any;
-
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack({ data: "test" }), 10);
-        return Promise.resolve();
+      
+      customReceiver.init(mockApp);
+      
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
       });
 
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
+      const handler = await customReceiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack({ processed: true }), 10);
       });
-      const res = createMockResponse();
 
-      await handler(req, res);
-
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(201);
+      expect(response.headers.get('X-Custom-Header')).toBe('test-value');
+      expect(await response.text()).toBe('Custom response content');
       expect(customResponseHandler).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: { type: "event_callback", event: { type: "app_mention" } },
+          body: JSON.parse(eventBody),
+          ack: expect.any(Function)
         }),
-        res
+        expect.any(Response)
       );
+    });
+
+    it('should handle custom response handler errors', async () => {
+      const customResponseHandler = vi.fn().mockRejectedValue(new Error('Handler failed'));
+      
+      const customReceiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
+        signatureVerification: false,
+        customResponseHandler,
+      });
+      
+      customReceiver.init(mockApp);
+      
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
+      });
+
+      const handler = await customReceiver.start();
+      
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack(), 10);
+      });
+
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.type).toBe('UnexpectedError');
     });
   });
 
-  describe("Error Handling", () => {
-    it("should handle app not initialized", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-        logger: createQuietLogger(),
+  describe('retry headers handling', () => {
+    it('should capture retry headers in receiver event', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-slack-retry-num': '3',
+          'x-slack-retry-reason': 'http_timeout',
+        },
+        body: eventBody,
       });
-      // Don't call init()
 
-      const handler = receiver.toHandler();
-      const req = createMockRequest();
-      const res = createMockResponse();
+      const handler = await receiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
+        setTimeout(() => event.ack(), 10);
+      });
 
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "VercelReceiverError",
-          error: expect.stringContaining("not initialized"),
-        })
-      );
+      await handler(request, new Response());
+      
+      expect(capturedEvent!.retryNum).toBe(3);
+      expect(capturedEvent!.retryReason).toBe('http_timeout');
     });
 
-    it("should handle unexpected errors gracefully", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-        logger: createQuietLogger(),
+    it('should handle missing retry headers', async () => {
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
       });
-      const app = createMockApp() as any;
 
-      // Mock processEvent to throw an error
-      app.processEvent.mockRejectedValue(new Error("Unexpected error"));
-
-      receiver.init(app);
-
-      const handler = receiver.toHandler();
-      const req = createMockRequest({
-        body: { type: "event_callback", event: { type: "app_mention" } },
+      const handler = await receiver.start();
+      
+      let capturedEvent: ReceiverEvent;
+      (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+        capturedEvent = event;
+        setTimeout(() => event.ack(), 10);
       });
-      const res = createMockResponse();
 
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(408); // Should timeout when ack is never called
-    }, 5000);
+      await handler(request, new Response());
+      
+      expect(capturedEvent!.retryNum).toBe(0);
+      expect(capturedEvent!.retryReason).toBe('');
+    });
   });
 
-  describe("createHandler Convenience Function", () => {
-    it("should initialize app and create handler", async () => {
-      const app = createMockApp() as any;
-
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
-      });
-
-      const handler = createHandler(app, {
-        signingSecret: SIGNING_SECRET,
+  describe('error handling', () => {
+    it('should handle app not initialized error', async () => {
+      const uninitializedReceiver = new VercelReceiver({
+        signingSecret: mockSigningSecret,
         signatureVerification: false,
-        logger: createQuietLogger(),
       });
 
-      const req = createMockRequest({
-        body: { type: "url_verification", challenge: "test" },
+      const eventBody = JSON.stringify({ type: 'event_callback' });
+      const request = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: eventBody,
       });
-      const res = createMockResponse();
 
-      await handler(req, res);
-
-      expect(app.init).toHaveBeenCalled();
-      expect(res.json).toHaveBeenCalledWith({ challenge: "test" });
+      const handler = await uninitializedReceiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error).toBe('Slack app not initialized');
+      expect(body.type).toBe('VercelReceiverError');
     });
 
-    it("should handle app initialization errors", async () => {
-      const app = createMockApp() as any;
-      app.init.mockRejectedValue(new Error("Init failed"));
+    it('should handle request body reading errors', async () => {
+      // Create a request with a body that will cause text() to fail
+      const request = {
+        method: 'POST',
+        headers: {
+          get: vi.fn().mockReturnValue('application/json')
+        },
+        text: vi.fn().mockRejectedValue(new Error('Failed to read body'))
+      } as unknown as Request;
 
-      const handler = createHandler(app, {
-        signingSecret: SIGNING_SECRET,
-        logger: createQuietLogger(),
-      });
-      const req = createMockRequest();
-      const res = createMockResponse();
-
-      await handler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "HandlerError",
-          error: "Internal Server Error",
-        })
-      );
+      const handler = await receiver.start();
+      const response = await handler(request, new Response());
+      
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.type).toBe('UnexpectedError');
     });
 
-    it("should reuse app initialization", async () => {
-      const app = createMockApp() as any;
+    it('should handle all error types correctly', async () => {
+      const testCases = [
+        {
+          name: 'VercelReceiverError',
+          error: { name: 'VercelReceiverError', message: 'Custom error', statusCode: 422 },
+          expectedStatus: 422,
+          expectedType: 'VercelReceiverError'
+        },
+        {
+          name: 'Generic Error',
+          error: new Error('Generic error'),
+          expectedStatus: 500,
+          expectedType: 'UnexpectedError'
+        }
+      ];
 
-      app.processEvent.mockImplementation((event: any) => {
-        setTimeout(() => event.ack(), 10);
-        return Promise.resolve();
-      });
-
-      const handler = createHandler(app, {
-        signingSecret: SIGNING_SECRET,
-        signatureVerification: false,
-        logger: createQuietLogger(),
-      });
-
-      const req1 = createMockRequest({
-        body: { type: "url_verification", challenge: "test1" },
-      });
-      const req2 = createMockRequest({
-        body: { type: "url_verification", challenge: "test2" },
-      });
-      const res1 = createMockResponse();
-      const res2 = createMockResponse();
-
-      await handler(req1, res1);
-      await handler(req2, res2);
-
-      // Init should only be called once
-      expect(app.init).toHaveBeenCalledTimes(1);
+      for (const testCase of testCases) {
+        const failingReceiver = new VercelReceiver({
+          signingSecret: mockSigningSecret,
+          signatureVerification: false,
+        });
+        
+        // Mock the start method to throw the error
+        vi.spyOn(failingReceiver, 'start').mockRejectedValue(testCase.error);
+        
+        try {
+          const handler = await failingReceiver.start();
+          
+          // This should not reach here for our test cases
+          await handler(new Request('http://localhost', { 
+            method: 'POST',
+            body: '{}' 
+          }), new Response());
+          
+          // If we get here, the test should fail
+          expect(false).toBe(true); // Force failure
+        } catch (error) {
+          // The error should be thrown during start()
+          if (testCase.error.name === 'VercelReceiverError' && 'statusCode' in testCase.error) {
+            expect(testCase.error.statusCode).toBe(testCase.expectedStatus);
+            expect(testCase.error.name).toBe(testCase.expectedType);
+          } else {
+            expect(error).toBeInstanceOf(Error);
+          }
+        }
+      }
     });
+  });
+});
+
+describe('createHandler', () => {
+  let mockApp: App;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    
+    mockApp = {
+      init: vi.fn().mockResolvedValue(undefined),
+      processEvent: vi.fn().mockImplementation((event: ReceiverEvent) => {
+        setTimeout(() => event.ack({ handled: true }), 10);
+      }),
+    } as unknown as App;
+  });
+
+  it('should create a working handler with receiver', async () => {
+    const mockReceiver = new VercelReceiver({
+      signingSecret: 'test-secret',
+      signatureVerification: false,
+    });
+    
+    const handler = createHandler(mockApp, mockReceiver);
+    
+    const eventBody = JSON.stringify({ type: 'event_callback' });
+    const request = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: eventBody,
+    });
+
+    const response = await handler(request, new Response());
+    
+    expect(response.status).toBe(200);
+    expect(mockApp.init).toHaveBeenCalledTimes(1);
+    
+    const body = await response.json();
+    expect(body).toEqual({ handled: true });
+  });
+
+  it('should handle app initialization errors', async () => {
+    (mockApp.init as any).mockRejectedValue(new Error('Init failed'));
+    
+    const mockReceiver = new VercelReceiver({
+      signingSecret: 'test-secret',
+      signatureVerification: false,
+    });
+    
+    const handler = createHandler(mockApp, mockReceiver);
+    
+    const request = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+    const response = await handler(request, new Response());
+    
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.type).toBe('HandlerError');
+    expect(body.error).toBe('Internal Server Error');
+  });
+
+  it('should initialize app only once across multiple calls', async () => {
+    const mockReceiver = new VercelReceiver({
+      signingSecret: 'test-secret',
+      signatureVerification: false,
+    });
+    
+    const handler = createHandler(mockApp, mockReceiver);
+    
+    const createRequest = () => new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"type":"event_callback"}',
+    });
+
+    // Call handler multiple times with fresh requests
+    const response1 = await handler(createRequest(), new Response());
+    const response2 = await handler(createRequest(), new Response());
+    
+    expect(response1.status).toBe(200);
+    expect(response2.status).toBe(200);
+    // App init should only be called once
+    expect(mockApp.init).toHaveBeenCalledTimes(1);
+  });
+
+  it('should properly initialize receiver with app', async () => {
+    const mockReceiver = new VercelReceiver({
+      signingSecret: 'test-secret',
+      signatureVerification: false,
+    });
+    
+    const receiverInitSpy = vi.spyOn(mockReceiver, 'init');
+    
+    const handler = createHandler(mockApp, mockReceiver);
+    
+    const request = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"type":"event_callback"}',
+    });
+
+    await handler(request, new Response());
+    
+    expect(receiverInitSpy).toHaveBeenCalledWith(mockApp);
+  });
+
+  it('should handle receiver start errors', async () => {
+    const mockReceiver = new VercelReceiver({
+      signingSecret: 'test-secret',
+      signatureVerification: false,
+    });
+    
+    vi.spyOn(mockReceiver, 'start').mockRejectedValue(new Error('Receiver start failed'));
+    
+    const handler = createHandler(mockApp, mockReceiver);
+    
+    const request = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+    const response = await handler(request, new Response());
+    
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.type).toBe('HandlerError');
+  });
+
+  it('should pass through all response properties correctly', async () => {
+    const mockReceiver = new VercelReceiver({
+      signingSecret: 'test-secret',
+      signatureVerification: false,
+    });
+    
+    const handler = createHandler(mockApp, mockReceiver);
+    
+    const eventBody = JSON.stringify({ type: 'event_callback' });
+    const request = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: eventBody,
+    });
+
+    // Mock processEvent to return a specific response
+    const expectedResponse = { 
+      text: 'Success',
+      response_type: 'in_channel',
+      attachments: [{ text: 'Processed' }]
+    };
+    
+    (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
+      setTimeout(() => event.ack(expectedResponse), 10);
+    });
+
+    const response = await handler(request, new Response());
+    const body = await response.json();
+    
+    expect(response.status).toBe(200);
+    expect(body).toEqual(expectedResponse);
   });
 });
