@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import type { IncomingHttpHeaders } from "node:http";
 import type {
@@ -10,11 +10,11 @@ import type {
 } from "@slack/bolt";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
+import { verifySlackRequest, isValidSlackRequest } from "./utils.js";
 
 // Constants
 const SCOPE = ["@vercel/bolt", "VercelReceiver"];
 const ACK_TIMEOUT_MS = 3001;
-const TIMESTAMP_TOLERANCE_SECONDS = 300;
 const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
 const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
 const SLACK_TIMESTAMP_HEADER = "x-slack-request-timestamp";
@@ -301,37 +301,21 @@ export class VercelReceiver implements Receiver {
       );
     }
 
-    // Check timestamp to prevent replay attacks
-    const requestTime = Number.parseInt(timestamp, 10);
-    const currentTime = Math.floor(Date.now() / 1000);
-
-    if (Math.abs(currentTime - requestTime) > TIMESTAMP_TOLERANCE_SECONDS) {
-      throw new SignatureVerificationError(
-        "Request timestamp is more than 5 minutes old. Possible replay attack."
-      );
-    }
-
-    // Verify signature
-    const baseString = `v0:${timestamp}:${rawBody}`;
-    const computedSignature = `v0=${createHmac("sha256", this.signingSecret)
-      .update(baseString, "utf8")
-      .digest("hex")}`;
-
     try {
-      const isValid = timingSafeEqual(
-        Buffer.from(signature, "utf8"),
-        Buffer.from(computedSignature, "utf8")
-      );
-
-      if (!isValid) {
-        throw new SignatureVerificationError("Invalid request signature");
-      }
+      verifySlackRequest({
+        signingSecret: this.signingSecret,
+        body: rawBody,
+        headers: {
+          "x-slack-signature": signature,
+          "x-slack-request-timestamp": Number.parseInt(timestamp, 10),
+        },
+        logger: this.logger,
+      });
     } catch (error) {
-      if (error instanceof SignatureVerificationError) {
-        throw error;
-      }
-      this.logger.error("Error comparing signatures", error);
-      throw new SignatureVerificationError("Signature verification failed");
+      this.logger.error("Slack request verification failed", error);
+      throw new SignatureVerificationError(
+        error instanceof Error ? error.message : "Signature verification failed"
+      );
     }
   }
 
