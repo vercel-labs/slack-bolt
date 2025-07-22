@@ -1,5 +1,11 @@
 # @vercel/bolt
 
+## 1.0.6
+
+### Patch Changes
+
+- 421e440: Added production ready logging and error handling
+
 ## 1.0.5
 
 ### Patch Changes
