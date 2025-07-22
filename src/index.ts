@@ -9,6 +9,9 @@ import type {
   StringIndexed,
 } from "@slack/bolt";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
+
+const SCOPE = ["@vercel/bolt", "VercelReceiver"];
 
 /**
  * Bolt Receiver for Vercel Fluid Compute
@@ -16,21 +19,26 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
+  private readonly logger: Logger;
+
   private app?: App;
 
-  public constructor(options?: VercelReceiverOptions) {
-    const providedSecret = options?.signingSecret;
-    const envSecret = process.env.SLACK_SIGNING_SECRET;
-    const resolvedSigningSecret = providedSecret ?? envSecret;
-
-    if (!resolvedSigningSecret) {
-      throw new Error(
-        "SLACK_SIGNING_SECRET is required. Either provide signingSecret parameter or set SLACK_SIGNING_SECRET environment variable."
-      );
+  public constructor({
+    signingSecret = process.env.SLACK_SIGNING_SECRET,
+    signatureVerification = true,
+    logger,
+    logLevel = LogLevel.INFO,
+  }: VercelReceiverOptions = {}) {
+    if (!signingSecret) {
+      throw new Error("SLACK_SIGNING_SECRET is required");
     }
 
-    this.signingSecret = resolvedSigningSecret;
-    this.signatureVerification = options?.signatureVerification ?? true;
+    this.signingSecret = signingSecret;
+    this.signatureVerification = signatureVerification;
+    this.logger = scopedLogger(
+      logger ?? this.createDefaultLogger(logLevel),
+      SCOPE
+    );
   }
 
   public init(app: App): void {
@@ -43,7 +51,6 @@ export class VercelReceiver implements Receiver {
         const handler = this.toHandler();
         resolve(handler);
       } catch (error) {
-        console.error("Error creating handler:", error);
         reject(error);
       }
     });
@@ -61,7 +68,7 @@ export class VercelReceiver implements Receiver {
       res: VercelResponse
     ): Promise<VercelResponse> => {
       if (!this.app) {
-        console.error("Slack app not initialized");
+        this.logger.error("Slack app not initialized");
         return res.json({
           message: "Slack app not initialized",
           status: 500,
@@ -79,7 +86,7 @@ export class VercelReceiver implements Receiver {
         const signature = this.getHeaderValue(headers, "x-slack-signature");
 
         if (!timestamp || !signature) {
-          console.error("Missing required headers");
+          this.logger.error("Missing required headers");
           return res.json({ message: "Unauthorized" });
         }
 
@@ -90,7 +97,7 @@ export class VercelReceiver implements Receiver {
         );
 
         if (!isValidSignature) {
-          console.error("Invalid request signature");
+          this.logger.error("Invalid request signature");
           return res.json({ message: "Unauthorized" });
         }
       }
@@ -109,7 +116,7 @@ export class VercelReceiver implements Receiver {
 
       const noAckTimeoutId = setTimeout(() => {
         if (!isAcknowledged) {
-          console.error(
+          this.logger.error(
             "An incoming event was not acknowledged within 3 seconds. " +
               "Ensure that the ack() argument is called in a listener."
           );
@@ -150,7 +157,7 @@ export class VercelReceiver implements Receiver {
       try {
         return await responsePromise;
       } catch (err) {
-        console.error("Error in response handling:", err);
+        this.logger.error("Error in response handling:", err);
         return res.json({ message: "Internal server error", status: 500 });
       }
     };
@@ -174,7 +181,7 @@ export class VercelReceiver implements Receiver {
     const currentTime = Math.floor(Date.now() / 1000);
 
     if (Math.abs(currentTime - requestTime) > 300) {
-      console.error(
+      this.logger.error(
         "Request timestamp is more than 5 minutes old. Possible replay attack."
       );
       return false;
@@ -192,7 +199,7 @@ export class VercelReceiver implements Receiver {
         Buffer.from(computedSignature, "utf8")
       );
     } catch (error) {
-      console.error("Error comparing signatures:", error);
+      this.logger.error("Error comparing signatures:", error);
       return false;
     }
   }
@@ -226,6 +233,12 @@ export class VercelReceiver implements Receiver {
       customProperties: {},
     };
   }
+
+  private createDefaultLogger(logLevel: LogLevel): Logger {
+    const defaultLogger = new ConsoleLogger();
+    defaultLogger.setLevel(logLevel);
+    return defaultLogger;
+  }
 }
 
 export function handler(app: App, receiver: VercelReceiver): VercelHandler {
@@ -244,9 +257,23 @@ export function handler(app: App, receiver: VercelReceiver): VercelHandler {
       const handler = await receiver.start();
       return await handler(req, res);
     } catch (error) {
-      console.error("Error processing Slack event:", error);
+      console.error(SCOPE.map((s) => `[${s}]`).join(""), "Error:", error);
       return res.status(500).json({ error: "Internal Server Error" });
     }
+  };
+}
+
+function scopedLogger(logger: Logger, scopes: string[]): Logger {
+  const prefix = scopes.map((s) => `[${s}]`).join("");
+
+  return {
+    ...logger,
+    error: (...args) => logger.error?.(prefix, ...args),
+    warn: (...args) => logger.warn?.(prefix, ...args),
+    info: (...args) => logger.info?.(prefix, ...args),
+    debug: (...args) => logger.debug?.(prefix, ...args),
+    setLevel: logger.setLevel,
+    getLevel: logger.getLevel,
   };
 }
 
@@ -258,4 +285,6 @@ export type VercelHandler = (
 export interface VercelReceiverOptions {
   signingSecret?: string;
   signatureVerification?: boolean;
+  logger?: Logger;
+  logLevel?: LogLevel;
 }
