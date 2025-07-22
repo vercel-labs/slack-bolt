@@ -1,5 +1,11 @@
 # @vercel/bolt
 
+## 1.0.8
+
+### Patch Changes
+
+- 1730da6: Update parsing logic to improve verification
+
 ## 1.0.7
 
 ### Patch Changes
