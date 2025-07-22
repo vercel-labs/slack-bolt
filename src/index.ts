@@ -93,15 +93,15 @@ export class VercelReceiver implements Receiver {
           throw new VercelReceiverError("Slack app not initialized", 500);
         }
 
-        const rawBody = await this.getRawBody(req);
+        const stringBody = await this.getRawBody(req);
         const body = await this.parseRequestBody(
-          rawBody,
+          stringBody,
           req.headers["content-type"]
         );
 
         // Verify signature if enabled
         if (this.signatureVerification) {
-          await this.verifySlackRequest(req, rawBody);
+          await this.verifySlackRequest(req, stringBody);
         }
 
         // Handle URL verification challenge
@@ -111,7 +111,7 @@ export class VercelReceiver implements Receiver {
         }
 
         // Process Slack event
-        const response = await this.handleSlackEvent(req, res, body, rawBody);
+        const response = await this.handleSlackEvent(req, res, body);
 
         const processingTime = Date.now() - startTime;
         this.logger.debug(`Request processed in ${processingTime}ms`);
@@ -149,7 +149,7 @@ export class VercelReceiver implements Receiver {
       return rawBody;
     } catch (error) {
       this.logger.error("Error getting raw body", error);
-      throw error;
+      throw new RequestParsingError("Failed to get raw body");
     }
   }
 
@@ -157,35 +157,37 @@ export class VercelReceiver implements Receiver {
     rawBody: string,
     contentType?: string
   ): Promise<StringIndexed> {
-    if (contentType === "application/x-www-form-urlencoded") {
-      const parsedBody = JSON.parse(rawBody);
-
-      if (typeof parsedBody.payload === "string") {
-        return JSON.parse(parsedBody.payload);
-      }
-      return parsedBody;
-    }
-    if (contentType === "application/json") {
-      return JSON.parse(rawBody);
-    }
-
-    this.logger.warn(`Unexpected content-type detected: ${contentType}`);
     try {
+      if (contentType === "application/x-www-form-urlencoded") {
+        const parsedBody = JSON.parse(rawBody);
+
+        if (typeof parsedBody.payload === "string") {
+          return JSON.parse(parsedBody.payload);
+        }
+        return parsedBody;
+      }
+      if (contentType === "application/json") {
+        return JSON.parse(rawBody);
+      }
+
+      this.logger.warn(`Unexpected content-type detected: ${contentType}`);
+
       // Parse this body anyway
       return JSON.parse(rawBody);
     } catch (e) {
       this.logger.error(
         `Failed to parse body as JSON data for content-type: ${contentType}`
       );
-      throw e;
+      throw new RequestParsingError(
+        `Failed to parse body as JSON data for content-type: ${contentType}`
+      );
     }
   }
 
   private async handleSlackEvent(
     req: VercelRequest,
     res: VercelResponse,
-    body: StringIndexed,
-    rawBody: string
+    body: StringIndexed
   ): Promise<VercelResponse> {
     if (!this.app) {
       throw new VercelReceiverError("App not initialized", 500);
