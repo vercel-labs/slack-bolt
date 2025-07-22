@@ -35,7 +35,6 @@
   "dependencies": {
     "@slack/logger": "^4.0.0",
     "@vercel/functions": "^2.2.4",
-    "@vercel/node": "^5.3.6",
     "tsscmp": "^1.0.6"
   },
   "peerDependencies": {
