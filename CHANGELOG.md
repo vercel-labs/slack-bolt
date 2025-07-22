@@ -1,5 +1,11 @@
 # @vercel/bolt
 
+## 1.0.7
+
+### Patch Changes
+
+- d1be497: Fix slack request verification
+
 ## 1.0.6
 
 ### Patch Changes
