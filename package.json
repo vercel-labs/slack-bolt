@@ -33,6 +33,7 @@
     "prepublishOnly": "npm run ci"
   },
   "dependencies": {
+    "@slack/logger": "^4.0.0",
     "@vercel/functions": "^2.2.4",
     "@vercel/node": "^5.3.6"
   },
