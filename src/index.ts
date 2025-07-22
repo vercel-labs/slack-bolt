@@ -208,7 +208,10 @@ export class VercelReceiver implements Receiver {
           response = await this.customResponseHandler(event, res);
         } else {
           const responseBody = ackResponse || {};
-          const body = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+          const body =
+            typeof responseBody === "string"
+              ? responseBody
+              : JSON.stringify(responseBody);
           response = new Response(body, {
             status: 200,
             headers: {
