@@ -2,3 +2,4 @@ node_modules
 dist
 tsconfig.tsbuildinfo
 vercel-bolt-*.tgz
+.DS_Store

@@ -4,7 +4,7 @@ import {
   SignatureVerificationError,
 } from "./errors";
 import { waitUntil } from "@vercel/functions";
-import type { IncomingHttpHeaders } from "node:http";
+
 import {
   verifySlackRequest,
   type AckFn,
@@ -13,7 +13,6 @@ import {
   type ReceiverEvent,
   type StringIndexed,
 } from "@slack/bolt";
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
 
 // Constants
@@ -28,13 +27,11 @@ export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
   private readonly logger: Logger;
-  private readonly customPropertiesExtractor?: (
-    req: VercelRequest
-  ) => StringIndexed;
+  private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly customResponseHandler?: (
     event: ReceiverEvent,
-    res: VercelResponse
-  ) => Promise<VercelResponse>;
+    res: Response
+  ) => Promise<Response>;
   private app?: App;
 
   public getLogger(): Logger {
@@ -82,10 +79,7 @@ export class VercelReceiver implements Receiver {
   }
 
   public toHandler(): VercelHandler {
-    return async (
-      req: VercelRequest,
-      res: VercelResponse
-    ): Promise<VercelResponse> => {
+    return async (req: Request, res: Response): Promise<Response> => {
       const startTime = Date.now();
 
       try {
@@ -93,21 +87,24 @@ export class VercelReceiver implements Receiver {
           throw new VercelReceiverError("Slack app not initialized", 500);
         }
 
-        const stringBody = await this.getRawBody(req);
-        const body = await this.parseRequestBody(
-          stringBody,
-          req.headers["content-type"]
-        );
+        const rawBody = await req.text();
 
         // Verify signature if enabled
         if (this.signatureVerification) {
-          await this.verifySlackRequest(req, stringBody);
+          await this.verifySlackRequest(req, rawBody);
         }
+
+        const body = await this.parseRequestBody(req, rawBody);
 
         // Handle URL verification challenge
         if (body.type === "url_verification") {
           this.logger.debug("Handling URL verification challenge");
-          return res.status(200).json({ challenge: body.challenge });
+          return new Response(JSON.stringify({ challenge: body.challenge }), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
         }
 
         // Process Slack event
@@ -123,44 +120,23 @@ export class VercelReceiver implements Receiver {
     };
   }
 
-  private async getRawBody(req: VercelRequest): Promise<string> {
-    try {
-      let rawBody: string;
-
-      // Handle different ways body might be provided
-      if (typeof req.body === "string") {
-        rawBody = req.body;
-      } else if (Buffer.isBuffer(req.body)) {
-        rawBody = req.body.toString("utf8");
-      } else if (req.body && typeof req.body === "object") {
-        // Body is already parsed
-        rawBody = JSON.stringify(req.body);
-      } else {
-        // Read from stream
-        const chunks: Buffer[] = [];
-
-        for await (const chunk of req) {
-          chunks.push(Buffer.from(chunk));
-        }
-
-        rawBody = Buffer.concat(chunks).toString("utf8");
-      }
-
-      return rawBody;
-    } catch (error) {
-      this.logger.error("Error getting raw body", error);
-      throw new RequestParsingError("Failed to get raw body");
-    }
-  }
-
   private async parseRequestBody(
-    rawBody: string,
-    contentType?: string
+    req: Request,
+    rawBody: string
   ): Promise<StringIndexed> {
+    const contentType = req?.headers.get("content-type") ?? undefined;
+
     try {
       if (contentType === "application/x-www-form-urlencoded") {
-        const parsedBody = JSON.parse(rawBody);
+        // Parse URL-encoded form data
+        const parsedBody: StringIndexed = {};
+        const params = new URLSearchParams(rawBody);
 
+        for (const [key, value] of params.entries()) {
+          parsedBody[key] = value;
+        }
+
+        // Check if payload field contains JSON (common with Slack)
         if (typeof parsedBody.payload === "string") {
           return JSON.parse(parsedBody.payload);
         }
@@ -172,7 +148,6 @@ export class VercelReceiver implements Receiver {
 
       this.logger.warn(`Unexpected content-type detected: ${contentType}`);
 
-      // Parse this body anyway
       return JSON.parse(rawBody);
     } catch (e) {
       this.logger.error(
@@ -185,19 +160,19 @@ export class VercelReceiver implements Receiver {
   }
 
   private async handleSlackEvent(
-    req: VercelRequest,
-    res: VercelResponse,
+    req: Request,
+    res: Response,
     body: StringIndexed
-  ): Promise<VercelResponse> {
+  ): Promise<Response> {
     if (!this.app) {
       throw new VercelReceiverError("App not initialized", 500);
     }
 
     let isAcknowledged = false;
-    let responseResolver: (value: VercelResponse) => void;
+    let responseResolver: (value: Response) => void;
     let responseRejecter: (error: Error) => void;
 
-    const responsePromise = new Promise<VercelResponse>((resolve, reject) => {
+    const responsePromise = new Promise<Response>((resolve, reject) => {
       responseResolver = resolve;
       responseRejecter = reject;
     });
@@ -212,7 +187,7 @@ export class VercelReceiver implements Receiver {
     }, ACK_TIMEOUT_MS);
 
     // Create acknowledgment function
-    const ackFn: AckFn<StringIndexed> = async (response) => {
+    const ackFn: AckFn<StringIndexed> = async (ackResponse) => {
       if (isAcknowledged) {
         throw new Error("Cannot acknowledge an event multiple times");
       }
@@ -221,7 +196,7 @@ export class VercelReceiver implements Receiver {
       clearTimeout(timeoutId);
 
       try {
-        let vercelResponse: VercelResponse;
+        let response: Response;
 
         if (this.customResponseHandler) {
           const event = this.createSlackReceiverEvent({
@@ -230,16 +205,19 @@ export class VercelReceiver implements Receiver {
             ack: ackFn,
             request: req,
           });
-          vercelResponse = await this.customResponseHandler(event, res);
+          response = await this.customResponseHandler(event, res);
         } else {
-          const responseData = response ?? "";
-          vercelResponse =
-            typeof responseData === "string"
-              ? res.status(200).send(responseData)
-              : res.status(200).json(responseData);
+          const responseBody = ackResponse || {};
+          const body = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+          response = new Response(body, {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
         }
 
-        responseResolver(vercelResponse);
+        responseResolver(response);
       } catch (error) {
         this.logger.error("Error in acknowledgment handler", error);
         responseRejecter(
@@ -267,11 +245,11 @@ export class VercelReceiver implements Receiver {
   }
 
   private async verifySlackRequest(
-    req: VercelRequest,
+    req: Request,
     rawBody: string
   ): Promise<void> {
-    const timestamp = this.getHeaderValue(req.headers, SLACK_TIMESTAMP_HEADER);
-    const signature = this.getHeaderValue(req.headers, SLACK_SIGNATURE_HEADER);
+    const timestamp = req.headers.get(SLACK_TIMESTAMP_HEADER);
+    const signature = req.headers.get(SLACK_SIGNATURE_HEADER);
 
     if (!timestamp || !signature) {
       throw new SignatureVerificationError(
@@ -304,19 +282,17 @@ export class VercelReceiver implements Receiver {
     request,
   }: {
     body: StringIndexed;
-    headers: IncomingHttpHeaders;
+    headers: Headers;
     ack: AckFn<StringIndexed>;
-    request?: VercelRequest;
+    request?: Request;
   }): ReceiverEvent {
     const customProperties = this.customPropertiesExtractor
       ? this.customPropertiesExtractor(request!)
       : {};
 
-    const retryNum =
-      this.getHeaderValue(headers, SLACK_RETRY_NUM_HEADER) || "0";
+    const retryNum = headers.get(SLACK_RETRY_NUM_HEADER) || "0";
 
-    const retryReason =
-      this.getHeaderValue(headers, SLACK_RETRY_REASON_HEADER) || "";
+    const retryReason = headers.get(SLACK_RETRY_REASON_HEADER) || "";
 
     return {
       body,
@@ -327,31 +303,29 @@ export class VercelReceiver implements Receiver {
     };
   }
 
-  private getHeaderValue(
-    headers: IncomingHttpHeaders,
-    name: string
-  ): string | undefined {
-    const value = headers[name.toLowerCase()];
-    return Array.isArray(value) ? value[0] : value;
-  }
-
-  private handleError(error: unknown, res: VercelResponse): VercelResponse {
+  private handleError(error: unknown, res: Response): Response {
     if (error instanceof VercelReceiverError) {
       this.logger.error(`VercelReceiverError: ${error.message}`, {
         statusCode: error.statusCode,
         name: error.name,
       });
-      return res.status(error.statusCode).json({
-        error: error.message,
-        type: error.name,
-      });
+      return new Response(
+        JSON.stringify({
+          error: error.message,
+          type: error.name,
+        }),
+        { status: error.statusCode }
+      );
     }
 
     this.logger.error("Unexpected error in VercelReceiver", error);
-    return res.status(500).json({
-      error: "Internal server error",
-      type: "UnexpectedError",
-    });
+    return new Response(
+      JSON.stringify({
+        error: "Internal server error",
+        type: "UnexpectedError",
+      }),
+      { status: 500 }
+    );
   }
 
   private createScopedLogger(logger: Logger, logLevel: LogLevel): Logger {
@@ -377,7 +351,7 @@ export function createHandler(
 ): VercelHandler {
   let initPromise: Promise<void> | null = null;
 
-  return async (req: VercelRequest, res: VercelResponse) => {
+  return async (req: Request, res: Response) => {
     try {
       if (!initPromise) {
         initPromise = app.init();
@@ -390,28 +364,28 @@ export function createHandler(
     } catch (error) {
       const logger = receiver.getLogger();
       logger.error("Error in createHandler:", error);
-      return res.status(500).json({
-        error: "Internal Server Error",
-        type: "HandlerError",
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Internal Server Error",
+          type: "HandlerError",
+        }),
+        { status: 500 }
+      );
     }
   };
 }
 
 // Types
-export type VercelHandler = (
-  req: VercelRequest,
-  res: VercelResponse
-) => Promise<VercelResponse>;
+export type VercelHandler = (req: Request, res: Response) => Promise<Response>;
 
 export interface VercelReceiverOptions {
   signingSecret?: string;
   signatureVerification?: boolean;
   logger?: Logger;
   logLevel?: LogLevel;
-  customPropertiesExtractor?: (req: VercelRequest) => StringIndexed;
+  customPropertiesExtractor?: (req: Request) => StringIndexed;
   customResponseHandler?: (
     event: ReceiverEvent,
-    res: VercelResponse
-  ) => Promise<VercelResponse>;
+    res: Response
+  ) => Promise<Response>;
 }
