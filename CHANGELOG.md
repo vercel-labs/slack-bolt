@@ -1,5 +1,11 @@
 # @vercel/bolt
 
+## 1.0.9
+
+### Patch Changes
+
+- 530bfc8: Update README and app setup for better DX and route support.
+
 ## 1.0.8
 
 ### Patch Changes

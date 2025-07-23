@@ -1,6 +1,6 @@
 {
   "name": "@vercel/bolt",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Bolt Receiver for Vercel",
   "keywords": [
     "vercel",
