@@ -10,56 +10,62 @@ pnpm add @vercel/bolt
 
 ### 1. Environment Setup
 
-Set your Slack signing secret in your environment variables:
+Add your `SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN` to your environment variables:
 
 ```bash
 SLACK_SIGNING_SECRET=your_slack_signing_secret_here
 SLACK_BOT_TOKEN=your_slack_bot_token
 ```
 
-### 2. Create API folder
+### 2. Add the Vercel Receiver to your Bolt app
+
+```typescript
+// app.ts
+
+import { App, LogLevel } from "@slack/bolt";
+import { VercelReceiver } from "@vercel/bolt";
+import registerListeners from "./listeners";
+
+const receiver = new VercelReceiver();
+
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  receiver,
+  deferInitialization: true,
+});
+
+registerListeners(app);
+
+export { app, receiver };
+```
+
+### 3. Create API folder and events.ts route
 
 Your project structure should look like this:
 
 ```
 root/
 ├── api/
-│   └── app.ts          # Vercel API endpoint with your Slack app logic
+│   └── events.ts          # Vercel API endpoint to handle requests
 ├── src/
 │   ├── commands/        # Slash command handlers
 │   ├── events/          # Event listeners
 │   └── utils/           # Helper functions
+├── app.ts               # Bolt app
 ├── package.json
 └── .env                 # Environment variables
 ```
 
-### 2. Create Bolt App
-
-Add your Bolt app to the `api/app.ts` file:
+### 4. Create a POST request handler using `createHandler` from `@vercel/bolt`
 
 ```typescript
-import { App } from "@slack/bolt";
-import { VercelReceiver, handler } from "@vercel/bolt";
+// api/events.ts
 
-// Create the Slack app with Vercel receiver
-const receiver = new VercelReceiver();
+import { createHandler } from "@vercel/bolt";
+import { app, receiver } from "../app";
 
-const app = new App({
-  receiver,
-  token: process.env.SLACK_BOT_TOKEN,
-  deferInitialization: true,
-});
-
-// Add your Slack event listeners
-app.message("hello", async ({ message, say }) => {
-  await say(`Hey there <@${message.user}>!`);
-});
-
-// Export the handler for Vercel
-export default async (req: VercelRequest, res: VercelResponse) => {
-  const handler = await receiver.start();
-  return handler(req, res);
-};
+export const POST = createHandler(app, receiver);
 ```
 
 ## Contributing
