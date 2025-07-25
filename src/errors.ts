@@ -1,4 +1,3 @@
-// Custom error types
 export class VercelReceiverError extends Error {
   constructor(message: string, public readonly statusCode: number = 500) {
     super(message);

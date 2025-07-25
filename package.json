@@ -1,7 +1,7 @@
 {
   "name": "@vercel/bolt",
   "version": "1.0.9",
-  "description": "Bolt Receiver for Vercel",
+  "description": "A Vercel receiver for building Slack apps with Bolt and deploying them to Vercel",
   "keywords": [
     "vercel",
     "bolt",

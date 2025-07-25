@@ -538,7 +538,7 @@ describe("VercelReceiver", () => {
       expect(response.status).toBe(401);
       const body = await response.json();
       expect(body.type).toBe("SignatureVerificationError");
-      expect(body.error).toBe("Missing required signature headers");
+      expect(body.error).toBe("Missing required timestamp header");
     });
 
     it("should handle missing signature header", async () => {

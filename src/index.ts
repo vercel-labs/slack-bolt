@@ -15,7 +15,17 @@ import {
 } from "@slack/bolt";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
 
-// Constants
+// Types
+export type VercelHandler = (req: Request) => Promise<Response>;
+export interface VercelReceiverOptions {
+  signingSecret?: string;
+  signatureVerification?: boolean;
+  logger?: Logger;
+  logLevel?: LogLevel;
+  customPropertiesExtractor?: (req: Request) => StringIndexed;
+  customResponseHandler?: (event: ReceiverEvent) => Promise<Response>;
+}
+
 const SCOPE = ["@vercel/bolt"];
 const ACK_TIMEOUT_MS = 3001;
 const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
@@ -88,14 +98,12 @@ export class VercelReceiver implements Receiver {
 
         const rawBody = await req.text();
 
-        // Verify signature if enabled
         if (this.signatureVerification) {
           await this.verifySlackRequest(req, rawBody);
         }
 
         const body = await this.parseRequestBody(req, rawBody);
 
-        // Handle URL verification challenge
         if (body.type === "url_verification") {
           this.logger.debug("Handling URL verification challenge");
           return new Response(JSON.stringify({ challenge: body.challenge }), {
@@ -106,7 +114,6 @@ export class VercelReceiver implements Receiver {
           });
         }
 
-        // Process Slack event
         const response = await this.handleSlackEvent(req, body);
 
         const processingTime = Date.now() - startTime;
@@ -175,7 +182,7 @@ export class VercelReceiver implements Receiver {
       responseRejecter = reject;
     });
 
-    // Set up acknowledgment timeout
+    // Slack requires an acknowledgment from your app within 3 seconds
     const timeoutId = setTimeout(() => {
       if (!isAcknowledged) {
         this.logger.error("Event not acknowledged within timeout period");
@@ -184,7 +191,7 @@ export class VercelReceiver implements Receiver {
       }
     }, ACK_TIMEOUT_MS);
 
-    // Create acknowledgment function
+    // Create an acknowledgment function to handle ack() calls from Bolt while waiting for the event to be processed
     const ackFn: AckFn<StringIndexed> = async (ackResponse) => {
       if (isAcknowledged) {
         throw new Error("Cannot acknowledge an event multiple times");
@@ -227,7 +234,6 @@ export class VercelReceiver implements Receiver {
       }
     };
 
-    // Create Slack receiver event
     const event = this.createSlackReceiverEvent({
       body,
       headers: req.headers,
@@ -235,7 +241,8 @@ export class VercelReceiver implements Receiver {
       request: req,
     });
 
-    // Process event in background
+    // Process event in background using waitUntil from Vercel Functions
+    // https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil
     waitUntil(this.app.processEvent(event));
 
     try {
@@ -252,7 +259,11 @@ export class VercelReceiver implements Receiver {
     const timestamp = req.headers.get(SLACK_TIMESTAMP_HEADER);
     const signature = req.headers.get(SLACK_SIGNATURE_HEADER);
 
-    if (!timestamp || !signature) {
+    if (!timestamp) {
+      throw new SignatureVerificationError("Missing required timestamp header");
+    }
+
+    if (!signature) {
       throw new SignatureVerificationError(
         "Missing required signature headers"
       );
@@ -345,7 +356,6 @@ export class VercelReceiver implements Receiver {
   }
 }
 
-// Convenience handler function
 export function createHandler(
   app: App,
   receiver: VercelReceiver
@@ -374,16 +384,4 @@ export function createHandler(
       );
     }
   };
-}
-
-// Types
-export type VercelHandler = (req: Request) => Promise<Response>;
-
-export interface VercelReceiverOptions {
-  signingSecret?: string;
-  signatureVerification?: boolean;
-  logger?: Logger;
-  logLevel?: LogLevel;
-  customPropertiesExtractor?: (req: Request) => StringIndexed;
-  customResponseHandler?: (event: ReceiverEvent) => Promise<Response>;
 }
