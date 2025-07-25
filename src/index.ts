@@ -29,8 +29,7 @@ export class VercelReceiver implements Receiver {
   private readonly logger: Logger;
   private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly customResponseHandler?: (
-    event: ReceiverEvent,
-    res: Response
+    event: ReceiverEvent
   ) => Promise<Response>;
   private app?: App;
 
@@ -79,7 +78,7 @@ export class VercelReceiver implements Receiver {
   }
 
   public toHandler(): VercelHandler {
-    return async (req: Request, res: Response): Promise<Response> => {
+    return async (req: Request): Promise<Response> => {
       const startTime = Date.now();
 
       try {
@@ -108,14 +107,14 @@ export class VercelReceiver implements Receiver {
         }
 
         // Process Slack event
-        const response = await this.handleSlackEvent(req, res, body);
+        const response = await this.handleSlackEvent(req, body);
 
         const processingTime = Date.now() - startTime;
         this.logger.debug(`Request processed in ${processingTime}ms`);
 
         return response;
       } catch (error) {
-        return this.handleError(error, res);
+        return this.handleError(error);
       }
     };
   }
@@ -161,7 +160,6 @@ export class VercelReceiver implements Receiver {
 
   private async handleSlackEvent(
     req: Request,
-    res: Response,
     body: StringIndexed
   ): Promise<Response> {
     if (!this.app) {
@@ -205,7 +203,7 @@ export class VercelReceiver implements Receiver {
             ack: ackFn,
             request: req,
           });
-          response = await this.customResponseHandler(event, res);
+          response = await this.customResponseHandler(event);
         } else {
           const responseBody = ackResponse || {};
           const body =
@@ -243,7 +241,7 @@ export class VercelReceiver implements Receiver {
     try {
       return await responsePromise;
     } catch (error) {
-      return this.handleError(error, res);
+      return this.handleError(error);
     }
   }
 
@@ -306,7 +304,7 @@ export class VercelReceiver implements Receiver {
     };
   }
 
-  private handleError(error: unknown, res: Response): Response {
+  private handleError(error: unknown): Response {
     if (error instanceof VercelReceiverError) {
       this.logger.error(`VercelReceiverError: ${error.message}`, {
         statusCode: error.statusCode,
@@ -354,7 +352,7 @@ export function createHandler(
 ): VercelHandler {
   let initPromise: Promise<void> | null = null;
 
-  return async (req: Request, res: Response) => {
+  return async (req: Request) => {
     try {
       if (!initPromise) {
         initPromise = app.init();
@@ -363,7 +361,7 @@ export function createHandler(
 
       receiver.init(app);
       const handler = await receiver.start();
-      return handler(req, res);
+      return handler(req);
     } catch (error) {
       const logger = receiver.getLogger();
       logger.error("Error in createHandler:", error);
@@ -379,7 +377,7 @@ export function createHandler(
 }
 
 // Types
-export type VercelHandler = (req: Request, res: Response) => Promise<Response>;
+export type VercelHandler = (req: Request) => Promise<Response>;
 
 export interface VercelReceiverOptions {
   signingSecret?: string;
@@ -387,8 +385,5 @@ export interface VercelReceiverOptions {
   logger?: Logger;
   logLevel?: LogLevel;
   customPropertiesExtractor?: (req: Request) => StringIndexed;
-  customResponseHandler?: (
-    event: ReceiverEvent,
-    res: Response
-  ) => Promise<Response>;
+  customResponseHandler?: (event: ReceiverEvent) => Promise<Response>;
 }
