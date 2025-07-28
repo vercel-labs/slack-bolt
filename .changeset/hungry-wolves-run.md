@@ -1,5 +1,5 @@
 ---
-"@vercel/bolt": patch
+"@vercel/slack-bolt": patch
 ---
 
 Create public package

@@ -1,4 +1,4 @@
-# @vercel/bolt
+# @vercel/slack-bolt
 
 ## Description
 
@@ -15,7 +15,7 @@ See below for installation and usage instructions.
 ## Installation
 
 ```bash
-pnpm add @vercel/bolt
+pnpm add @vercel/slack-bolt
 ```
 
 ## Quick Start
@@ -35,7 +35,7 @@ SLACK_BOT_TOKEN=your_slack_bot_token
 // app.ts
 
 import { App } from "@slack/bolt";
-import { VercelReceiver } from "@vercel/bolt";
+import { VercelReceiver } from "@vercel/slack-bolt";
 
 const receiver = new VercelReceiver();
 
@@ -66,12 +66,12 @@ root/
 └── .env                 # Environment variables
 ```
 
-### 4. Create a POST request handler using `createHandler` from `@vercel/bolt`
+### 4. Create a POST request handler using `createHandler` from `@vercel/slack-bolt`
 
 ```typescript
 // api/events.ts
 
-import { createHandler } from "@vercel/bolt";
+import { createHandler } from "@vercel/slack-bolt";
 import { app, receiver } from "../app";
 
 export const POST = createHandler(app, receiver);

@@ -26,7 +26,7 @@ export interface VercelReceiverOptions {
   customResponseHandler?: (event: ReceiverEvent) => Promise<Response>;
 }
 
-const SCOPE = ["@vercel/bolt"];
+const SCOPE = ["@vercel/slack-bolt"];
 const ACK_TIMEOUT_MS = 3001;
 const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
 const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";

@@ -1,4 +1,4 @@
-# @vercel/bolt
+# @vercel/slack-bolt
 
 ## 1.0.9
 
