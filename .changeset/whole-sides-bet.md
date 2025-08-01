@@ -2,4 +2,4 @@
 "@vercel/slack-bolt": patch
 ---
 
-Create public package
+Prepare package for initial release

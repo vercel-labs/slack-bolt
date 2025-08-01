@@ -16,13 +16,54 @@ import {
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
 
 // Types
+/**
+ * A function to handle the request from the Slack app.
+ * @param req - The request from the Slack app.
+ * @returns A response object.
+ */
 export type VercelHandler = (req: Request) => Promise<Response>;
+
+/**
+ * Configuration options for the VercelReceiver.
+ * @property signingSecret - The signing secret for the Slack app.
+ * @property signatureVerification - If true, verifies the Slack request signature.
+ * @property logger - The logger to use for the VercelReceiver.
+ * @property logLevel - The log level to use for the VercelReceiver.
+ * @property customPropertiesExtractor - A function to extract custom properties from the request.
+ * @property customResponseHandler - A function to handle the response from the Slack app.
+ */
 export interface VercelReceiverOptions {
+  /**
+   * The signing secret for the Slack app.
+   * @default process.env.SLACK_SIGNING_SECRET
+   */
   signingSecret?: string;
+  /**
+   * If true, verifies the Slack request signature.
+   * @default true
+   */
   signatureVerification?: boolean;
+  /**
+   * The logger to use for the VercelReceiver.
+   * @default new ConsoleLogger()
+   */
   logger?: Logger;
+  /**
+   * The log level to use for the VercelReceiver.
+   * @default LogLevel.INFO
+   */
   logLevel?: LogLevel;
+  /**
+   * A function to extract custom properties from incoming events.
+   * @default undefined
+   * @returns An object with custom properties.
+   */
   customPropertiesExtractor?: (req: Request) => StringIndexed;
+  /**
+   * A function to handle the response from the Slack app.
+   * @default undefined
+   * @returns A response object.
+   */
   customResponseHandler?: (event: ReceiverEvent) => Promise<Response>;
 }
 
@@ -33,20 +74,54 @@ const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
 const SLACK_TIMESTAMP_HEADER = "x-slack-request-timestamp";
 const SLACK_SIGNATURE_HEADER = "x-slack-signature";
 
+/**
+ * A Slack Bolt receiver implementation designed for Vercel's serverless environment.
+ * Handles Slack events, interactions, and slash commands with automatic request verification,
+ * background processing, and timeout management.
+ *
+ * @example
+ * ```typescript
+ * import { App } from '@slack/bolt';
+ * import { VercelReceiver, createHandler } from '@vercel/slack-bolt';
+ *
+ * const receiver = new VercelReceiver();
+ *
+ * const app = new App({
+ *   receiver,
+ *   token: process.env.SLACK_BOT_TOKEN,
+ *   signingSecret: process.env.SLACK_SIGNING_SECRET,
+ * });
+ * ```
+ */
 export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
   private readonly logger: Logger;
   private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly customResponseHandler?: (
-    event: ReceiverEvent
+    event: ReceiverEvent,
   ) => Promise<Response>;
   private app?: App;
 
+  /**
+   * Gets the logger instance used by this receiver.
+   * @returns The logger instance
+   */
   public getLogger(): Logger {
     return this.logger;
   }
 
+  /**
+   * Creates a new VercelReceiver instance.
+   *
+   * @param options - Configuration options for the receiver
+   * @throws {VercelReceiverError} When signing secret is not provided
+   *
+   * @example
+   * ```typescript
+   * const receiver = new VercelReceiver();
+   * ```
+   */
   public constructor({
     signingSecret = process.env.SLACK_SIGNING_SECRET,
     signatureVerification = true,
@@ -57,7 +132,7 @@ export class VercelReceiver implements Receiver {
   }: VercelReceiverOptions = {}) {
     if (!signingSecret) {
       throw new VercelReceiverError(
-        "SLACK_SIGNING_SECRET is required for VercelReceiver"
+        "SLACK_SIGNING_SECRET is required for VercelReceiver",
       );
     }
 
@@ -65,7 +140,7 @@ export class VercelReceiver implements Receiver {
     this.signatureVerification = signatureVerification;
     this.logger = this.createScopedLogger(
       logger ?? new ConsoleLogger(),
-      logLevel
+      logLevel,
     );
     this.customPropertiesExtractor = customPropertiesExtractor;
     this.customResponseHandler = customResponseHandler;
@@ -73,24 +148,44 @@ export class VercelReceiver implements Receiver {
     this.logger.debug("VercelReceiver initialized");
   }
 
+  /**
+   * Initializes the receiver with a Slack Bolt app instance.
+   * This method is called automatically by the Bolt framework.
+   *
+   * @param app - The Slack Bolt app instance
+   */
   public init(app: App): void {
     this.app = app;
     this.logger.debug("App initialized in VercelReceiver");
   }
 
+  /**
+   * Starts the receiver and returns a handler function for processing requests.
+   * This method is called automatically by the Bolt framework.
+   *
+   * @returns A handler function that processes incoming Slack requests
+   */
   public async start(): Promise<VercelHandler> {
     this.logger.debug("VercelReceiver started");
     return this.toHandler();
   }
 
+  /**
+   * Stops the receiver. This method is called automatically by the Bolt framework.
+   */
   public async stop(): Promise<void> {
     this.logger.debug("VercelReceiver stopped");
   }
 
+  /**
+   * Creates a handler function that processes incoming Slack requests.
+   * This is the main entry point for handling Slack events in Vercel.
+   * It is called automatically by the Bolt framework in the start() method.
+   *
+   * @returns A handler function compatible with Vercel's function signature
+   */
   public toHandler(): VercelHandler {
     return async (req: Request): Promise<Response> => {
-      const startTime = Date.now();
-
       try {
         if (!this.app) {
           throw new VercelReceiverError("Slack app not initialized", 500);
@@ -106,20 +201,10 @@ export class VercelReceiver implements Receiver {
 
         if (body.type === "url_verification") {
           this.logger.debug("Handling URL verification challenge");
-          return new Response(JSON.stringify({ challenge: body.challenge }), {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          });
+          return Response.json({ challenge: body.challenge });
         }
 
-        const response = await this.handleSlackEvent(req, body);
-
-        const processingTime = Date.now() - startTime;
-        this.logger.debug(`Request processed in ${processingTime}ms`);
-
-        return response;
+        return await this.handleSlackEvent(req, body);
       } catch (error) {
         return this.handleError(error);
       }
@@ -128,13 +213,12 @@ export class VercelReceiver implements Receiver {
 
   private async parseRequestBody(
     req: Request,
-    rawBody: string
+    rawBody: string,
   ): Promise<StringIndexed> {
-    const contentType = req?.headers.get("content-type") ?? undefined;
+    const contentType = req.headers.get("content-type");
 
     try {
       if (contentType === "application/x-www-form-urlencoded") {
-        // Parse URL-encoded form data
         const parsedBody: StringIndexed = {};
         const params = new URLSearchParams(rawBody);
 
@@ -142,7 +226,6 @@ export class VercelReceiver implements Receiver {
           parsedBody[key] = value;
         }
 
-        // Check if payload field contains JSON (common with Slack)
         if (typeof parsedBody.payload === "string") {
           return JSON.parse(parsedBody.payload);
         }
@@ -156,18 +239,15 @@ export class VercelReceiver implements Receiver {
 
       return JSON.parse(rawBody);
     } catch (e) {
-      this.logger.error(
-        `Failed to parse body as JSON data for content-type: ${contentType}`
-      );
       throw new RequestParsingError(
-        `Failed to parse body as JSON data for content-type: ${contentType}`
+        `Failed to parse body as JSON data for content-type: ${contentType}. Error: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
 
   private async handleSlackEvent(
     req: Request,
-    body: StringIndexed
+    body: StringIndexed,
   ): Promise<Response> {
     if (!this.app) {
       throw new VercelReceiverError("App not initialized", 500);
@@ -212,7 +292,7 @@ export class VercelReceiver implements Receiver {
           });
           response = await this.customResponseHandler(event);
         } else {
-          const responseBody = ackResponse || {};
+          const responseBody = ackResponse || null;
           const body =
             typeof responseBody === "string"
               ? responseBody
@@ -229,7 +309,7 @@ export class VercelReceiver implements Receiver {
       } catch (error) {
         this.logger.error("Error in acknowledgment handler", error);
         responseRejecter(
-          error instanceof Error ? error : new Error(String(error))
+          error instanceof Error ? error : new Error(String(error)),
         );
       }
     };
@@ -254,7 +334,7 @@ export class VercelReceiver implements Receiver {
 
   private async verifySlackRequest(
     req: Request,
-    rawBody: string
+    rawBody: string,
   ): Promise<void> {
     const timestamp = req.headers.get(SLACK_TIMESTAMP_HEADER);
     const signature = req.headers.get(SLACK_SIGNATURE_HEADER);
@@ -265,7 +345,7 @@ export class VercelReceiver implements Receiver {
 
     if (!signature) {
       throw new SignatureVerificationError(
-        "Missing required signature headers"
+        "Missing required signature headers",
       );
     }
 
@@ -282,7 +362,9 @@ export class VercelReceiver implements Receiver {
     } catch (error) {
       this.logger.error("Slack request verification failed", error);
       throw new SignatureVerificationError(
-        error instanceof Error ? error.message : "Signature verification failed"
+        error instanceof Error
+          ? error.message
+          : "Signature verification failed",
       );
     }
   }
@@ -296,10 +378,10 @@ export class VercelReceiver implements Receiver {
     body: StringIndexed;
     headers: Headers;
     ack: AckFn<StringIndexed>;
-    request?: Request;
+    request: Request;
   }): ReceiverEvent {
     const customProperties = this.customPropertiesExtractor
-      ? this.customPropertiesExtractor(request!)
+      ? this.customPropertiesExtractor(request)
       : {};
 
     const retryNum = headers.get(SLACK_RETRY_NUM_HEADER) || "0";
@@ -326,7 +408,7 @@ export class VercelReceiver implements Receiver {
           error: error.message,
           type: error.name,
         }),
-        { status: error.statusCode }
+        { status: error.statusCode },
       );
     }
 
@@ -336,7 +418,7 @@ export class VercelReceiver implements Receiver {
         error: "Internal server error",
         type: "UnexpectedError",
       }),
-      { status: 500 }
+      { status: 500 },
     );
   }
 
@@ -356,9 +438,33 @@ export class VercelReceiver implements Receiver {
   }
 }
 
+/**
+ * Creates a Vercel-compatible handler function for a Slack Bolt app.
+ * This is the recommended way to create handlers for deployment on Vercel.
+ *
+ * @param {App} app - The initialized Slack Bolt app instance.
+ * @param {VercelReceiver} receiver - The VercelReceiver instance.
+ * @returns {VercelHandler} A handler function compatible with Vercel's function signature.
+ *
+ * @example
+ * ```typescript
+ * // api/events.ts
+ * import { createHandler } from '@vercel/bolt';
+ * import { app, receiver } from '../app';
+ *
+ * const handler = createHandler(app, receiver);
+ *
+ * export const POST = async (req: Request) => {
+ *   return handler(req);
+ * };
+ * ```
+ *
+ * @throws {Error} If app initialization fails.
+ * @throws {VercelReceiverError} If request processing fails.
+ */
 export function createHandler(
   app: App,
-  receiver: VercelReceiver
+  receiver: VercelReceiver,
 ): VercelHandler {
   let initPromise: Promise<void> | null = null;
 
@@ -380,7 +486,7 @@ export function createHandler(
           error: "Internal Server Error",
           type: "HandlerError",
         }),
-        { status: 500 }
+        { status: 500 },
       );
     }
   };

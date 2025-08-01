@@ -1,16 +1,11 @@
 # @vercel/slack-bolt
 
-## Description
+A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [Fluid Compute](https://vercel.com/docs/fluid-compute).
 
-A Vercel-compatible [Slack Bolt](https://slack.dev/bolt-js/) receiver for building Slack apps on Vercel’s serverless platform.
-
-This package provides a drop-in replacement for the default Bolt receiver, allowing you to deploy your Bolt Javascript app to Vercel
-
-- **Easy integration:** Use with your existing Bolt app code.
-- **Customizable:** Supports custom response handlers and property extraction.
-- **TypeScript ready:** Fully typed for modern development.
-
-See below for installation and usage instructions.
+- **Vercel Fluid Compute** Fully compabatible with Vercel Fluid Compute and [Active CPU Pricing](https://vercel.com/changelog/lower-pricing-with-active-cpu-pricing-for-fluid-compute)
+- **Easy integration:** Use with your existing Bolt app code
+- **Customizable:** Supports custom response handlers and property extraction
+- **TypeScript ready:** Fully typed for modern development
 
 ## Installation
 
@@ -47,7 +42,7 @@ const app = new App({
 });
 
 app.message(/^(hi|hello|hey).*/, async ({ say }) => {
-  await say("Hello!");
+  await say("Hello, world!");
 });
 
 export { app, receiver };
@@ -71,11 +66,18 @@ root/
 ```typescript
 // api/events.ts
 
-import { createHandler } from "@vercel/slack-bolt";
-import { app, receiver } from "../app";
+import { createHandler } from '@vercel/bolt';
+import { app, receiver } from '../app';
 
-export const POST = createHandler(app, receiver);
+const handler = createHandler(app, receiver);
+
+export const POST = async (req: Request) => {
+  return handler(req);
+};
 ```
+> **Note:**  
+> The `handler` returned by `createHandler` works with standard `WebRequest` objects.  
+> You can use it directly in your Vercel API routes or with any framework that provides compatible request objects.
 
 ### 5. Update your Slack App Manifest
 
@@ -89,9 +91,7 @@ See the [example](./manifest.example.json) for reference.
 
 This package is compatible with the Slack CLI and can be used with the `slack run` command.
 
-### 1. Ensure your app and manifest are not using `socket mode`.
-
-### 2. Update the `start` command in you `./slack/hooks.json` file
+### 1. Update the `start` command in your `./slack/hooks.json` file
 
 ```json
 // ./slack/hooks.json
@@ -103,7 +103,7 @@ This package is compatible with the Slack CLI and can be used with the `slack ru
 }
 ```
 
-### 3. If you'd like to use your local `manifest.json`, update your `config.json` file. (optional)
+### 2. If you'd like to use your local `manifest.json`, update your `config.json` file. (optional)
 
 ```json
 {
@@ -115,13 +115,13 @@ This package is compatible with the Slack CLI and can be used with the `slack ru
 }
 ```
 
-### 4. Expose your local server with `ngrok` or a similar tunneling tool
+### 3. Expose your local server with `ngrok` or a similar tunneling tool
 
 ```bash
 ngrok http 3000
 ```
 
-### 5. Update your app manifest to use your tunnel URL
+### 4. Update your app manifest to use your tunnel URL
 
 Example: https://slack-agent.ngrok.dev/api/events
 

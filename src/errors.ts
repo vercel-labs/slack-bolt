@@ -1,5 +1,8 @@
 export class VercelReceiverError extends Error {
-  constructor(message: string, public readonly statusCode: number = 500) {
+  constructor(
+    message: string,
+    public readonly statusCode: number = 500,
+  ) {
     super(message);
     this.name = "VercelReceiverError";
   }
