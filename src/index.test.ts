@@ -126,7 +126,7 @@ describe("VercelReceiver", () => {
         type: "interactive_message",
         actions: [{ name: "button", value: "click" }],
       };
-      const formData = "payload=" + encodeURIComponent(JSON.stringify(payload));
+      const formData = `payload=${encodeURIComponent(JSON.stringify(payload))}`;
       const request = new Request("http://localhost", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
