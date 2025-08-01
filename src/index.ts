@@ -74,6 +74,25 @@ const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
 const SLACK_TIMESTAMP_HEADER = "x-slack-request-timestamp";
 const SLACK_SIGNATURE_HEADER = "x-slack-signature";
 
+/**
+ * A Slack Bolt receiver implementation designed for Vercel's serverless environment.
+ * Handles Slack events, interactions, and slash commands with automatic request verification,
+ * background processing, and timeout management.
+ * 
+ * @example
+ * ```typescript
+ * import { App } from '@slack/bolt';
+ * import { VercelReceiver, createHandler } from '@vercel/slack-bolt';
+ * 
+ * const receiver = new VercelReceiver();
+ * 
+ * const app = new App({
+ *   receiver,
+ *   token: process.env.SLACK_BOT_TOKEN,
+ *   signingSecret: process.env.SLACK_SIGNING_SECRET,
+ * });
+ * ```
+ */
 export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
@@ -84,10 +103,25 @@ export class VercelReceiver implements Receiver {
   ) => Promise<Response>;
   private app?: App;
 
+  /**
+   * Gets the logger instance used by this receiver.
+   * @returns The logger instance
+   */
   public getLogger(): Logger {
     return this.logger;
   }
 
+  /**
+   * Creates a new VercelReceiver instance.
+   * 
+   * @param options - Configuration options for the receiver
+   * @throws {VercelReceiverError} When signing secret is not provided
+   * 
+   * @example
+   * ```typescript
+   * const receiver = new VercelReceiver();
+   * ```
+   */
   public constructor({
     signingSecret = process.env.SLACK_SIGNING_SECRET,
     signatureVerification = true,
@@ -114,20 +148,42 @@ export class VercelReceiver implements Receiver {
     this.logger.debug("VercelReceiver initialized");
   }
 
+  /**
+   * Initializes the receiver with a Slack Bolt app instance.
+   * This method is called automatically by the Bolt framework.
+   * 
+   * @param app - The Slack Bolt app instance
+   */
   public init(app: App): void {
     this.app = app;
     this.logger.debug("App initialized in VercelReceiver");
   }
 
+  /**
+   * Starts the receiver and returns a handler function for processing requests.
+   * This method is called automatically by the Bolt framework.
+   * 
+   * @returns A handler function that processes incoming Slack requests
+   */
   public async start(): Promise<VercelHandler> {
     this.logger.debug("VercelReceiver started");
     return this.toHandler();
   }
 
+  /**
+   * Stops the receiver. This method is called automatically by the Bolt framework.
+   */
   public async stop(): Promise<void> {
     this.logger.debug("VercelReceiver stopped");
   }
 
+  /**
+   * Creates a handler function that processes incoming Slack requests.
+   * This is the main entry point for handling Slack events in Vercel.
+   * It is called automatically by the Bolt framework in the start() method.
+   * 
+   * @returns A handler function compatible with Vercel's function signature
+   */
   public toHandler(): VercelHandler {
     return async (req: Request): Promise<Response> => {
       try {
@@ -380,6 +436,30 @@ export class VercelReceiver implements Receiver {
   }
 }
 
+/**
+ * Creates a Vercel-compatible handler function for a Slack Bolt app.
+ * This is the recommended way to create handlers for deployment on Vercel.
+ *
+ * @param {App} app - The initialized Slack Bolt app instance.
+ * @param {VercelReceiver} receiver - The VercelReceiver instance.
+ * @returns {VercelHandler} A handler function compatible with Vercel's function signature.
+ *
+ * @example
+ * ```typescript
+ * // api/events.ts
+ * import { createHandler } from '@vercel/bolt';
+ * import { app, receiver } from '../app';
+ *
+ * const handler = createHandler(app, receiver);
+ *
+ * export const POST = async (req: Request) => {
+ *   return handler(req);
+ * };
+ * ```
+ *
+ * @throws {Error} If app initialization fails.
+ * @throws {VercelReceiverError} If request processing fails.
+ */
 export function createHandler(
   app: App,
   receiver: VercelReceiver
