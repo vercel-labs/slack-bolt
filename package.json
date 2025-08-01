@@ -30,13 +30,9 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest watch",
-    "prebuild": "npm run clean",
-    "clean": "rm -rf dist",
-    "ci": "npm run build && npm run test",
-    "release": "changeset version && changeset publish",
-    "lint": "biome check .",
-    "lint:fix": "biome check . --write",
-    "prepublishOnly": "npm run ci"
+    "version-packages": "changeset version",
+    "changeset": "changeset",
+    "release": "pnpm build && changeset publish"
   },
   "keywords": [
     "vercel",
