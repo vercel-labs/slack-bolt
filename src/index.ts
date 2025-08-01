@@ -89,8 +89,6 @@ export class VercelReceiver implements Receiver {
 
   public toHandler(): VercelHandler {
     return async (req: Request): Promise<Response> => {
-      const startTime = Date.now();
-
       try {
         if (!this.app) {
           throw new VercelReceiverError("Slack app not initialized", 500);
@@ -106,20 +104,10 @@ export class VercelReceiver implements Receiver {
 
         if (body.type === "url_verification") {
           this.logger.debug("Handling URL verification challenge");
-          return new Response(JSON.stringify({ challenge: body.challenge }), {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          });
+          return Response.json({ challenge: body.challenge });
         }
 
-        const response = await this.handleSlackEvent(req, body);
-
-        const processingTime = Date.now() - startTime;
-        this.logger.debug(`Request processed in ${processingTime}ms`);
-
-        return response;
+        return await this.handleSlackEvent(req, body);
       } catch (error) {
         return this.handleError(error);
       }
@@ -130,11 +118,10 @@ export class VercelReceiver implements Receiver {
     req: Request,
     rawBody: string
   ): Promise<StringIndexed> {
-    const contentType = req?.headers.get("content-type") ?? undefined;
+    const contentType = req.headers.get("content-type");
 
     try {
       if (contentType === "application/x-www-form-urlencoded") {
-        // Parse URL-encoded form data
         const parsedBody: StringIndexed = {};
         const params = new URLSearchParams(rawBody);
 
@@ -142,7 +129,6 @@ export class VercelReceiver implements Receiver {
           parsedBody[key] = value;
         }
 
-        // Check if payload field contains JSON (common with Slack)
         if (typeof parsedBody.payload === "string") {
           return JSON.parse(parsedBody.payload);
         }
@@ -156,9 +142,6 @@ export class VercelReceiver implements Receiver {
 
       return JSON.parse(rawBody);
     } catch (e) {
-      this.logger.error(
-        `Failed to parse body as JSON data for content-type: ${contentType}`
-      );
       throw new RequestParsingError(
         `Failed to parse body as JSON data for content-type: ${contentType}`
       );
@@ -212,7 +195,7 @@ export class VercelReceiver implements Receiver {
           });
           response = await this.customResponseHandler(event);
         } else {
-          const responseBody = ackResponse || {};
+          const responseBody = ackResponse || null;
           const body =
             typeof responseBody === "string"
               ? responseBody
