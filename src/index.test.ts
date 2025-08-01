@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VercelReceiver, createHandler } from "./index";
-import { App, ReceiverEvent } from "@slack/bolt";
+import type { App, ReceiverEvent } from "@slack/bolt";
 import { ConsoleLogger, LogLevel } from "@slack/logger";
 
 // Mock @slack/bolt
@@ -109,7 +109,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack({ success: true }), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -140,7 +140,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -163,7 +163,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -237,7 +237,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -259,7 +259,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -330,7 +330,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack(stringResponse), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -360,7 +360,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack(objectResponse), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -383,7 +383,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -434,7 +434,7 @@ describe("VercelReceiver", () => {
 
             // Second ack should throw
             await expect(event.ack({ second: true })).rejects.toThrow(
-              "Cannot acknowledge an event multiple times"
+              "Cannot acknowledge an event multiple times",
             );
           }, 10);
         });
@@ -501,7 +501,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack({ verified: true }), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -607,7 +607,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack({ bypassed: true }), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -649,7 +649,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -718,7 +718,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack({ processed: true }), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -733,7 +733,7 @@ describe("VercelReceiver", () => {
           customProperties: expect.any(Object),
           retryNum: expect.any(Number),
           retryReason: expect.any(String),
-        })
+        }),
       );
     });
 
@@ -762,7 +762,7 @@ describe("VercelReceiver", () => {
       (mockApp.processEvent as any).mockImplementation(
         (event: ReceiverEvent) => {
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       const response = await handler(request);
@@ -793,7 +793,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -817,7 +817,7 @@ describe("VercelReceiver", () => {
         (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
-        }
+        },
       );
 
       await handler(request);
@@ -905,7 +905,7 @@ describe("VercelReceiver", () => {
             new Request("http://localhost", {
               method: "POST",
               body: "{}",
-            })
+            }),
           );
 
           // If we get here, the test should fail
@@ -1042,7 +1042,7 @@ describe("createHandler", () => {
     });
 
     vi.spyOn(mockReceiver, "start").mockRejectedValue(
-      new Error("Receiver start failed")
+      new Error("Receiver start failed"),
     );
 
     const handler = createHandler(mockApp, mockReceiver);
