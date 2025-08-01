@@ -16,13 +16,54 @@ import {
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
 
 // Types
+/**
+ * A function to handle the request from the Slack app.
+ * @param req - The request from the Slack app.
+ * @returns A response object.
+ */
 export type VercelHandler = (req: Request) => Promise<Response>;
+
+/**
+ * Configuration options for the VercelReceiver.
+ * @property signingSecret - The signing secret for the Slack app.
+ * @property signatureVerification - If true, verifies the Slack request signature.
+ * @property logger - The logger to use for the VercelReceiver.
+ * @property logLevel - The log level to use for the VercelReceiver.
+ * @property customPropertiesExtractor - A function to extract custom properties from the request.
+ * @property customResponseHandler - A function to handle the response from the Slack app.
+ */
 export interface VercelReceiverOptions {
+  /**
+   * The signing secret for the Slack app.
+   * @default process.env.SLACK_SIGNING_SECRET
+   */
   signingSecret?: string;
+  /**
+   * If true, verifies the Slack request signature.
+   * @default true
+   */
   signatureVerification?: boolean;
+  /**
+   * The logger to use for the VercelReceiver.
+   * @default new ConsoleLogger()
+   */
   logger?: Logger;
+  /**
+   * The log level to use for the VercelReceiver.
+   * @default LogLevel.INFO
+   */
   logLevel?: LogLevel;
+  /**
+   * A function to extract custom properties from incoming events.
+   * @default undefined
+   * @returns An object with custom properties.
+   */
   customPropertiesExtractor?: (req: Request) => StringIndexed;
+  /**   
+   * A function to handle the response from the Slack app.
+   * @default undefined
+   * @returns A response object.
+   */
   customResponseHandler?: (event: ReceiverEvent) => Promise<Response>;
 }
 
