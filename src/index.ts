@@ -240,7 +240,7 @@ export class VercelReceiver implements Receiver {
       return JSON.parse(rawBody);
     } catch (e) {
       throw new RequestParsingError(
-        `Failed to parse body as JSON data for content-type: ${contentType}`,
+        `Failed to parse body as JSON data for content-type: ${contentType}. Error: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
