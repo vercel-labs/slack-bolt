@@ -378,10 +378,10 @@ export class VercelReceiver implements Receiver {
     body: StringIndexed;
     headers: Headers;
     ack: AckFn<StringIndexed>;
-    request?: Request;
+    request: Request;
   }): ReceiverEvent {
     const customProperties = this.customPropertiesExtractor
-      ? this.customPropertiesExtractor(request!)
+      ? this.customPropertiesExtractor(request)
       : {};
 
     const retryNum = headers.get(SLACK_RETRY_NUM_HEADER) || "0";
