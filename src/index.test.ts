@@ -104,9 +104,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack({ success: true }), 10);
         },
@@ -115,7 +115,7 @@ describe("VercelReceiver", () => {
       const response = await handler(request);
 
       expect(response.status).toBe(200);
-      expect(capturedEvent!.body).toEqual(jsonPayload);
+      expect(capturedEvent?.body).toEqual(jsonPayload);
 
       const responseBody = await response.json();
       expect(responseBody).toEqual({ success: true });
@@ -135,9 +135,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -145,7 +145,7 @@ describe("VercelReceiver", () => {
 
       await handler(request);
 
-      expect(capturedEvent!.body).toEqual(payload);
+      expect(capturedEvent?.body).toEqual(payload);
     });
 
     it("should parse URL-encoded form data without payload field", async () => {
@@ -158,9 +158,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -168,7 +168,7 @@ describe("VercelReceiver", () => {
 
       await handler(request);
 
-      expect(capturedEvent!.body).toEqual({
+      expect(capturedEvent?.body).toEqual({
         token: "xoxb-token",
         team_id: "T123",
         user_id: "U456",
@@ -232,9 +232,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -242,7 +242,7 @@ describe("VercelReceiver", () => {
 
       await handler(request);
 
-      expect(capturedEvent!.body).toEqual({ type: "event_callback" });
+      expect(capturedEvent?.body).toEqual({ type: "event_callback" });
     });
 
     it("should handle missing content-type header", async () => {
@@ -254,9 +254,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -264,7 +264,7 @@ describe("VercelReceiver", () => {
 
       await handler(request);
 
-      expect(capturedEvent!.body).toEqual({ type: "event_callback" });
+      expect(capturedEvent?.body).toEqual({ type: "event_callback" });
     });
   });
 
@@ -327,8 +327,8 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack(stringResponse), 10);
         },
       );
@@ -357,8 +357,8 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack(objectResponse), 10);
         },
       );
@@ -380,8 +380,8 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack(), 10);
         },
       );
@@ -404,7 +404,7 @@ describe("VercelReceiver", () => {
       const handler = await receiver.start();
 
       // Don't acknowledge the event
-      (mockApp.processEvent as any).mockImplementation(() => {
+      vi.mocked(mockApp.processEvent).mockImplementation(async () => {
         // Simulate processing that never calls ack
       });
 
@@ -428,7 +428,7 @@ describe("VercelReceiver", () => {
 
       const mockProcessEvent = vi
         .fn()
-        .mockImplementation((event: ReceiverEvent) => {
+        .mockImplementation(async (event: ReceiverEvent) => {
           setTimeout(async () => {
             await event.ack({ first: true });
 
@@ -439,7 +439,7 @@ describe("VercelReceiver", () => {
           }, 10);
         });
 
-      (mockApp.processEvent as any) = mockProcessEvent;
+      mockApp.processEvent = mockProcessEvent;
 
       await handler(request);
       expect(mockProcessEvent).toHaveBeenCalledTimes(1);
@@ -455,7 +455,7 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(() => {
+      vi.mocked(mockApp.processEvent).mockImplementation(async () => {
         // Simply don't call ack() to trigger timeout
         // This simulates the case where processing fails before ack
       });
@@ -477,7 +477,7 @@ describe("VercelReceiver", () => {
 
     it("should verify slack request signature successfully", async () => {
       const { verifySlackRequest } = await import("@slack/bolt");
-      (verifySlackRequest as any).mockImplementation(() => {
+      vi.mocked(verifySlackRequest).mockImplementation(() => {
         // Mock successful verification
       });
 
@@ -498,8 +498,8 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack({ verified: true }), 10);
         },
       );
@@ -563,7 +563,7 @@ describe("VercelReceiver", () => {
 
     it("should handle signature verification failure", async () => {
       const { verifySlackRequest } = await import("@slack/bolt");
-      (verifySlackRequest as any).mockImplementation(() => {
+      vi.mocked(verifySlackRequest).mockImplementation(() => {
         throw new Error("Invalid signature");
       });
 
@@ -604,8 +604,8 @@ describe("VercelReceiver", () => {
 
       const handler = await bypassReceiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack({ bypassed: true }), 10);
         },
       );
@@ -644,9 +644,9 @@ describe("VercelReceiver", () => {
 
       const handler = await customReceiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -655,7 +655,7 @@ describe("VercelReceiver", () => {
       await handler(request);
 
       expect(customPropertiesExtractor).toHaveBeenCalledWith(request);
-      expect(capturedEvent!.customProperties).toEqual({
+      expect(capturedEvent?.customProperties).toEqual({
         customProp: "customValue",
         requestId: "req-123",
       });
@@ -715,8 +715,8 @@ describe("VercelReceiver", () => {
 
       const handler = await customReceiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack({ processed: true }), 10);
         },
       );
@@ -759,8 +759,8 @@ describe("VercelReceiver", () => {
 
       const handler = await customReceiver.start();
 
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           setTimeout(() => event.ack(), 10);
         },
       );
@@ -788,9 +788,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -798,8 +798,8 @@ describe("VercelReceiver", () => {
 
       await handler(request);
 
-      expect(capturedEvent!.retryNum).toBe(3);
-      expect(capturedEvent!.retryReason).toBe("http_timeout");
+      expect(capturedEvent?.retryNum).toBe(3);
+      expect(capturedEvent?.retryReason).toBe("http_timeout");
     });
 
     it("should handle missing retry headers", async () => {
@@ -812,9 +812,9 @@ describe("VercelReceiver", () => {
 
       const handler = await receiver.start();
 
-      let capturedEvent: ReceiverEvent;
-      (mockApp.processEvent as any).mockImplementation(
-        (event: ReceiverEvent) => {
+      let capturedEvent: ReceiverEvent | undefined;
+      vi.mocked(mockApp.processEvent).mockImplementation(
+        async (event: ReceiverEvent) => {
           capturedEvent = event;
           setTimeout(() => event.ack(), 10);
         },
@@ -822,8 +822,8 @@ describe("VercelReceiver", () => {
 
       await handler(request);
 
-      expect(capturedEvent!.retryNum).toBe(0);
-      expect(capturedEvent!.retryReason).toBe("");
+      expect(capturedEvent?.retryNum).toBe(0);
+      expect(capturedEvent?.retryReason).toBe("");
     });
   });
 
@@ -935,7 +935,7 @@ describe("createHandler", () => {
 
     mockApp = {
       init: vi.fn().mockResolvedValue(undefined),
-      processEvent: vi.fn().mockImplementation((event: ReceiverEvent) => {
+      processEvent: vi.fn().mockImplementation(async (event: ReceiverEvent) => {
         setTimeout(() => event.ack({ handled: true }), 10);
       }),
     } as unknown as App;
@@ -966,7 +966,7 @@ describe("createHandler", () => {
   });
 
   it("should handle app initialization errors", async () => {
-    (mockApp.init as any).mockRejectedValue(new Error("Init failed"));
+    vi.mocked(mockApp.init).mockRejectedValue(new Error("Init failed"));
 
     const mockReceiver = new VercelReceiver({
       signingSecret: "test-secret",
@@ -1082,9 +1082,11 @@ describe("createHandler", () => {
       attachments: [{ text: "Processed" }],
     };
 
-    (mockApp.processEvent as any).mockImplementation((event: ReceiverEvent) => {
-      setTimeout(() => event.ack(expectedResponse), 10);
-    });
+    vi.mocked(mockApp.processEvent).mockImplementation(
+      async (event: ReceiverEvent) => {
+        setTimeout(async () => await event.ack(expectedResponse), 10);
+      },
+    );
 
     const response = await handler(request);
     const body = await response.json();
