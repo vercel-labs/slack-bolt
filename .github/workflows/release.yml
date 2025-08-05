@@ -17,10 +17,6 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,8 +39,8 @@ jobs:
         with:
           publish: pnpm release
           version: pnpm version-packages
-          commit: 'chore: update package versions'
-          title: 'chore: update package versions'
+          commit: "chore: update package versions"
+          title: "chore: update package versions"
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PULL_REQUESTS }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN_ELEVATED }}
