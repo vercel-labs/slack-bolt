@@ -12,7 +12,8 @@
       "tsup.config.ts",
       "tsconfig.json",
       "biome.json",
-      "vitest.config.ts"
+      "vitest.config.ts",
+      ".github/**/*"
     ]
   },
   "formatter": {

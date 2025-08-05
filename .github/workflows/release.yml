@@ -43,8 +43,8 @@ jobs:
         with:
           publish: pnpm release
           version: pnpm version-packages
-          commit: "chore: update package versions"
-          title: "chore: update package versions"
+          commit: 'chore: update package versions'
+          title: 'chore: update package versions'
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PULL_REQUESTS }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN_ELEVATED }}

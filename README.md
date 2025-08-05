@@ -10,7 +10,7 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 ## Installation
 
 ```bash
-pnpm add @vercel/slack-bolt
+pnpm add @vercel/slack-bolt @slack/bolt
 ```
 
 ## Quick Start
