@@ -99,7 +99,7 @@ export class VercelReceiver implements Receiver {
   private readonly logger: Logger;
   private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly customResponseHandler?: (
-    event: ReceiverEvent,
+    event: ReceiverEvent
   ) => Promise<Response>;
   private app?: App;
 
@@ -132,7 +132,7 @@ export class VercelReceiver implements Receiver {
   }: VercelReceiverOptions = {}) {
     if (!signingSecret) {
       throw new VercelReceiverError(
-        "SLACK_SIGNING_SECRET is required for VercelReceiver",
+        "SLACK_SIGNING_SECRET is required for VercelReceiver"
       );
     }
 
@@ -140,7 +140,7 @@ export class VercelReceiver implements Receiver {
     this.signatureVerification = signatureVerification;
     this.logger = this.createScopedLogger(
       logger ?? new ConsoleLogger(),
-      logLevel,
+      logLevel
     );
     this.customPropertiesExtractor = customPropertiesExtractor;
     this.customResponseHandler = customResponseHandler;
@@ -213,7 +213,7 @@ export class VercelReceiver implements Receiver {
 
   private async parseRequestBody(
     req: Request,
-    rawBody: string,
+    rawBody: string
   ): Promise<StringIndexed> {
     const contentType = req.headers.get("content-type");
 
@@ -240,14 +240,16 @@ export class VercelReceiver implements Receiver {
       return JSON.parse(rawBody);
     } catch (e) {
       throw new RequestParsingError(
-        `Failed to parse body as JSON data for content-type: ${contentType}. Error: ${e instanceof Error ? e.message : String(e)}`,
+        `Failed to parse body as JSON data for content-type: ${contentType}. Error: ${
+          e instanceof Error ? e.message : String(e)
+        }`
       );
     }
   }
 
   private async handleSlackEvent(
     req: Request,
-    body: StringIndexed,
+    body: StringIndexed
   ): Promise<Response> {
     if (!this.app) {
       throw new VercelReceiverError("App not initialized", 500);
@@ -309,7 +311,7 @@ export class VercelReceiver implements Receiver {
       } catch (error) {
         this.logger.error("Error in acknowledgment handler", error);
         responseRejecter(
-          error instanceof Error ? error : new Error(String(error)),
+          error instanceof Error ? error : new Error(String(error))
         );
       }
     };
@@ -334,7 +336,7 @@ export class VercelReceiver implements Receiver {
 
   private async verifySlackRequest(
     req: Request,
-    rawBody: string,
+    rawBody: string
   ): Promise<void> {
     const timestamp = req.headers.get(SLACK_TIMESTAMP_HEADER);
     const signature = req.headers.get(SLACK_SIGNATURE_HEADER);
@@ -345,7 +347,7 @@ export class VercelReceiver implements Receiver {
 
     if (!signature) {
       throw new SignatureVerificationError(
-        "Missing required signature headers",
+        "Missing required signature headers"
       );
     }
 
@@ -362,9 +364,7 @@ export class VercelReceiver implements Receiver {
     } catch (error) {
       this.logger.error("Slack request verification failed", error);
       throw new SignatureVerificationError(
-        error instanceof Error
-          ? error.message
-          : "Signature verification failed",
+        error instanceof Error ? error.message : "Signature verification failed"
       );
     }
   }
@@ -408,7 +408,7 @@ export class VercelReceiver implements Receiver {
           error: error.message,
           type: error.name,
         }),
-        { status: error.statusCode },
+        { status: error.statusCode }
       );
     }
 
@@ -418,7 +418,7 @@ export class VercelReceiver implements Receiver {
         error: "Internal server error",
         type: "UnexpectedError",
       }),
-      { status: 500 },
+      { status: 500 }
     );
   }
 
@@ -449,7 +449,7 @@ export class VercelReceiver implements Receiver {
  * @example
  * ```typescript
  * // api/events.ts
- * import { createHandler } from '@vercel/bolt';
+ * import { createHandler } from '@vercel/slack-bolt';
  * import { app, receiver } from '../app';
  *
  * const handler = createHandler(app, receiver);
@@ -464,7 +464,7 @@ export class VercelReceiver implements Receiver {
  */
 export function createHandler(
   app: App,
-  receiver: VercelReceiver,
+  receiver: VercelReceiver
 ): VercelHandler {
   let initPromise: Promise<void> | null = null;
 
@@ -486,7 +486,7 @@ export function createHandler(
           error: "Internal Server Error",
           type: "HandlerError",
         }),
-        { status: 500 },
+        { status: 500 }
       );
     }
   };

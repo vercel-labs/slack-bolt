@@ -66,8 +66,8 @@ root/
 ```typescript
 // api/events.ts
 
-import { createHandler } from '@vercel/bolt';
-import { app, receiver } from '../app';
+import { createHandler } from "@vercel/slack-bolt";
+import { app, receiver } from "../app";
 
 const handler = createHandler(app, receiver);
 
@@ -75,6 +75,7 @@ export const POST = async (req: Request) => {
   return handler(req);
 };
 ```
+
 > **Note:**  
 > The `handler` returned by `createHandler` works with standard `WebRequest` objects.  
 > You can use it directly in your Vercel API routes or with any framework that provides compatible request objects.
