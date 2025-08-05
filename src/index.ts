@@ -92,6 +92,7 @@ const SLACK_SIGNATURE_HEADER = "x-slack-signature";
  *   signingSecret: process.env.SLACK_SIGNING_SECRET,
  * });
  * ```
+ *
  */
 export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
