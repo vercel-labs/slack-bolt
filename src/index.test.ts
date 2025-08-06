@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VercelReceiver, createHandler } from "./index";
 import type { App, ReceiverEvent } from "@slack/bolt";
+import { ReceiverMultipleAckError } from "@slack/bolt";
 import { ConsoleLogger, LogLevel } from "@slack/logger";
 
 // Mock @slack/bolt
@@ -14,6 +15,7 @@ vi.mock("@slack/bolt", () => ({
     setLevel: vi.fn(),
     getLevel: vi.fn(),
   })),
+  ReceiverMultipleAckError: vi.fn(),
   LogLevel: {
     DEBUG: "debug",
     INFO: "info",
@@ -72,9 +74,6 @@ describe("VercelReceiver", () => {
       const customPropertiesExtractor = vi
         .fn()
         .mockReturnValue({ custom: "property" });
-      const customResponseHandler = vi
-        .fn()
-        .mockResolvedValue(new Response("custom"));
 
       const customReceiver = new VercelReceiver({
         signingSecret: "test-secret",
@@ -82,7 +81,6 @@ describe("VercelReceiver", () => {
         logger: customLogger,
         logLevel: LogLevel.DEBUG,
         customPropertiesExtractor,
-        customResponseHandler,
       });
 
       expect(customReceiver).toBeDefined();
@@ -387,10 +385,10 @@ describe("VercelReceiver", () => {
       );
 
       const response = await handler(request);
-      const body = await response.json();
 
       expect(response.status).toBe(200);
-      expect(body).toEqual(null);
+      const body = await response.text();
+      expect(body).toBe("");
     });
 
     it("should timeout when event is not acknowledged", async () => {
@@ -432,9 +430,9 @@ describe("VercelReceiver", () => {
           setTimeout(async () => {
             await event.ack({ first: true });
 
-            // Second ack should throw
+            // Second ack should throw ReceiverMultipleAckError
             await expect(event.ack({ second: true })).rejects.toThrow(
-              "Cannot acknowledge an event multiple times",
+              ReceiverMultipleAckError,
             );
           }, 10);
         });
@@ -690,89 +688,6 @@ describe("VercelReceiver", () => {
     });
   });
 
-  describe("custom response handler", () => {
-    it("should use custom response handler when provided", async () => {
-      const customResponse = new Response("Custom response content", {
-        status: 201,
-        headers: { "X-Custom-Header": "test-value" },
-      });
-      const customResponseHandler = vi.fn().mockResolvedValue(customResponse);
-
-      const customReceiver = new VercelReceiver({
-        signingSecret: mockSigningSecret,
-        signatureVerification: false,
-        customResponseHandler,
-      });
-
-      customReceiver.init(mockApp);
-
-      const eventBody = JSON.stringify({ type: "event_callback" });
-      const request = new Request("http://localhost", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: eventBody,
-      });
-
-      const handler = await customReceiver.start();
-
-      vi.mocked(mockApp.processEvent).mockImplementation(
-        async (event: ReceiverEvent) => {
-          setTimeout(() => event.ack({ processed: true }), 10);
-        },
-      );
-
-      const response = await handler(request);
-
-      expect(response.status).toBe(201);
-      expect(response.headers.get("X-Custom-Header")).toBe("test-value");
-      expect(await response.text()).toBe("Custom response content");
-      expect(customResponseHandler).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: JSON.parse(eventBody),
-          ack: expect.any(Function),
-          customProperties: expect.any(Object),
-          retryNum: expect.any(Number),
-          retryReason: expect.any(String),
-        }),
-      );
-    });
-
-    it("should handle custom response handler errors", async () => {
-      const customResponseHandler = vi
-        .fn()
-        .mockRejectedValue(new Error("Handler failed"));
-
-      const customReceiver = new VercelReceiver({
-        signingSecret: mockSigningSecret,
-        signatureVerification: false,
-        customResponseHandler,
-      });
-
-      customReceiver.init(mockApp);
-
-      const eventBody = JSON.stringify({ type: "event_callback" });
-      const request = new Request("http://localhost", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: eventBody,
-      });
-
-      const handler = await customReceiver.start();
-
-      vi.mocked(mockApp.processEvent).mockImplementation(
-        async (event: ReceiverEvent) => {
-          setTimeout(() => event.ack(), 10);
-        },
-      );
-
-      const response = await handler(request);
-
-      expect(response.status).toBe(500);
-      const body = await response.json();
-      expect(body.type).toBe("UnexpectedError");
-    });
-  });
-
   describe("retry headers handling", () => {
     it("should capture retry headers in receiver event", async () => {
       const eventBody = JSON.stringify({ type: "event_callback" });
@@ -846,7 +761,7 @@ describe("VercelReceiver", () => {
 
       expect(response.status).toBe(500);
       const body = await response.json();
-      expect(body.error).toBe("Slack app not initialized");
+      expect(body.error).toBe("App not initialized");
       expect(body.type).toBe("VercelReceiverError");
     });
 
