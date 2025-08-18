@@ -559,7 +559,7 @@ describe("VercelReceiver", () => {
       expect(body.error).toBe("Missing required signature headers");
     });
 
-    it("should handle signature verification failure", async () => {
+    it("should handle signature verification failure with generic error", async () => {
       const { verifySlackRequest } = await import("@slack/bolt");
       vi.mocked(verifySlackRequest).mockImplementation(() => {
         throw new Error("Invalid signature");
@@ -579,10 +579,37 @@ describe("VercelReceiver", () => {
       const handler = await receiver.start();
       const response = await handler(request);
 
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.type).toBe("VercelReceiverError");
+      expect(body.error).toBe("Request verification failed");
+    });
+
+    it("should handle signature verification failure with SignatureVerificationError", async () => {
+      const { verifySlackRequest } = await import("@slack/bolt");
+      const { SignatureVerificationError } = await import("./errors");
+      vi.mocked(verifySlackRequest).mockImplementation(() => {
+        throw new SignatureVerificationError("Signature mismatch detected");
+      });
+
+      const eventBody = JSON.stringify({ type: "event_callback" });
+      const request = new Request("http://localhost", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-slack-signature": "v0=invalid-signature",
+          "x-slack-request-timestamp": "1609459200",
+        },
+        body: eventBody,
+      });
+
+      const handler = await receiver.start();
+      const response = await handler(request);
+
       expect(response.status).toBe(401);
       const body = await response.json();
       expect(body.type).toBe("SignatureVerificationError");
-      expect(body.error).toBe("Invalid signature");
+      expect(body.error).toBe("Signature mismatch detected");
     });
 
     it("should bypass verification when disabled", async () => {
