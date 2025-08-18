@@ -340,12 +340,11 @@ export class VercelReceiver implements Receiver {
         logger: this.logger,
       });
     } catch (error) {
-      this.logger.error("Slack request verification failed", error);
-      throw new SignatureVerificationError(
-        error instanceof Error
-          ? error.message
-          : "Signature verification failed",
-      );
+      this.logger.error("Slack request verification failed");
+      if (error instanceof SignatureVerificationError) {
+        throw error;
+      }
+      throw new VercelReceiverError("Request verification failed");
     }
   }
 
