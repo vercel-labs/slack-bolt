@@ -1,12 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VercelReceiver, createHandler } from "./index";
 import type { App, ReceiverEvent } from "@slack/bolt";
-import { ReceiverMultipleAckError } from "@slack/bolt";
-import { ConsoleLogger, LogLevel } from "@slack/logger";
+// import { ConsoleLogger, LogLevel } from "@slack/logger";
 
-// Mock @slack/bolt
-vi.mock("@slack/bolt", () => ({
-  verifySlackRequest: vi.fn(),
+vi.mock("@slack/logger", () => ({
   ConsoleLogger: vi.fn(() => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -14,8 +11,26 @@ vi.mock("@slack/bolt", () => ({
     error: vi.fn(),
     setLevel: vi.fn(),
     getLevel: vi.fn(),
+    setName: vi.fn(),
   })),
-  ReceiverMultipleAckError: vi.fn(),
+  LogLevel: {
+    DEBUG: "debug",
+    INFO: "info",
+    WARN: "warn",
+    ERROR: "error",
+  },
+}));
+// Mock @slack/bolt
+vi.mock("@slack/bolt", () => ({
+  verifySlackRequest: vi.fn(),
+  ReceiverMultipleAckError: class {
+    name = "ReceiverMultipleAckError";
+    constructor(public message?: string) {}
+  },
+  ReceiverAuthenticityError: class {
+    name = "ReceiverAuthenticityError";
+    constructor(public message: string) {}
+  },
   LogLevel: {
     DEBUG: "debug",
     INFO: "info",
@@ -45,7 +60,7 @@ describe("VercelReceiver", () => {
     receiver = new VercelReceiver({
       signingSecret: mockSigningSecret,
       signatureVerification: false, // Disable for most tests
-      logLevel: LogLevel.ERROR, // Reduce noise in tests
+      ackTimeoutMs: 50, // Fast timeout for tests
     });
 
     receiver.init(mockApp);
@@ -63,14 +78,30 @@ describe("VercelReceiver", () => {
     });
 
     it("should initialize with environment variable", () => {
+      const originalValue = process.env.SLACK_SIGNING_SECRET;
       process.env.SLACK_SIGNING_SECRET = "env-secret";
+      
       const receiver = new VercelReceiver();
       expect(receiver).toBeDefined();
-      delete process.env.SLACK_SIGNING_SECRET;
+      
+      // Restore original value
+      if (originalValue === undefined) {
+        delete process.env.SLACK_SIGNING_SECRET;
+      } else {
+        process.env.SLACK_SIGNING_SECRET = originalValue;
+      }
     });
 
     it("should initialize with all custom options", () => {
-      const customLogger = new ConsoleLogger();
+      const customLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        setLevel: vi.fn(),
+        getLevel: vi.fn(),
+        setName: vi.fn(),
+      };
       const customPropertiesExtractor = vi
         .fn()
         .mockReturnValue({ custom: "property" });
@@ -79,7 +110,6 @@ describe("VercelReceiver", () => {
         signingSecret: "test-secret",
         signatureVerification: false,
         logger: customLogger,
-        logLevel: LogLevel.DEBUG,
         customPropertiesExtractor,
       });
 
@@ -431,9 +461,12 @@ describe("VercelReceiver", () => {
             await event.ack({ first: true });
 
             // Second ack should throw ReceiverMultipleAckError
-            await expect(event.ack({ second: true })).rejects.toThrow(
-              ReceiverMultipleAckError,
-            );
+            try {
+              await event.ack({ second: true });
+              throw new Error("Expected ReceiverMultipleAckError to be thrown");
+            } catch (error) {
+              expect(error.name).toBe("ReceiverMultipleAckError");
+            }
           }, 10);
         });
 
@@ -535,8 +568,10 @@ describe("VercelReceiver", () => {
 
       expect(response.status).toBe(401);
       const body = await response.json();
-      expect(body.type).toBe("SignatureVerificationError");
-      expect(body.error).toBe("Missing required timestamp header");
+      expect(body.type).toBe("ReceiverAuthenticityError");
+      expect(body.error).toBe(
+        "Missing required header: x-slack-request-timestamp",
+      );
     });
 
     it("should handle missing signature header", async () => {
@@ -555,8 +590,8 @@ describe("VercelReceiver", () => {
 
       expect(response.status).toBe(401);
       const body = await response.json();
-      expect(body.type).toBe("SignatureVerificationError");
-      expect(body.error).toBe("Missing required signature headers");
+      expect(body.type).toBe("ReceiverAuthenticityError");
+      expect(body.error).toBe("Missing required header: x-slack-signature");
     });
 
     it("should handle signature verification failure with generic error", async () => {
@@ -579,17 +614,16 @@ describe("VercelReceiver", () => {
       const handler = await receiver.start();
       const response = await handler(request);
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      expect(body.type).toBe("VercelReceiverError");
-      expect(body.error).toBe("Request verification failed");
+      expect(body.type).toBe("ReceiverAuthenticityError");
+      expect(body.error).toBe("Invalid signature");
     });
 
-    it("should handle signature verification failure with SignatureVerificationError", async () => {
+    it("should handle signature verification failure with custom error", async () => {
       const { verifySlackRequest } = await import("@slack/bolt");
-      const { SignatureVerificationError } = await import("./errors");
       vi.mocked(verifySlackRequest).mockImplementation(() => {
-        throw new SignatureVerificationError("Signature mismatch detected");
+        throw new Error("Signature mismatch detected");
       });
 
       const eventBody = JSON.stringify({ type: "event_callback" });
@@ -608,7 +642,7 @@ describe("VercelReceiver", () => {
 
       expect(response.status).toBe(401);
       const body = await response.json();
-      expect(body.type).toBe("SignatureVerificationError");
+      expect(body.type).toBe("ReceiverAuthenticityError");
       expect(body.error).toBe("Signature mismatch detected");
     });
 
