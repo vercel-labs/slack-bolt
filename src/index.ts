@@ -189,7 +189,7 @@ export class VercelReceiver implements Receiver {
         const rawBody = await req.text();
 
         if (this.signatureVerification) {
-          await this.verifySlackRequest(req, rawBody);
+          this.verifyRequest(req, rawBody);
         }
 
         const body = await this.parseRequestBody(req, rawBody);
@@ -324,10 +324,7 @@ export class VercelReceiver implements Receiver {
     }
   }
 
-  private async verifySlackRequest(
-    req: Request,
-    rawBody: string,
-  ): Promise<void> {
+  private verifyRequest(req: Request, body: string): void {
     const timestamp = req.headers.get(SLACK_TIMESTAMP_HEADER);
     const signature = req.headers.get(SLACK_SIGNATURE_HEADER);
 
@@ -343,26 +340,15 @@ export class VercelReceiver implements Receiver {
       );
     }
 
-    try {
-      verifySlackRequest({
-        signingSecret: this.signingSecret,
-        body: rawBody,
-        headers: {
-          "x-slack-signature": signature,
-          "x-slack-request-timestamp": Number.parseInt(timestamp, 10),
-        },
-        logger: this.logger,
-      });
-    } catch (error) {
-      if (error instanceof ReceiverAuthenticityError) {
-        throw error;
-      }
-      const message =
-        error instanceof Error
-          ? error.message
-          : ERROR_MESSAGES.REQUEST_VERIFICATION_FAILED;
-      throw new ReceiverAuthenticityError(message);
-    }
+    verifySlackRequest({
+      signingSecret: this.signingSecret,
+      body,
+      headers: {
+        "x-slack-signature": signature,
+        "x-slack-request-timestamp": Number.parseInt(timestamp, 10),
+      },
+      logger: this.logger,
+    });
   }
 
   private createSlackReceiverEvent({
