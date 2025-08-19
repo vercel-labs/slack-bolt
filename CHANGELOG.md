@@ -1,5 +1,12 @@
 # @vercel/slack-bolt
 
+## 0.1.3
+
+### Patch Changes
+
+- 34bcf47: Remove double error logging when SignatureVerificationError is thrown.
+- bf81350: Add coded errors that follow the Bolt pattern
+
 ## 0.1.2
 
 ### Patch Changes
