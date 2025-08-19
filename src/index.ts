@@ -69,7 +69,7 @@ export interface VercelReceiverOptions {
   ackTimeoutMs?: number;
 }
 
-const SCOPE = ["@vercel/slack-bolt"];
+const LOG_PREFIX = "[@vercel/slack-bolt]";
 const ACK_TIMEOUT_MS = 3001;
 const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
 const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
@@ -404,15 +404,14 @@ export class VercelReceiver implements Receiver {
   }
 
   private createScopedLogger(logger: Logger, logLevel: LogLevel): Logger {
-    const prefix = SCOPE.map((s) => `[${s}]`).join(" ");
     logger.setLevel(logLevel);
 
     return {
       ...logger,
-      error: (...args) => logger.error?.(prefix, ...args),
-      warn: (...args) => logger.warn?.(prefix, ...args),
-      info: (...args) => logger.info?.(prefix, ...args),
-      debug: (...args) => logger.debug?.(prefix, ...args),
+      error: (...args) => logger.error?.(LOG_PREFIX, ...args),
+      warn: (...args) => logger.warn?.(LOG_PREFIX, ...args),
+      info: (...args) => logger.info?.(LOG_PREFIX, ...args),
+      debug: (...args) => logger.debug?.(LOG_PREFIX, ...args),
       setLevel: logger.setLevel,
       getLevel: logger.getLevel,
     };
