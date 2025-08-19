@@ -34,7 +34,8 @@
     "changeset": "changeset",
     "release": "pnpm build && changeset publish",
     "lint": "biome check .",
-    "lint:fix": "biome check . --write"
+    "lint:fix": "biome check . --write",
+    "prepare": "husky"
   },
   "keywords": [
     "vercel",
@@ -51,6 +52,7 @@
     "@biomejs/biome": "2.2.0",
     "@changesets/cli": "^2.29.6",
     "@types/node": "^24.3.0",
+    "husky": "^9.1.7",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
