@@ -1,24 +1,23 @@
 import {
-  VercelReceiverError,
-  RequestParsingError,
-  ERROR_MESSAGES,
-  getStatusCode,
-  getErrorMessage,
-  getErrorType,
-} from "./errors";
-import { waitUntil } from "@vercel/functions";
-
-import {
-  ReceiverAuthenticityError,
-  ReceiverMultipleAckError,
-  verifySlackRequest,
   type AckFn,
   type App,
   type Receiver,
+  ReceiverAuthenticityError,
   type ReceiverEvent,
+  ReceiverMultipleAckError,
   type StringIndexed,
+  verifySlackRequest,
 } from "@slack/bolt";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
+import { waitUntil } from "@vercel/functions";
+import {
+  ERROR_MESSAGES,
+  getErrorMessage,
+  getErrorType,
+  getStatusCode,
+  RequestParsingError,
+  VercelReceiverError,
+} from "./errors";
 
 // Types
 /**
@@ -133,9 +132,7 @@ export class VercelReceiver implements Receiver {
     ackTimeoutMs = ACK_TIMEOUT_MS,
   }: VercelReceiverOptions = {}) {
     if (!signingSecret) {
-      throw new VercelReceiverError(
-        ERROR_MESSAGES.SIGNING_SECRET_REQUIRED,
-      );
+      throw new VercelReceiverError(ERROR_MESSAGES.SIGNING_SECRET_REQUIRED);
     }
 
     this.signingSecret = signingSecret;
@@ -266,7 +263,10 @@ export class VercelReceiver implements Receiver {
     const timeoutId = setTimeout(() => {
       if (!isAcknowledged) {
         this.logger.error(ERROR_MESSAGES.EVENT_NOT_ACKNOWLEDGED);
-        const error = new VercelReceiverError(ERROR_MESSAGES.REQUEST_TIMEOUT, 408);
+        const error = new VercelReceiverError(
+          ERROR_MESSAGES.REQUEST_TIMEOUT,
+          408,
+        );
         responseRejecter(error);
       }
     }, this.ackTimeoutMs);
@@ -358,7 +358,9 @@ export class VercelReceiver implements Receiver {
         throw error;
       }
       const message =
-        error instanceof Error ? error.message : ERROR_MESSAGES.REQUEST_VERIFICATION_FAILED;
+        error instanceof Error
+          ? error.message
+          : ERROR_MESSAGES.REQUEST_VERIFICATION_FAILED;
       throw new ReceiverAuthenticityError(message);
     }
   }

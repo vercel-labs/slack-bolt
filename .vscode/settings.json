@@ -1,0 +1,23 @@
+{
+    // Make Biome the default formatter for common languages
+    "[javascript]": { "editor.defaultFormatter": "biomejs.biome" },
+    "[typescript]": { "editor.defaultFormatter": "biomejs.biome" },
+    "[json]": { "editor.defaultFormatter": "biomejs.biome" },
+    "[jsonc]": { "editor.defaultFormatter": "biomejs.biome" },
+
+    // Format on save
+    "editor.formatOnSave": true,
+  
+    // Fix-on-save & organize imports (Biome-specific code actions)
+    "editor.codeActionsOnSave": {
+      "source.fixAll.biome": "explicit",
+      "source.organizeImports.biome": "explicit"
+    },
+  
+    // (Optional) Only activate if a biome.json exists in the workspace
+    "biome.requireConfiguration": false,
+  
+    // (Optional) Force-enable the extension for this workspace
+    "biome.enabled": true
+  }
+  

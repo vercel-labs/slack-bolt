@@ -54,24 +54,24 @@ export function getStatusCode(error: unknown): number {
   if (error instanceof VercelReceiverError) {
     return error.statusCode;
   }
-  
+
   // External error types from @slack/bolt
-  if (error && typeof error === 'object' && 'name' in error) {
+  if (error && typeof error === "object" && "name" in error) {
     const errorName = String(error.name);
     switch (errorName) {
-      case 'ReceiverAuthenticityError':
+      case "ReceiverAuthenticityError":
         return 401;
-      case 'ReceiverMultipleAckError':
+      case "ReceiverMultipleAckError":
         return 500;
-      case 'RequestParsingError':
+      case "RequestParsingError":
         return 400;
-      case 'SignatureVerificationError':
+      case "SignatureVerificationError":
         return 400;
       default:
         return 500;
     }
   }
-  
+
   return 500;
 }
 
@@ -81,7 +81,7 @@ export function getStatusCode(error: unknown): number {
  * @returns Error message string
  */
 export function getErrorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'message' in error) {
+  if (error && typeof error === "object" && "message" in error) {
     return String(error.message);
   }
   return ERROR_MESSAGES.INTERNAL_SERVER_ERROR;
@@ -89,15 +89,15 @@ export function getErrorMessage(error: unknown): string {
 
 /**
  * Gets the error type for response.
- * @param error The error to get type for  
+ * @param error The error to get type for
  * @returns Error type string
  */
 export function getErrorType(error: unknown): string {
-  if (error && typeof error === 'object' && 'name' in error) {
+  if (error && typeof error === "object" && "name" in error) {
     const errorName = String(error.name);
     // Use "UnexpectedError" for generic Error instances, otherwise use the actual name
-    return errorName === 'Error' 
-      ? ERROR_MESSAGES.TYPES.UNEXPECTED_ERROR 
+    return errorName === "Error"
+      ? ERROR_MESSAGES.TYPES.UNEXPECTED_ERROR
       : errorName;
   }
   return ERROR_MESSAGES.TYPES.UNEXPECTED_ERROR;

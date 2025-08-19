@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { VercelReceiver, createHandler } from "./index";
 import type { App, ReceiverEvent } from "@slack/bolt";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHandler, VercelReceiver } from "./index";
+
 // import { ConsoleLogger, LogLevel } from "@slack/logger";
 
 vi.mock("@slack/logger", () => ({
@@ -80,10 +81,10 @@ describe("VercelReceiver", () => {
     it("should initialize with environment variable", () => {
       const originalValue = process.env.SLACK_SIGNING_SECRET;
       process.env.SLACK_SIGNING_SECRET = "env-secret";
-      
+
       const receiver = new VercelReceiver();
       expect(receiver).toBeDefined();
-      
+
       // Restore original value
       if (originalValue === undefined) {
         delete process.env.SLACK_SIGNING_SECRET;
