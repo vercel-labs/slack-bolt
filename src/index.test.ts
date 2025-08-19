@@ -595,10 +595,12 @@ describe("VercelReceiver", () => {
       expect(body.error).toBe("Missing required header: x-slack-signature");
     });
 
-    it("should handle signature verification failure with generic error", async () => {
-      const { verifySlackRequest } = await import("@slack/bolt");
+    it("should handle signature verification failure with ReceiverAuthenticityError", async () => {
+      const { verifySlackRequest, ReceiverAuthenticityError } = await import(
+        "@slack/bolt"
+      );
       vi.mocked(verifySlackRequest).mockImplementation(() => {
-        throw new Error("Invalid signature");
+        throw new ReceiverAuthenticityError("Invalid signature");
       });
 
       const eventBody = JSON.stringify({ type: "event_callback" });
@@ -621,10 +623,12 @@ describe("VercelReceiver", () => {
       expect(body.error).toBe("Invalid signature");
     });
 
-    it("should handle signature verification failure with custom error", async () => {
-      const { verifySlackRequest } = await import("@slack/bolt");
+    it("should handle signature verification failure with custom ReceiverAuthenticityError", async () => {
+      const { verifySlackRequest, ReceiverAuthenticityError } = await import(
+        "@slack/bolt"
+      );
       vi.mocked(verifySlackRequest).mockImplementation(() => {
-        throw new Error("Signature mismatch detected");
+        throw new ReceiverAuthenticityError("Signature mismatch detected");
       });
 
       const eventBody = JSON.stringify({ type: "event_callback" });
