@@ -315,7 +315,11 @@ export class VercelReceiver implements Receiver {
 
     // Process event in background using waitUntil from Vercel Functions
     // https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil
-    waitUntil(this.app.processEvent(event));
+    waitUntil(
+      this.app.processEvent(event).catch((error) => {
+        return this.handleError(error);
+      }),
+    );
 
     try {
       return await responsePromise;
@@ -340,15 +344,23 @@ export class VercelReceiver implements Receiver {
       );
     }
 
-    verifySlackRequest({
-      signingSecret: this.signingSecret,
-      body,
-      headers: {
-        "x-slack-signature": signature,
-        "x-slack-request-timestamp": Number.parseInt(timestamp, 10),
-      },
-      logger: this.logger,
-    });
+    try {
+      verifySlackRequest({
+        signingSecret: this.signingSecret,
+        body,
+        headers: {
+          "x-slack-signature": signature,
+          "x-slack-request-timestamp": Number.parseInt(timestamp, 10),
+        },
+        logger: this.logger,
+      });
+    } catch (error) {
+      throw new ReceiverAuthenticityError(
+        error instanceof Error
+          ? error.message
+          : "Failed to verify request signature",
+      );
+    }
   }
 
   private createSlackReceiverEvent({
@@ -379,13 +391,21 @@ export class VercelReceiver implements Receiver {
     };
   }
 
-  private handleError(error: unknown): Response {
+  public handleError(error: unknown): Response {
+    const errorMessage = getErrorMessage(error);
+    const errorType = getErrorType(error);
+    const errorStatusCode = getStatusCode(error);
+
+    this.logger.error(error);
     return new Response(
       JSON.stringify({
-        error: getErrorMessage(error),
-        type: getErrorType(error),
+        error: errorMessage,
+        type: errorType,
       }),
-      { status: getStatusCode(error) },
+      {
+        status: errorStatusCode,
+        headers: { "content-type": "application/json" },
+      },
     );
   }
 
@@ -452,7 +472,7 @@ export function createHandler(
           error: ERROR_MESSAGES.INTERNAL_SERVER_ERROR_HANDLER,
           type: ERROR_MESSAGES.TYPES.HANDLER_ERROR,
         }),
-        { status: 500 },
+        { status: 500, headers: { "content-type": "application/json" } },
       );
     }
   };
