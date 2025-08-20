@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 0.1.5
+
+### Patch Changes
+
+- 1660169: Fix URLs in our package.json for repository and bugs.
+
 ## 0.1.4
 
 ### Patch Changes
