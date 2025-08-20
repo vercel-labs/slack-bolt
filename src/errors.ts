@@ -56,8 +56,9 @@ export function getStatusCode(error: unknown): number {
   }
 
   // External error types from @slack/bolt
-  if (error && typeof error === "object" && "name" in error) {
-    const errorName = String(error.name);
+  if (error && typeof error === "object") {
+    const errorName =
+      error.constructor?.name || (error as { name?: string }).name;
     switch (errorName) {
       case "ReceiverAuthenticityError":
         return 401;
@@ -93,8 +94,12 @@ export function getErrorMessage(error: unknown): string {
  * @returns Error type string
  */
 export function getErrorType(error: unknown): string {
-  if (error && typeof error === "object" && "name" in error) {
-    const errorName = String(error.name);
+  if (error && typeof error === "object") {
+    const ctorName = (error as { constructor?: { name?: string } }).constructor
+      ?.name;
+    const nameProp = (error as { name?: string }).name;
+    const errorName =
+      ctorName ?? nameProp ?? ERROR_MESSAGES.TYPES.UNEXPECTED_ERROR;
     // Use "UnexpectedError" for generic Error instances, otherwise use the actual name
     return errorName === "Error"
       ? ERROR_MESSAGES.TYPES.UNEXPECTED_ERROR
