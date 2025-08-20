@@ -17,6 +17,9 @@ importers:
       '@vercel/functions':
         specifier: ^2.2.12
         version: 2.2.12
+      '@vercel/slack-bolt':
+        specifier: ^0.1.4
+        version: 0.1.4(@slack/bolt@4.4.0(@types/express@5.0.3))
     devDependencies:
       '@biomejs/biome':
         specifier: 2.2.0
@@ -564,6 +567,11 @@ packages:
   '@vercel/oidc@2.0.1':
     resolution: {integrity: sha512-p/rFk8vz+AggU0bHXjwtRUyXNxboLvfCjwN0KH5xhBJ5wGS+n/psLJP1c69QPdWIZM4aVVIrTqdjUuDwuJGYzQ==}
     engines: {node: '>= 18'}
+
+  '@vercel/slack-bolt@0.1.4':
+    resolution: {integrity: sha512-V5yzCQK+jvbxVjIRsMY95oNmSYWrj+8ICP3mq+ZbhUM+tAld4gT0GAg296BKZ5BgtSgYMQWGUCEq/AXmpDmHHw==}
+    peerDependencies:
+      '@slack/bolt': ^4.4.0
 
   '@vitest/expect@3.2.4':
     resolution: {integrity: sha512-Io0yyORnB6sikFlt8QW5K7slY4OjqNX9jmJQ02QDda8lyM6B5oNgVWoSoKPac8/kgnCUzuHQKrSLtu/uOqqrig==}
@@ -2128,7 +2136,7 @@ snapshots:
       '@slack/logger': 4.0.0
       '@slack/web-api': 7.9.3
       '@types/jsonwebtoken': 9.0.10
-      '@types/node': 20.19.11
+      '@types/node': 24.3.0
       jsonwebtoken: 9.0.2
       lodash.isstring: 4.0.1
     transitivePeerDependencies:
@@ -2138,7 +2146,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.0
       '@slack/web-api': 7.9.3
-      '@types/node': 20.19.11
+      '@types/node': 24.3.0
       '@types/ws': 8.18.1
       eventemitter3: 5.0.1
       ws: 8.18.3
@@ -2153,7 +2161,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.0
       '@slack/types': 2.15.0
-      '@types/node': 20.19.11
+      '@types/node': 24.3.0
       '@types/retry': 0.12.0
       axios: 1.11.0
       eventemitter3: 5.0.1
@@ -2201,7 +2209,7 @@ snapshots:
   '@types/jsonwebtoken@9.0.10':
     dependencies:
       '@types/ms': 2.1.0
-      '@types/node': 20.19.11
+      '@types/node': 24.3.0
 
   '@types/mime@1.3.5': {}
 
@@ -2236,7 +2244,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 20.19.11
+      '@types/node': 24.3.0
 
   '@vercel/functions@2.2.12':
     dependencies:
@@ -2246,6 +2254,14 @@ snapshots:
     dependencies:
       '@types/ms': 2.1.0
       ms: 2.1.3
+
+  '@vercel/slack-bolt@0.1.4(@slack/bolt@4.4.0(@types/express@5.0.3))':
+    dependencies:
+      '@slack/bolt': 4.4.0(@types/express@5.0.3)
+      '@slack/logger': 4.0.0
+      '@vercel/functions': 2.2.12
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-web-identity'
 
   '@vitest/expect@3.2.4':
     dependencies:

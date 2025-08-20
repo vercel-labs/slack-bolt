@@ -46,7 +46,8 @@
   "license": "MIT",
   "dependencies": {
     "@slack/logger": "^4.0.0",
-    "@vercel/functions": "^2.2.12"
+    "@vercel/functions": "^2.2.12",
+    "@vercel/slack-bolt": "^0.1.4"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.0",

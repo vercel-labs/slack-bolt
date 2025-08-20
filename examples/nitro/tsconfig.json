@@ -1,0 +1,30 @@
+{
+  // https://nitro.build/guide/typescript
+  // "extends": "./.nitro/types/tsconfig.json",
+  "compilerOptions": {
+    // Module resolution
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+
+    // Core checks
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+
+    // Additional safety
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true,
+    "noUnusedLocals": true,
+
+    // Libs & paths
+    "lib": ["ESNext"],
+    "baseUrl": "."
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
