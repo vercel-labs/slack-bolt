@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 0.1.4
+
+### Patch Changes
+
+- 40126ec: Added better testing and error logging. Fixed bug where no error was logged for ReceiverAuthenticityError
+
 ## 0.1.3
 
 ### Patch Changes
