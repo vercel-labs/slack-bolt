@@ -6,6 +6,7 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 - **Easy integration:** Use with your existing Bolt app code
 - **Customizable:** Supports custom response handlers and property extraction
 - **TypeScript ready:** Fully typed for modern development
+- **Node.js Compatible:** The library is compatible with any framework or function using the Node.js Request object.
 
 ## Installation
 
@@ -77,7 +78,7 @@ export const POST = async (req: Request) => {
 ```
 
 > **Note:**  
-> The `handler` returned by `createHandler` works with standard `WebRequest` objects.  
+> The `handler` returned by `createHandler` works with standard Node.js `Request` objects.  
 > You can use it directly in your Vercel API routes or with any framework that provides compatible request objects.
 
 ### 5. Update your Slack App Manifest
@@ -94,19 +95,19 @@ This package is compatible with the Slack CLI and can be used with the `slack ru
 
 ### 1. Update the `start` command in your `./slack/hooks.json` file
 
-```json
+```jsonc
 // ./slack/hooks.json
 {
   "hooks": {
     "get-hooks": "npx -q --no-install -p @slack/cli-hooks slack-cli-get-hooks",
-    "start": "vc dev"
+    "start": "vc dev" // or the start command for your framework
   }
 }
 ```
 
 ### 2. If you'd like to use your local `manifest.json`, update your `config.json` file. (optional)
 
-```json
+```jsonc
 {
   // ./slack/config.json
   "manifest": {
