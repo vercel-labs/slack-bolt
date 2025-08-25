@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.0.0
+
+### Major Changes
+
+- 9a99e5b: Release v1 of the package.
+
 ## 0.1.5
 
 ### Patch Changes
