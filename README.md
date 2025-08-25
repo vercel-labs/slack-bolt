@@ -8,6 +8,11 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 - **TypeScript ready:** Fully typed for modern development
 - **Node.js Compatible:** The library is compatible with any framework or function using the Node.js Request object.
 
+## Examples
+**[Slack App with Nitro](https://vercel.com/templates/backend/slack-bolt-with-nitro)** - A simple stater template built with the Nitro framework.
+
+**[Slack Agent Template](https://vercel.com/templates/ai/slack-agent-template)** - A template used for AI and Agents with the AI SDK.
+
 ## Installation
 
 ```bash
