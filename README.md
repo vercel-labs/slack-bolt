@@ -58,7 +58,7 @@ export { app, receiver };
 
 
 ### createHandler
-The `createHander` function returns a Vercel-compatible request handler that will initialize and start your Bolt app to process the event.
+The `createHandler` function returns a Vercel-compatible request handler that will initialize and start your Bolt app to process the event.
 
 ```typescript
 // An example using Next.js route handlers
