@@ -71,10 +71,12 @@ export const POST = createHandler(app, receiver)
 
 #### Parameters
 
-| Name        | Type        | Description                                              |
-|-------------|-------------|----------------------------------------------------------|
-| `app`       | `App`       | Your Bolt app                                            |
-| `receiver`  | `VercelReceiver`  | The Vercel receiver instance used to process Slack requests. |
+| Name        | Type        | Required | Description                                                          |
+|-------------|-------------|----------|----------------------------------------------------------------------|
+| `app`       | `App`<sup>1</sup>       | Yes       | Your Bolt app                                            |
+| `receiver`  | `VercelReceiver`  | Yes       | The Vercel receiver instance used to process Slack requests.   |
+
+<sup>1</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
 
 ## Examples
 Starter templates: [Next.js](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/nextjs), [Hono](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/hono), [Nitro](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/nitro).
