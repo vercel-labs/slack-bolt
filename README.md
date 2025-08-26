@@ -20,7 +20,7 @@ bun add @vercel/slack-bolt
 ## API Reference
 
 ### VercelReceiver
-The `VercelReceiver` class is responsible for handling and parsing any incoming requests from Slack and then passing it to your Bolt app for event processing.
+The `VercelReceiver` class is responsible for handling and parsing any incoming requests from Slack and then forwarding them to your Bolt app for event processing.
 
 ```typescript
 import { App } from "@slack/bolt";
