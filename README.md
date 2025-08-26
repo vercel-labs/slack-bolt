@@ -23,11 +23,23 @@ bun add @vercel/slack-bolt
 The `VercelReceiver` class is responsible for handling and parsing any incoming requests from Slack and then passing it to your Bolt app for event processing.
 
 ```typescript
-import { VercelReceiver } from "@vercel/slack-bolt"
+import { App } from "@slack/bolt";
+import { VercelReceiver } from "@vercel/slack-bolt";
 
-const receiver = new VercelReceiver({
-  // Parameters
+const receiver = new VercelReceiver();
+
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  receiver,
+  deferInitialization: true,
 });
+
+app.message(/^(hi|hello|hey).*/, async ({ say }) => {
+  await say("Hello, world!");
+});
+
+export { app, receiver };
 ```
 #### Parameters
 
