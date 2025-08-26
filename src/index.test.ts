@@ -1167,4 +1167,41 @@ describe("VercelReceiver", () => {
       expect(app.init).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("falls back to console.error when createHandler init fails", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const receiver = new VercelReceiver({
+      signingSecret: "test-secret",
+      signatureVerification: false,
+    });
+
+    const app = {
+      init: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    } as unknown as App;
+
+    const handler = createHandler(app, receiver);
+
+    const request = new Request("http://localhost", {
+      method: "POST",
+      body: JSON.stringify({ type: "event_callback" }),
+      headers: { "content-type": "application/json" },
+    });
+
+    const response = await handler(request);
+
+    expect(response.status).toBe(500);
+    const json = await response.json();
+    expect(json).toHaveProperty("type", "HandlerError");
+
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const args = consoleSpy.mock.calls[0] ?? [];
+    expect(typeof args[0]).toBe("string");
+    expect(String(args[0])).toContain("createHandler");
+    expect(args[1]).toBeInstanceOf(Error);
+
+    consoleSpy.mockRestore();
+  });
 });
