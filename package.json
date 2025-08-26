@@ -1,6 +1,6 @@
 {
   "name": "@vercel/slack-bolt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A Vercel receiver for building Slack apps with Bolt and deploying them to Vercel",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.0.1
+
+### Patch Changes
+
+- e75d60e: Bug fix for empty error log when `createHandler` fails. Use `console.error` instead of `app.logger.error` which is undefined if `app.init` fails.
+
 ## 1.0.0
 
 ### Major Changes
