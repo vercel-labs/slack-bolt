@@ -3,7 +3,8 @@
 A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [Fluid Compute](https://vercel.com/docs/fluid-compute).
 
 ## Getting Started
-- Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app.
+
+Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app.
 
 
 ## Installation
