@@ -2,4 +2,4 @@
 "@vercel/slack-bolt": patch
 ---
 
-Fix empty error log for when createHandler fails. We incorrectly used the app.logger which was not available if app.init failed.
+Bug fix for empty error log when `createHandler` fails. Use `console.error` instead of `app.logger.error` which is undefined if `app.init` fails.
