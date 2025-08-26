@@ -19,8 +19,8 @@ bun add @vercel/slack-bolt
 
 ## API Reference
 
-### VercelReceiver
-The `VercelReceiver` class is responsible for handling and parsing any incoming requests from Slack and then forwarding them to your Bolt app for event processing.
+### `VercelReceiver`
+Responsible for handling and parsing any incoming requests from Slack and then forwarding them to your Bolt app for event processing.
 
 ```typescript
 import { App } from "@slack/bolt";
@@ -57,8 +57,8 @@ export { app, receiver };
 <sup>2</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
 
 
-### createHandler
-The `createHandler` function returns a Vercel-compatible request handler that will initialize and start your Bolt app to process the event.
+### `createHandler`
+A function that returns a Vercel-compatible request handler that will initialize and start your Bolt app to process the event.
 
 ```typescript
 // An example using Next.js route handlers
