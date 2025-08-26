@@ -465,8 +465,8 @@ export function createHandler(
       const handler = await receiver.start();
       return handler(req);
     } catch (error) {
-      const logger = receiver.getLogger();
-      logger.error(ERROR_MESSAGES.CREATE_HANDLER_ERROR, error);
+      // if app.init fails, we use console.error instead of logger.error because the logger is not available
+      console.error(ERROR_MESSAGES.CREATE_HANDLER_ERROR, error);
       return new Response(
         JSON.stringify({
           error: ERROR_MESSAGES.INTERNAL_SERVER_ERROR_HANDLER,
