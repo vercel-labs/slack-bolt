@@ -46,12 +46,12 @@
   "license": "MIT",
   "dependencies": {
     "@slack/logger": "^4.0.0",
-    "@vercel/functions": "^2.2.12"
+    "@vercel/functions": "^3.1.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.2",
-    "@changesets/cli": "^2.29.6",
-    "@types/node": "^24.3.0",
+    "@changesets/cli": "^2.29.7",
+    "@types/node": "^24.4.0",
     "husky": "^9.1.7",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
