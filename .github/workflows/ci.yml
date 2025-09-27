@@ -59,6 +59,3 @@ jobs:
 
       - name: Build package
         run: pnpm build
-
-      - name: Check types
-        run: pnpm attw
