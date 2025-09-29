@@ -26,8 +26,8 @@
     "url": "https://github.com/vercel-labs/slack-bolt/issues"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "version-packages": "changeset version",
@@ -53,7 +53,7 @@
     "@changesets/cli": "^2.29.7",
     "@types/node": "^24.4.0",
     "husky": "^9.1.7",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.15.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   },
