@@ -35,7 +35,8 @@
     "release": "pnpm build && changeset publish",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "prepare": "husky"
+    "prepare": "husky",
+    "attw": "attw --pack ."
   },
   "keywords": [
     "vercel",
@@ -49,9 +50,10 @@
     "@vercel/functions": "^3.1.0"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
     "@biomejs/biome": "2.2.2",
     "@changesets/cli": "^2.29.7",
-    "@types/node": "^24.4.0",
+    "@types/node": "^20.0.0",
     "husky": "^9.1.7",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
@@ -64,6 +66,9 @@
     "@slack/bolt": {
       "optional": false
     }
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748",
   "publishConfig": {
