@@ -1128,6 +1128,46 @@ describe("VercelReceiver", () => {
         const body = await response.json();
         expect(body.error).toBe("Request timeout");
       });
+
+      it("should clear timeout and acknowledge event when processEvent throws error", async () => {
+        const receiver = new VercelReceiver({
+          signingSecret: "test-secret",
+          signatureVerification: false,
+          ackTimeoutMs: 100, // Long enough to not interfere with the test
+        });
+
+        const testError = new Error("Test processing error");
+        const mockApp = {
+          processEvent: vi.fn(async () => {
+            throw testError;
+          }),
+        } as unknown as App;
+
+        receiver.init(mockApp);
+        const handler = receiver.toHandler();
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify({ type: "event_callback" }),
+          headers: { "content-type": "application/json" },
+        });
+
+        // The response should be returned immediately due to error handling, not timeout
+        const startTime = Date.now();
+        const response = await handler(request);
+        const endTime = Date.now();
+
+        // Verify the response was returned quickly (not after timeout)
+        expect(endTime - startTime).toBeLessThan(50);
+
+        // Verify proper error response
+        expect(response.status).toBe(500);
+        const body = await response.json();
+        expect(body.error).toBe("Test processing error");
+        expect(body.type).toBe("UnexpectedError");
+
+        // Verify processEvent was called
+        expect(mockApp.processEvent).toHaveBeenCalledOnce();
+      });
     });
   });
   describe("integration", () => {

@@ -271,6 +271,18 @@ export class VercelReceiver implements Receiver {
       }
     }, this.ackTimeoutMs);
 
+    // Helper function to ensure cleanup happens
+    const ensureCleanup = (error?: unknown) => {
+      if (!isAcknowledged) {
+        isAcknowledged = true;
+        clearTimeout(timeoutId);
+
+        if (error) {
+          responseResolver(this.handleError(error));
+        }
+      }
+    };
+
     // Create acknowledgment function
     const ackFn: AckFn<StringIndexed> = async (responseBody) => {
       this.logger.debug(`ack() call begins (body: ${responseBody})`);
@@ -317,6 +329,8 @@ export class VercelReceiver implements Receiver {
     // https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil
     waitUntil(
       this.app.processEvent(event).catch((error) => {
+        // Ensure timeout is cleared and event is acknowledged even when processing fails
+        ensureCleanup(error);
         return this.handleError(error);
       }),
     );
@@ -324,6 +338,8 @@ export class VercelReceiver implements Receiver {
     try {
       return await responsePromise;
     } catch (error) {
+      // Ensure cleanup in case of any other errors
+      ensureCleanup(error);
       return this.handleError(error);
     }
   }
