@@ -1,0 +1,14 @@
+{
+  "name": "hono",
+  "type": "module",
+  "dependencies": {
+    "@slack/bolt": "^4.6.0",
+    "@vercel/slack-bolt": "^1.0.2",
+    "hono": "^4.10.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.17",
+    "tsx": "^4.7.1",
+    "typescript": "^5.8.3"
+  }
+}
