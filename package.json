@@ -47,16 +47,16 @@
   "license": "MIT",
   "dependencies": {
     "@slack/logger": "^4.0.0",
-    "@vercel/functions": "^3.1.0"
+    "@vercel/functions": "^3.3.4"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
     "@biomejs/biome": "2.2.2",
-    "@changesets/cli": "^2.29.7",
-    "@types/node": "^20.0.0",
+    "@changesets/cli": "^2.29.8",
+    "@types/node": "^20.19.25",
     "husky": "^9.1.7",
-    "tsup": "^8.5.0",
-    "typescript": "^5.9.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
   "peerDependencies": {
