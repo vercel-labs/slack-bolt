@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.0.3
+
+### Patch Changes
+
+- e7f758f: Bump package dependencies
+
 ## 1.0.2
 
 ### Patch Changes
