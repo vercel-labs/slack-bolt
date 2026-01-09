@@ -1,5 +1,12 @@
 # @vercel/slack-bolt
 
+## 1.0.4
+
+### Patch Changes
+
+- bf45f37: upgrade vitest to v4
+- 17b49fe: bump vercel packages to latest version
+
 ## 1.0.3
 
 ### Patch Changes
