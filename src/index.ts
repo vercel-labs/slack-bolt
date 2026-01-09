@@ -262,6 +262,7 @@ export class VercelReceiver implements Receiver {
     // Slack requires an acknowledgment from your app within 3 seconds
     const timeoutId = setTimeout(() => {
       if (!isAcknowledged) {
+        isAcknowledged = true;
         this.logger.error(ERROR_MESSAGES.EVENT_NOT_ACKNOWLEDGED);
         const error = new VercelReceiverError(
           ERROR_MESSAGES.REQUEST_TIMEOUT,
