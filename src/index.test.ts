@@ -5,14 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHandler, VercelReceiver } from "./index";
 
 vi.mock("@slack/logger", () => ({
-  ConsoleLogger: vi.fn(() => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    setLevel: vi.fn(),
-    getLevel: vi.fn(),
-  })),
+  // biome-ignore lint/complexity/useArrowFunction: we're mocking the ConsoleLogger
+  ConsoleLogger: vi.fn(function () {
+    return {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      setLevel: vi.fn(),
+      getLevel: vi.fn(),
+    };
+  }),
   LogLevel: {
     ERROR: 0,
     WARN: 1,
