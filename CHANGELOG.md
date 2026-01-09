@@ -1,5 +1,15 @@
 # @vercel/slack-bolt
 
+## 1.1.0
+
+### Minor Changes
+
+- 3f992a0: Fix late ack() calls after timeout. Previously, if `ack()` was called after the 3-second timeout had already fired, it would silently succeed instead of throwing an error. Now it properly throws `ReceiverMultipleAckError`, making it clear to developers that their acknowledgment was too late.
+
+### Patch Changes
+
+- c098020: Fix init retry after transient failure. Previously, if `app.init()` failed, the rejected promise was cached and all subsequent requests would fail until a cold start. Now the handler resets and retries initialization on the next request, allowing recovery from transient failures like network blips.
+
 ## 1.0.4
 
 ### Patch Changes
