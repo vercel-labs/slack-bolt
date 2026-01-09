@@ -1207,4 +1207,52 @@ describe("VercelReceiver", () => {
 
     consoleSpy.mockRestore();
   });
+
+  it("should recover after transient init failure", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const receiver = new VercelReceiver({
+      signingSecret: "test-secret",
+      signatureVerification: false,
+    });
+
+    let initCallCount = 0;
+    const app = {
+      init: vi.fn(async () => {
+        initCallCount++;
+        if (initCallCount === 1) {
+          throw new Error("transient failure");
+        }
+        // Second call succeeds
+      }),
+      processEvent: vi.fn(async (event) => {
+        await event.ack({ ok: true });
+      }),
+    } as unknown as App;
+
+    const handler = createHandler(app, receiver);
+
+    // First request - init fails
+    const request1 = new Request("http://localhost", {
+      method: "POST",
+      body: JSON.stringify({ type: "event_callback" }),
+      headers: { "content-type": "application/json" },
+    });
+    const response1 = await handler(request1);
+    expect(response1.status).toBe(500);
+
+    // Second request - should retry init and succeed
+    const request2 = new Request("http://localhost", {
+      method: "POST",
+      body: JSON.stringify({ type: "event_callback" }),
+      headers: { "content-type": "application/json" },
+    });
+    const response2 = await handler(request2);
+
+    // This should succeed because init should be retried
+    expect(response2.status).toBe(200);
+    expect(app.init).toHaveBeenCalledTimes(2);
+
+    consoleSpy.mockRestore();
+  });
 });
