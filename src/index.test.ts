@@ -1,4 +1,4 @@
-import type { App } from "@slack/bolt";
+import { type App, ReceiverMultipleAckError } from "@slack/bolt";
 import { LogLevel } from "@slack/logger";
 import { waitUntil } from "@vercel/functions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1130,6 +1130,45 @@ describe("VercelReceiver", () => {
         expect(response.status).toBe(408);
         const body = await response.json();
         expect(body.error).toBe("Request timeout");
+      });
+
+      it("should throw ReceiverMultipleAckError when ack is called after timeout", async () => {
+        const receiver = new VercelReceiver({
+          signingSecret: "test-secret",
+          signatureVerification: false,
+          ackTimeoutMs: 10,
+        });
+
+        let ackError: Error | null = null;
+        const mockApp = {
+          processEvent: vi.fn(async (event) => {
+            // Wait for timeout to fire
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            // Now try to ack after timeout has already rejected
+            try {
+              await event.ack("late response");
+            } catch (error) {
+              ackError = error as Error;
+            }
+          }),
+        } as unknown as App;
+
+        receiver.init(mockApp);
+        const handler = receiver.toHandler();
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify({ type: "event_callback" }),
+          headers: { "content-type": "application/json" },
+        });
+
+        const response = await handler(request);
+        expect(response.status).toBe(408);
+
+        // Wait for background processing to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Late ack should throw an error indicating it was too late
+        expect(ackError).toBeInstanceOf(ReceiverMultipleAckError);
       });
     });
   });
