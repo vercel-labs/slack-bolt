@@ -458,7 +458,11 @@ export function createHandler(
   return async (req: Request) => {
     try {
       if (!initPromise) {
-        initPromise = app.init();
+        initPromise = app.init().catch((error) => {
+          // Reset initPromise so subsequent requests can retry initialization
+          initPromise = null;
+          throw error;
+        });
       }
       await initPromise;
 
