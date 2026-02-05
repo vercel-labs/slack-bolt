@@ -5,3 +5,5 @@ vercel-bolt-*.tgz
 .DS_Store
 vercel-slack-bolt-*.tgz
 coverage
+.vercel
+.env*.local
