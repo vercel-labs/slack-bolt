@@ -1,0 +1,47 @@
+{
+  "display_information": {
+    "name": "Hello World Bot",
+    "description": "A simple hello world Slack app",
+    "background_color": "#000000"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Hello World Bot",
+      "always_online": false
+    },
+    "slash_commands": [
+      {
+        "command": "/hello",
+        "url": "https://example.com/api/slack/events",
+        "description": "Say hello!",
+        "usage_hint": "[name]",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:history",
+        "chat:write",
+        "commands"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://example.com/api/slack/events",
+      "bot_events": [
+        "app_mention",
+        "message.channels"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://example.com/api/slack/events"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
