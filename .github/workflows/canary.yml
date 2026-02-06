@@ -29,11 +29,11 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          npm version "0.0.0-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
+          pnpm version "0.0.0-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
 
       - name: Publish canary
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          npm publish --tag canary --access public
+          pnpm publish --tag canary --access public --no-git-checks
         env:
           NPM_TOKEN: ${{ secrets.NPM_VERCEL_TOKEN_ELEVATED }}
