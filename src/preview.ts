@@ -574,6 +574,14 @@ function injectUrls(manifest: Manifest, baseUrl: string): void {
  * Extracts the path portion from a URL, or returns the string as-is if it's already a path.
  */
 function extractPath(urlOrPath: string): string {
+  // If it looks like a full URL (http:// or https://), extract the path after the host.
+  // We use string manipulation instead of `new URL()` because manifests often contain
+  // placeholder domains like `<your-domain>` that are not valid URLs.
+  const protocolMatch = urlOrPath.match(/^https?:\/\/[^/]+(\/.*)?$/);
+  if (protocolMatch) {
+    return protocolMatch[1] || "/";
+  }
+
   try {
     const url = new URL(urlOrPath);
     return url.pathname + url.search;
