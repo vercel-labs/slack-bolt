@@ -236,8 +236,29 @@ export async function setupSlackPreview(
     manifest.display_information.long_description = combined;
   }
 
-  // Inject branch URL into manifest
-  injectUrls(manifest, baseUrl);
+  // ── Ensure deployment protection bypass ──
+  // Vercel preview deployments are protected by default. Slack can't set custom
+  // headers on its outbound webhook requests, so we append the bypass secret as
+  // a query parameter to every URL in the manifest.
+  let bypassSecret: string | null = null;
+  try {
+    bypassSecret = await ensureProtectionBypass(projectId, vercelToken, teamId);
+    if (bypassSecret === process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+      log.success("Deployment protection bypass configured");
+    } else {
+      log.success("Generated deployment protection bypass");
+    }
+  } catch (error) {
+    log.warn(
+      `Failed to configure deployment protection bypass: ${error instanceof Error ? error.message : error}`,
+    );
+    log.warn(
+      "Slack webhooks may be blocked by Vercel Authentication on preview deployments",
+    );
+  }
+
+  // Inject branch URL (and optional bypass secret) into manifest
+  injectUrls(manifest, baseUrl, bypassSecret);
 
   // Check if app already exists for this branch by querying Vercel env vars
   let resolvedAppId: string | null = null;
@@ -550,21 +571,31 @@ async function loadManifest(manifestPath: string): Promise<Manifest> {
 /**
  * Injects a base URL into all URL fields in a manifest.
  * Preserves the path portion of existing URLs.
+ * When a bypass secret is provided, appends it as a query parameter
+ * so Slack's webhook requests can reach protected preview deployments.
  */
-function injectUrls(manifest: Manifest, baseUrl: string): void {
+function injectUrls(
+  manifest: Manifest,
+  baseUrl: string,
+  bypassSecret?: string | null,
+): void {
+  const bypassParam = bypassSecret
+    ? `?x-vercel-protection-bypass=${bypassSecret}`
+    : "";
+
   if (manifest.settings?.event_subscriptions?.request_url) {
     const p = extractPath(manifest.settings.event_subscriptions.request_url);
-    manifest.settings.event_subscriptions.request_url = `${baseUrl}${p}`;
+    manifest.settings.event_subscriptions.request_url = `${baseUrl}${p}${bypassParam}`;
   }
   if (manifest.settings?.interactivity?.request_url) {
     const p = extractPath(manifest.settings.interactivity.request_url);
-    manifest.settings.interactivity.request_url = `${baseUrl}${p}`;
+    manifest.settings.interactivity.request_url = `${baseUrl}${p}${bypassParam}`;
   }
   if (manifest.features?.slash_commands) {
     for (const cmd of manifest.features.slash_commands) {
       if (cmd.url) {
         const p = extractPath(cmd.url);
-        cmd.url = `${baseUrl}${p}`;
+        cmd.url = `${baseUrl}${p}${bypassParam}`;
       }
     }
   }
@@ -893,6 +924,92 @@ async function deleteVercelEnvVars(
       }
     }
   }
+}
+
+// =============================================================================
+// Vercel Deployment Protection Bypass
+// =============================================================================
+
+/**
+ * Ensures a deployment protection bypass secret exists for the project.
+ *
+ * Vercel preview deployments are protected by default. Since Slack can't set
+ * custom HTTP headers on its outbound webhook requests, we need to append
+ * the bypass secret as a query parameter (`?x-vercel-protection-bypass=SECRET`)
+ * to all manifest URLs.
+ *
+ * On first deploy: generates a new bypass secret via the Vercel API and marks
+ * it as the `VERCEL_AUTOMATION_BYPASS_SECRET` env var so future builds get it
+ * automatically.
+ *
+ * On subsequent deploys: reads the existing secret from the env var directly.
+ *
+ * @returns The bypass secret string.
+ */
+async function ensureProtectionBypass(
+  projectId: string,
+  token: string,
+  teamId?: string | null,
+): Promise<string> {
+  // Fast path: Vercel auto-injects this env var when a bypass secret exists
+  const existing = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (existing) {
+    return existing;
+  }
+
+  // No bypass secret yet -- generate one via the Vercel API
+  const vercel = new Vercel({ bearerToken: token });
+
+  const result = await vercel.projects.updateProjectProtectionBypass({
+    idOrName: projectId,
+    teamId: teamId ?? undefined,
+    requestBody: {
+      generate: {
+        note: "Slack preview app webhooks (managed by @vercel/slack-bolt)",
+      },
+    },
+  });
+
+  const bypasses = result.protectionBypass;
+  if (!bypasses || Object.keys(bypasses).length === 0) {
+    throw new Error("Vercel API returned empty protectionBypass response");
+  }
+
+  // Find the newly generated automation-bypass secret
+  let newSecret: string | null = null;
+  for (const [secret, meta] of Object.entries(bypasses)) {
+    if (
+      meta &&
+      typeof meta === "object" &&
+      "scope" in meta &&
+      meta.scope === "automation-bypass"
+    ) {
+      newSecret = secret;
+      break;
+    }
+  }
+
+  if (!newSecret) {
+    throw new Error(
+      "Could not find automation-bypass secret in Vercel API response",
+    );
+  }
+
+  // Mark this secret as the VERCEL_AUTOMATION_BYPASS_SECRET env var so
+  // future builds get it automatically without an API call
+  await vercel.projects.updateProjectProtectionBypass({
+    idOrName: projectId,
+    teamId: teamId ?? undefined,
+    requestBody: {
+      update: {
+        secret: newSecret,
+        isEnvVar: true,
+        note: "Slack preview app webhooks (managed by @vercel/slack-bolt)",
+      },
+    },
+  });
+
+  return newSecret;
 }
 
 // =============================================================================
