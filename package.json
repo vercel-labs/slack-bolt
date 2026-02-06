@@ -54,9 +54,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "prepare": "husky",
-    "attw": "attw --pack .",
-    "test:create": "tsx scripts/test-create-app.ts",
-    "test:delete": "tsx scripts/test-delete-app.ts"
+    "attw": "attw --pack ."
   },
   "keywords": [
     "vercel",
