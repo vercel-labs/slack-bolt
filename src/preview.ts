@@ -391,6 +391,28 @@ export async function setupSlackPreview(
       );
     }
 
+    // Warn if the environment already has a stale signing secret from a
+    // global (non-branch-scoped) env var (e.g. production app credentials
+    // set for "All Environments").
+    const existingSecret = process.env.SLACK_SIGNING_SECRET;
+    if (existingSecret && existingSecret !== signingSecret) {
+      log.warn(
+        `Detected a stale SLACK_SIGNING_SECRET in the environment that belongs to a different Slack app.`,
+      );
+      log.warn(
+        `Tip: Scope your production Slack env vars to the "Production" environment only in Vercel project settings.`,
+      );
+    }
+
+    // Inject credentials into process.env so the rest of the build pipeline
+    // (e.g. next build) can access them immediately. Without this, the
+    // framework build would fail because these values were only set via the
+    // Vercel API and aren't in the current build's environment yet.
+    process.env.SLACK_APP_ID = appId;
+    process.env.SLACK_CLIENT_ID = clientId;
+    process.env.SLACK_CLIENT_SECRET = clientSecret;
+    process.env.SLACK_SIGNING_SECRET = signingSecret;
+
     // Set Vercel environment variables (branch-scoped), including SLACK_APP_ID as our "store"
     await setVercelEnvVars(
       projectId,
@@ -403,10 +425,6 @@ export async function setupSlackPreview(
         { key: "SLACK_SIGNING_SECRET", value: signingSecret },
       ],
       teamId,
-    );
-    log.debug(
-      "NOTE: These env vars were set DURING the build. They will be available " +
-        "at runtime for the NEXT deployment, but may not be available to THIS deployment's runtime.",
     );
 
     resolvedAppId = appId;
@@ -429,6 +447,7 @@ export async function setupSlackPreview(
         manifest,
         slackServiceToken,
       );
+      process.env.SLACK_BOT_TOKEN = botToken;
       await setVercelEnvVars(
         projectId,
         branch,
