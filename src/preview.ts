@@ -416,6 +416,21 @@ export async function setupSlackPreview(
     }
   }
 
+  // ── Best-effort orphan cleanup ──────────────────────────────────────────
+  try {
+    await cleanupOrphanedApps(
+      projectId,
+      branch,
+      vercelToken,
+      teamId,
+      slackConfigToken,
+    );
+  } catch (error) {
+    log.warn(
+      `Orphan cleanup: ${error instanceof Error ? error.message : error}`,
+    );
+  }
+
   if (resolvedInstallUrl || resolvedAppId) {
     console.log();
     // Only show manual install URL if auto-install is not configured
@@ -1083,6 +1098,138 @@ async function deleteVercelEnvVars(
           error instanceof Error ? error.message : error,
         );
       }
+    }
+  }
+}
+
+// =============================================================================
+// Vercel Branch & Orphan Cleanup
+// =============================================================================
+
+/** Response shape from Vercel's branches API */
+interface VercelBranchesResponse {
+  branches?: Array<{ branch: string }>;
+}
+
+/**
+ * Fetches the list of active branches for a Vercel project.
+ * Uses the Vercel REST API directly (the SDK does not expose this endpoint).
+ */
+async function getActiveBranches(
+  projectId: string,
+  token: string,
+  teamId?: string | null,
+): Promise<Set<string>> {
+  const params = new URLSearchParams({ active: "1", limit: "100" });
+  if (teamId) params.set("teamId", teamId);
+
+  const response = await fetch(
+    `https://api.vercel.com/v5/projects/${projectId}/branches?${params}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  const data = (await response.json()) as VercelBranchesResponse;
+  return new Set(data.branches?.map((b) => b.branch) ?? []);
+}
+
+/**
+ * Scans for orphaned Slack apps from deleted branches and cleans them up.
+ *
+ * Compares branches that have `SLACK_APP_ID` env vars against the list of
+ * active branches in Vercel. Any branch with a Slack app but no active
+ * deployment is considered stale -- its app is deleted and env vars removed.
+ *
+ * This is a best-effort operation; errors are logged but do not throw.
+ */
+async function cleanupOrphanedApps(
+  projectId: string,
+  currentBranch: string,
+  vercelToken: string,
+  teamId: string | null,
+  slackConfigToken: string,
+): Promise<void> {
+  // 1. Get the set of active branches from Vercel
+  const activeBranches = await getActiveBranches(
+    projectId,
+    vercelToken,
+    teamId,
+  );
+
+  // 2. Get all env vars to find branches with Slack apps
+  const vercel = new Vercel({ bearerToken: vercelToken });
+  const data = await vercel.projects.filterProjectEnvs({
+    idOrName: projectId,
+    teamId: teamId ?? undefined,
+  });
+  const envs: Array<{ id?: string; key: string; gitBranch?: string }> =
+    "envs" in data ? data.envs : [];
+
+  // 3. Collect branches that have SLACK_APP_ID but are not active (and not the current branch)
+  const staleBranches = new Map<string, string | undefined>();
+  for (const env of envs) {
+    if (
+      env.key === "SLACK_APP_ID" &&
+      env.gitBranch &&
+      env.gitBranch !== currentBranch &&
+      !activeBranches.has(env.gitBranch)
+    ) {
+      staleBranches.set(env.gitBranch, env.id);
+    }
+  }
+
+  if (staleBranches.size === 0) {
+    return;
+  }
+
+  console.log(
+    `[slack-bolt] Found ${staleBranches.size} orphaned branch(es): ${[...staleBranches.keys()].join(", ")}`,
+  );
+
+  // 4. Clean up each stale branch
+  for (const [branch, envId] of staleBranches) {
+    // Decrypt the SLACK_APP_ID
+    let appId: string | null = null;
+    if (envId) {
+      try {
+        const decrypted = await vercel.projects.getProjectEnv({
+          idOrName: projectId,
+          id: envId,
+          teamId: teamId ?? undefined,
+        });
+        appId = "value" in decrypted ? (decrypted.value ?? null) : null;
+      } catch {
+        console.warn(
+          `[slack-bolt] Failed to decrypt SLACK_APP_ID for branch ${branch}`,
+        );
+      }
+    }
+
+    // Delete the Slack app
+    if (appId) {
+      try {
+        await deleteSlackApp(appId, slackConfigToken);
+        console.log(
+          `[slack-bolt] Deleted orphaned Slack app ${appId} (branch: ${branch})`,
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes("app_not_found")) {
+          console.log(
+            `[slack-bolt] App ${appId} already deleted (branch: ${branch})`,
+          );
+        } else {
+          console.warn(`[slack-bolt] Failed to delete app ${appId}: ${msg}`);
+        }
+      }
+    }
+
+    // Delete all branch-scoped env vars
+    try {
+      await deleteVercelEnvVars(projectId, branch, vercelToken, teamId);
+    } catch (error) {
+      console.warn(
+        `[slack-bolt] Failed to delete env vars for branch ${branch}: ${error instanceof Error ? error.message : error}`,
+      );
     }
   }
 }

@@ -65,29 +65,26 @@
   "license": "MIT",
   "dependencies": {
     "@slack/logger": "^4.0.0",
-    "@vercel/functions": "^3.3.5",
+    "@slack/web-api": "^7.13.0",
+    "@vercel/functions": "^3.4.1",
     "@vercel/sdk": "^1.19.1"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
     "@biomejs/biome": "2.2.2",
     "@changesets/cli": "^2.29.8",
-    "@types/node": "^20.19.27",
+    "@types/node": "^20.19.32",
     "husky": "^9.1.7",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.18"
   },
   "peerDependencies": {
-    "@slack/bolt": "^4.4.0",
-    "@slack/web-api": "^7.0.0"
+    "@slack/bolt": "^4.4.0"
   },
   "peerDependenciesMeta": {
     "@slack/bolt": {
-      "optional": false
-    },
-    "@slack/web-api": {
       "optional": false
     }
   },
