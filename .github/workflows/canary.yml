@@ -1,0 +1,39 @@
+name: Canary Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  canary:
+    name: Publish Canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Set canary version
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          npm version "0.0.0-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
+
+      - name: Publish canary
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          npm publish --tag canary --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_VERCEL_TOKEN_ELEVATED }}
