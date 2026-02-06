@@ -116,6 +116,17 @@ export interface SetupSlackPreviewOptions {
    * @default "/api/webhooks/vercel"
    */
   webhookPath?: string;
+  /**
+   * Slack CLI service token (xoxp-...) for automatic app installation.
+   * When provided, the app is installed to the workspace automatically via
+   * the `apps.developerInstall` API and the `SLACK_BOT_TOKEN` is set as a
+   * branch-scoped Vercel environment variable.
+   *
+   * Obtain a service token by running `slack auth token` in the Slack CLI.
+   * @see {@link https://docs.slack.dev/tools/slack-cli/guides/authorizing-the-slack-cli#ci-cd CI/CD authorization}
+   * @default process.env.SLACK_SERVICE_TOKEN
+   */
+  slackServiceToken?: string;
 }
 
 /**
@@ -148,6 +159,7 @@ export async function setupSlackPreview(
     slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
     vercelToken = process.env.VERCEL_API_TOKEN,
     webhookPath = "/api/webhooks/vercel",
+    slackServiceToken = process.env.SLACK_SERVICE_TOKEN,
   } = options;
 
   const branch = process.env.VERCEL_GIT_COMMIT_REF;
@@ -335,6 +347,42 @@ export async function setupSlackPreview(
     log.info("URL", baseUrl);
   }
 
+  // ── Install app and set SLACK_BOT_TOKEN ──
+  // When a service token is available, install the app to the workspace via
+  // the apps.developerInstall API (same API the Slack CLI uses). This returns
+  // the bot token directly, bypassing the OAuth flow entirely.
+  // Runs on every deploy (idempotent) to keep tokens in sync with scope changes.
+  if (resolvedAppId && slackServiceToken) {
+    try {
+      const botToken = await installSlackApp(
+        resolvedAppId,
+        manifest,
+        slackServiceToken,
+      );
+      await setVercelEnvVars(
+        projectId,
+        branch,
+        vercelToken,
+        [{ key: "SLACK_BOT_TOKEN", value: botToken }],
+        teamId,
+      );
+      log.success("Installed app and set SLACK_BOT_TOKEN");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // Surface approval-related errors clearly so the user knows what to do
+      if (msg.includes("app_approval")) {
+        log.warn(
+          `App requires admin approval before it can be installed: ${msg}`,
+        );
+      } else {
+        log.warn(`Failed to auto-install app: ${msg}`);
+      }
+      log.warn(
+        "Set SLACK_SERVICE_TOKEN to enable automatic installation, or install manually via the URL below.",
+      );
+    }
+  }
+
   // ── Ensure Vercel webhook is registered for cleanup events ──
   // The webhook targets the production deployment so it has a stable URL.
   // Failures here are non-fatal; the webhook can be retried on the next deploy.
@@ -370,7 +418,8 @@ export async function setupSlackPreview(
 
   if (resolvedInstallUrl || resolvedAppId) {
     console.log();
-    if (resolvedInstallUrl) {
+    // Only show manual install URL if auto-install is not configured
+    if (resolvedInstallUrl && !slackServiceToken) {
       console.log(`${c.dim}→ Install app: ${resolvedInstallUrl}${c.reset}`);
     }
     if (resolvedAppId) {
@@ -404,6 +453,12 @@ export interface CleanupHandlerOptions {
    * @default process.env.VERCEL_API_TOKEN
    */
   vercelToken?: string;
+  /**
+   * Slack CLI service token for uninstalling apps from the workspace.
+   * When provided, the app is uninstalled before deletion.
+   * @default process.env.SLACK_SERVICE_TOKEN
+   */
+  slackServiceToken?: string;
 }
 
 /**
@@ -431,6 +486,7 @@ export function createCleanupHandler(
     secret = process.env.VERCEL_WEBHOOK_SECRET,
     slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
     vercelToken = process.env.VERCEL_API_TOKEN,
+    slackServiceToken = process.env.SLACK_SERVICE_TOKEN,
   } = options;
 
   return async (req: Request): Promise<Response> => {
@@ -500,6 +556,16 @@ export function createCleanupHandler(
           JSON.stringify({ received: true, cleaned: false }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
+      }
+
+      // Uninstall the app from the workspace (if service token is available)
+      if (slackServiceToken && teamId) {
+        try {
+          await uninstallSlackApp(appId, teamId, slackServiceToken);
+          console.log(`[slack-bolt] Uninstalled Slack app: ${appId}`);
+        } catch (error) {
+          console.error("[slack-bolt] Failed to uninstall Slack app:", error);
+        }
       }
 
       // Delete the Slack app -- requires slackConfigToken
@@ -756,6 +822,100 @@ async function deleteSlackApp(appId: string, token: string): Promise<void> {
   }
 }
 
+/** Response shape from the apps.developerInstall Slack API */
+interface DeveloperInstallResponse {
+  ok: boolean;
+  error?: string;
+  app_id?: string;
+  api_access_tokens?: {
+    bot?: string;
+    app_level?: string;
+    user?: string;
+  };
+}
+
+/**
+ * Installs a Slack app to the workspace associated with the service token
+ * using the `apps.developerInstall` API (the same API used by the Slack CLI).
+ *
+ * This bypasses the OAuth flow entirely -- the service token represents an
+ * authenticated user who is granting the app access to their workspace.
+ *
+ * @see {@link https://github.com/slackapi/slack-cli/blob/main/internal/api/app.go Slack CLI source}
+ * @returns The bot token (xoxb-...) for the installed app.
+ */
+async function installSlackApp(
+  appId: string,
+  manifest: Manifest,
+  serviceToken: string,
+): Promise<string> {
+  const botScopes = manifest.oauth_config?.scopes?.bot ?? [];
+
+  const response = await fetch("https://slack.com/api/apps.developerInstall", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceToken}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      app_id: appId,
+      bot_scopes: botScopes,
+      outgoing_domains: [],
+    }),
+  });
+
+  const data = (await response.json()) as DeveloperInstallResponse;
+
+  if (!data.ok) {
+    throw new Error(
+      `Failed to install Slack app: ${data.error ?? "unknown error"}`,
+    );
+  }
+
+  const botToken = data.api_access_tokens?.bot;
+  if (!botToken) {
+    throw new Error(
+      "Slack app was installed but no bot token was returned. " +
+        "Ensure the manifest includes bot scopes in oauth_config.scopes.bot.",
+    );
+  }
+
+  return botToken;
+}
+
+/**
+ * Uninstalls a Slack app from a workspace using the `apps.developerUninstall` API.
+ * Used during cleanup when a preview branch is deleted.
+ */
+async function uninstallSlackApp(
+  appId: string,
+  teamId: string,
+  serviceToken: string,
+): Promise<void> {
+  const response = await fetch(
+    "https://slack.com/api/apps.developerUninstall",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceToken}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        app_id: appId,
+        team_id: teamId,
+      }),
+    },
+  );
+
+  const data = (await response.json()) as { ok: boolean; error?: string };
+
+  if (!data.ok && data.error !== "not_installed") {
+    throw new Error(
+      `Failed to uninstall Slack app: ${data.error ?? "unknown error"}`,
+    );
+  }
+}
+
 // =============================================================================
 // Vercel API Functions
 // =============================================================================
@@ -766,6 +926,7 @@ const SLACK_ENV_VAR_KEYS = [
   "SLACK_CLIENT_ID",
   "SLACK_CLIENT_SECRET",
   "SLACK_SIGNING_SECRET",
+  "SLACK_BOT_TOKEN",
 ] as const;
 
 /**
