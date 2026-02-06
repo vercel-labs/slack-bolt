@@ -16,20 +16,27 @@ Commands:
 
 Options:
   --manifest <path>  Path to manifest.json (default: "manifest.json")
+  --debug            Enable verbose debug logging
   --help             Show this help message
 `.trim();
 
-function parseFlags(args: string[]): { manifestPath?: string } {
+function parseFlags(args: string[]): {
+  manifestPath?: string;
+  debug?: boolean;
+} {
   let manifestPath: string | undefined;
+  let debug = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--manifest" && args[i + 1]) {
       manifestPath = args[i + 1];
       i++;
+    } else if (args[i] === "--debug") {
+      debug = true;
     }
   }
 
-  return { manifestPath };
+  return { manifestPath, debug };
 }
 
 async function main() {
@@ -44,7 +51,10 @@ async function main() {
   switch (command) {
     case "build": {
       const flags = parseFlags(args.slice(1));
-      await setupSlackPreview({ manifestPath: flags.manifestPath });
+      await setupSlackPreview({
+        manifestPath: flags.manifestPath,
+        debug: flags.debug,
+      });
       break;
     }
     default:

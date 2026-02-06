@@ -21,6 +21,7 @@ const c = {
 };
 
 const log = {
+  _debug: false,
   header() {
     console.log(`${c.bold}▲ Vercel Slack Bolt${c.reset}`);
   },
@@ -39,6 +40,11 @@ const log = {
   skip(msg: string) {
     console.log(`${c.dim}○ ${msg}${c.reset}`);
   },
+  debug(msg: string) {
+    if (this._debug) {
+      console.log(`${c.dim}[debug] ${msg}${c.reset}`);
+    }
+  },
   tree(items: { label: string; value: string }[]) {
     const maxLen = Math.max(...items.map((i) => i.label.length));
     for (let i = 0; i < items.length; i++) {
@@ -50,6 +56,13 @@ const log = {
     }
   },
 };
+
+/** Redact a secret for debug output: show first 4 chars + length */
+function redact(value: string | undefined | null): string {
+  if (!value) return "<not set>";
+  if (value.length <= 4) return "***";
+  return `${value.slice(0, 4)}... (${value.length} chars)`;
+}
 
 // =============================================================================
 // Slack App Manifest Types
@@ -127,6 +140,13 @@ export interface SetupSlackPreviewOptions {
    * @default process.env.SLACK_SERVICE_TOKEN
    */
   slackServiceToken?: string;
+  /**
+   * Enable verbose debug logging.
+   * Logs detailed information about each step of the build process including
+   * environment variable state, API calls, and timing.
+   * @default false
+   */
+  debug?: boolean;
 }
 
 /**
@@ -160,7 +180,10 @@ export async function setupSlackPreview(
     vercelToken = process.env.VERCEL_API_TOKEN,
     webhookPath = "/api/webhooks/vercel",
     slackServiceToken = process.env.SLACK_SERVICE_TOKEN,
+    debug = false,
   } = options;
+
+  log._debug = debug;
 
   const branch = process.env.VERCEL_GIT_COMMIT_REF;
   const projectId = process.env.VERCEL_PROJECT_ID;
@@ -168,6 +191,36 @@ export async function setupSlackPreview(
   const teamId = process.env.VERCEL_TEAM_ID || null;
 
   log.header();
+
+  if (debug) {
+    console.log(`${c.dim}[debug] Debug mode enabled${c.reset}`);
+    log.debug(
+      `Environment snapshot (values available to this deployment at runtime):`,
+    );
+    log.debug(`  SLACK_APP_ID = ${redact(process.env.SLACK_APP_ID)}`);
+    log.debug(`  SLACK_CLIENT_ID = ${redact(process.env.SLACK_CLIENT_ID)}`);
+    log.debug(
+      `  SLACK_CLIENT_SECRET = ${redact(process.env.SLACK_CLIENT_SECRET)}`,
+    );
+    log.debug(
+      `  SLACK_SIGNING_SECRET = ${redact(process.env.SLACK_SIGNING_SECRET)}`,
+    );
+    log.debug(`  SLACK_BOT_TOKEN = ${redact(process.env.SLACK_BOT_TOKEN)}`);
+    log.debug(
+      `  SLACK_CONFIGURATION_TOKEN = ${redact(process.env.SLACK_CONFIGURATION_TOKEN)}`,
+    );
+    log.debug(
+      `  SLACK_SERVICE_TOKEN = ${redact(process.env.SLACK_SERVICE_TOKEN)}`,
+    );
+    log.debug(`  VERCEL_GIT_COMMIT_REF = ${branch ?? "<not set>"}`);
+    log.debug(`  VERCEL_PROJECT_ID = ${projectId ?? "<not set>"}`);
+    log.debug(`  VERCEL_BRANCH_URL = ${branchUrl ?? "<not set>"}`);
+    log.debug(`  VERCEL_TEAM_ID = ${teamId ?? "<not set>"}`);
+    log.debug(`  VERCEL_ENV = ${process.env.VERCEL_ENV ?? "<not set>"}`);
+    log.debug(
+      `  VERCEL_AUTOMATION_BYPASS_SECRET = ${redact(process.env.VERCEL_AUTOMATION_BYPASS_SECRET)}`,
+    );
+  }
 
   // Skip for production deployments
   if (process.env.VERCEL_ENV === "production") {
@@ -199,8 +252,10 @@ export async function setupSlackPreview(
   console.log();
 
   // Load and prepare manifest
+  log.debug(`Loading manifest from: ${manifestPath}`);
   const manifest = await loadManifest(manifestPath);
   const baseUrl = `https://${branchUrl}`;
+  log.debug(`Base URL for manifest: ${baseUrl}`);
 
   // Read deployment context from Vercel system env vars
   const commitSha = process.env.VERCEL_GIT_COMMIT_SHA ?? "unknown";
@@ -253,12 +308,15 @@ export async function setupSlackPreview(
   // headers on its outbound webhook requests, so we append the bypass secret as
   // a query parameter to every URL in the manifest.
   let bypassSecret: string | null = null;
+  log.debug("Ensuring deployment protection bypass...");
   try {
     bypassSecret = await ensureProtectionBypass(projectId, vercelToken, teamId);
     if (bypassSecret === process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
       log.success("Deployment protection bypass configured");
+      log.debug("Using existing VERCEL_AUTOMATION_BYPASS_SECRET");
     } else {
       log.success("Generated deployment protection bypass");
+      log.debug(`Generated new bypass secret: ${redact(bypassSecret)}`);
     }
   } catch (error) {
     log.warn(
@@ -270,16 +328,23 @@ export async function setupSlackPreview(
   }
 
   // Inject branch URL (and optional bypass secret) into manifest
+  log.debug(
+    `Injecting URLs into manifest (bypassSecret: ${bypassSecret ? "present" : "absent"})`,
+  );
   injectUrls(manifest, baseUrl, bypassSecret);
 
   // Check if app already exists for this branch by querying Vercel env vars
   let resolvedAppId: string | null = null;
   let resolvedInstallUrl: string | null = null;
+  log.debug(`Checking for existing SLACK_APP_ID env var for branch: ${branch}`);
   let existingAppId = await getSlackAppIdForBranch(
     projectId,
     branch,
     vercelToken,
     teamId,
+  );
+  log.debug(
+    `Existing app lookup result: ${existingAppId ? `found ${existingAppId}` : "not found (new branch)"}`,
   );
 
   // If app exists, always update the manifest (safe upsert)
@@ -295,6 +360,7 @@ export async function setupSlackPreview(
       // App was deleted externally -- clean up env vars and recreate below
       if (msg.includes("app_not_found") || msg.includes("internal_error")) {
         log.warn(`App ${existingAppId} no longer exists, recreating`);
+        log.debug("Cleaning up stale env vars before recreating...");
         // Clean up stale env vars before recreating
         try {
           await deleteVercelEnvVars(projectId, branch, vercelToken, teamId);
@@ -337,6 +403,10 @@ export async function setupSlackPreview(
         { key: "SLACK_SIGNING_SECRET", value: signingSecret },
       ],
       teamId,
+    );
+    log.debug(
+      "NOTE: These env vars were set DURING the build. They will be available " +
+        "at runtime for the NEXT deployment, but may not be available to THIS deployment's runtime.",
     );
 
     resolvedAppId = appId;
@@ -381,6 +451,10 @@ export async function setupSlackPreview(
         "Set SLACK_SERVICE_TOKEN to enable automatic installation, or install manually via the URL below.",
       );
     }
+  } else if (resolvedAppId && !slackServiceToken) {
+    log.debug(
+      "Skipping auto-install (SLACK_SERVICE_TOKEN not set). App must be installed manually.",
+    );
   }
 
   // ── Ensure Vercel webhook is registered for cleanup events ──
@@ -389,8 +463,10 @@ export async function setupSlackPreview(
   const productionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   if (!productionUrl) {
     log.warn("Skipping webhook registration (no production URL yet)");
+    log.debug("VERCEL_PROJECT_PRODUCTION_URL is not set");
   } else {
     const webhookUrl = `https://${productionUrl}${webhookPath}`;
+    log.debug(`Registering cleanup webhook at: ${webhookUrl}`);
     try {
       const webhookSecret = await ensureVercelWebhook(
         projectId,
@@ -406,8 +482,10 @@ export async function setupSlackPreview(
           teamId,
         );
         log.success("Registered cleanup webhook");
+        log.debug(`Webhook secret: ${redact(webhookSecret)}`);
       } else {
         log.success("Cleanup webhook already registered");
+        log.debug("Webhook already exists, no update needed");
       }
     } catch (error) {
       log.warn(
@@ -417,6 +495,7 @@ export async function setupSlackPreview(
   }
 
   // ── Best-effort orphan cleanup ──────────────────────────────────────────
+  log.debug("Running orphan cleanup...");
   try {
     await cleanupOrphanedApps(
       projectId,
@@ -425,6 +504,7 @@ export async function setupSlackPreview(
       teamId,
       slackConfigToken,
     );
+    log.debug("Orphan cleanup completed");
   } catch (error) {
     log.warn(
       `Orphan cleanup: ${error instanceof Error ? error.message : error}`,
@@ -442,6 +522,25 @@ export async function setupSlackPreview(
         `${c.dim}→ Manage app: https://api.slack.com/apps/${resolvedAppId}${c.reset}`,
       );
     }
+  }
+
+  if (debug) {
+    console.log();
+    log.debug("--- Build summary ---");
+    log.debug(`App ID: ${resolvedAppId ?? "<none>"}`);
+    log.debug(`Is new app: ${!existingAppId}`);
+    log.debug(
+      `SLACK_SIGNING_SECRET in process.env: ${redact(process.env.SLACK_SIGNING_SECRET)}`,
+    );
+    if (!existingAppId) {
+      log.debug(
+        "IMPORTANT: This was the first deployment for this branch. " +
+          "Env vars (SLACK_SIGNING_SECRET, etc.) were set via the Vercel API during this build, " +
+          "but this deployment's runtime may not have them. " +
+          "The next deployment will pick them up.",
+      );
+    }
+    log.debug("--- End build summary ---");
   }
 
   console.log();
@@ -759,9 +858,11 @@ async function validateSlackManifest(
   manifest: Manifest,
   token: string,
 ): Promise<void> {
+  log.debug("Validating manifest via apps.manifest.validate...");
   const client = new WebClient(token);
   try {
     await client.apps.manifest.validate({ manifest });
+    log.debug("Manifest validation passed");
   } catch (error) {
     const apiError = extractSlackApiError(error);
     const details = apiError?.validationErrors
@@ -770,6 +871,7 @@ async function validateSlackManifest(
           .join("\n")
       : (apiError?.code ??
         (error instanceof Error ? error.message : String(error)));
+    log.debug(`Manifest validation failed: ${details}`);
     throw new Error(
       `[slack-bolt] Invalid manifest.json:\n${details}\n\nFix your manifest.json and redeploy.`,
     );
@@ -782,9 +884,29 @@ async function validateSlackManifest(
 async function createSlackAppFromManifest(manifest: Manifest, token: string) {
   await validateSlackManifest(manifest, token);
 
+  log.debug("Calling apps.manifest.create...");
   const client = new WebClient(token);
   try {
-    return await client.apps.manifest.create({ manifest });
+    const result = await client.apps.manifest.create({ manifest });
+    log.debug(`apps.manifest.create response:`);
+    log.debug(`  ok = ${result.ok}`);
+    log.debug(`  app_id = ${result.app_id ?? "<missing>"}`);
+    log.debug(
+      `  credentials.client_id = ${redact(result.credentials?.client_id)}`,
+    );
+    log.debug(
+      `  credentials.client_secret = ${redact(result.credentials?.client_secret)}`,
+    );
+    log.debug(
+      `  credentials.signing_secret = ${redact(result.credentials?.signing_secret)}`,
+    );
+    log.debug(
+      `  credentials.verification_token = ${redact(result.credentials?.verification_token)}`,
+    );
+    log.debug(
+      `  oauth_authorize_url = ${result.oauth_authorize_url ?? "<not provided>"}`,
+    );
+    return result;
   } catch (error) {
     const apiError = extractSlackApiError(error);
     const details = apiError?.validationErrors
@@ -793,6 +915,7 @@ async function createSlackAppFromManifest(manifest: Manifest, token: string) {
           .join("; ")
       : (apiError?.code ??
         (error instanceof Error ? error.message : String(error)));
+    log.debug(`apps.manifest.create failed: ${details}`);
     throw new Error(`Failed to create Slack app: ${details}`);
   }
 }
@@ -807,9 +930,17 @@ async function updateSlackAppManifest(
 ): Promise<void> {
   await validateSlackManifest(manifest, token);
 
+  log.debug(`Calling apps.manifest.update for app ${appId}...`);
   const client = new WebClient(token);
   try {
-    await client.apps.manifest.update({ app_id: appId, manifest });
+    const result = await client.apps.manifest.update({
+      app_id: appId,
+      manifest,
+    });
+    log.debug(`apps.manifest.update response: ok = ${result.ok}`);
+    log.debug(
+      "Note: manifest updates do NOT return new credentials; signing_secret is unchanged",
+    );
   } catch (error) {
     const apiError = extractSlackApiError(error);
     const details = apiError?.validationErrors
@@ -818,6 +949,7 @@ async function updateSlackAppManifest(
           .join("; ")
       : (apiError?.code ??
         (error instanceof Error ? error.message : String(error)));
+    log.debug(`apps.manifest.update failed: ${details}`);
     throw new Error(`Failed to update Slack app: ${details}`);
   }
 }
@@ -866,6 +998,11 @@ async function installSlackApp(
 ): Promise<string> {
   const botScopes = manifest.oauth_config?.scopes?.bot ?? [];
 
+  log.debug(`Calling apps.developerInstall for app ${appId}...`);
+  log.debug(
+    `  Request: app_id=${appId}, bot_scopes=[${botScopes.join(", ")}], outgoing_domains=[]`,
+  );
+
   const response = await fetch("https://slack.com/api/apps.developerInstall", {
     method: "POST",
     headers: {
@@ -879,7 +1016,20 @@ async function installSlackApp(
     }),
   });
 
+  log.debug(`  HTTP status: ${response.status} ${response.statusText}`);
   const data = (await response.json()) as DeveloperInstallResponse;
+
+  log.debug(`apps.developerInstall response:`);
+  log.debug(`  ok = ${data.ok}`);
+  log.debug(`  error = ${data.error ?? "<none>"}`);
+  log.debug(`  app_id = ${data.app_id ?? "<not returned>"}`);
+  log.debug(`  api_access_tokens.bot = ${redact(data.api_access_tokens?.bot)}`);
+  log.debug(
+    `  api_access_tokens.app_level = ${redact(data.api_access_tokens?.app_level)}`,
+  );
+  log.debug(
+    `  api_access_tokens.user = ${redact(data.api_access_tokens?.user)}`,
+  );
 
   if (!data.ok) {
     throw new Error(
@@ -955,6 +1105,7 @@ async function getSlackAppIdForBranch(
   token: string,
   teamId?: string | null,
 ): Promise<string | null> {
+  log.debug(`Querying Vercel env vars for SLACK_APP_ID on branch: ${branch}`);
   const vercel = new Vercel({ bearerToken: token });
 
   let envs: Array<{ id?: string; key: string; gitBranch?: string }>;
@@ -964,6 +1115,11 @@ async function getSlackAppIdForBranch(
       teamId: teamId ?? undefined,
     });
     envs = "envs" in data ? data.envs : [];
+    log.debug(`  Found ${envs.length} total env vars in project`);
+    const branchEnvs = envs.filter((e) => e.gitBranch === branch);
+    log.debug(
+      `  Found ${branchEnvs.length} env vars for branch "${branch}": ${branchEnvs.map((e) => e.key).join(", ") || "<none>"}`,
+    );
   } catch (error) {
     if (error && typeof error === "object" && "statusCode" in error) {
       const statusCode = (error as { statusCode: number }).statusCode;
@@ -984,17 +1140,23 @@ async function getSlackAppIdForBranch(
   );
 
   if (!appIdEnv?.id) {
+    log.debug("  No SLACK_APP_ID env var found for this branch");
     return null;
   }
 
   // Fetch the individual env var to get the decrypted value
+  log.debug(
+    `  Found SLACK_APP_ID env var (id: ${appIdEnv.id}), fetching decrypted value...`,
+  );
   try {
     const decrypted = await vercel.projects.getProjectEnv({
       idOrName: projectId,
       id: appIdEnv.id,
       teamId: teamId ?? undefined,
     });
-    return "value" in decrypted ? (decrypted.value ?? null) : null;
+    const value = "value" in decrypted ? (decrypted.value ?? null) : null;
+    log.debug(`  Decrypted SLACK_APP_ID = ${value ?? "<null>"}`);
+    return value;
   } catch (error) {
     console.error(
       `[slack-bolt] Failed to decrypt SLACK_APP_ID:`,
@@ -1015,10 +1177,14 @@ async function setVercelEnvVars(
   vars: { key: string; value: string }[],
   teamId?: string | null,
 ): Promise<void> {
+  log.debug(
+    `Setting ${vars.length} env var(s) via Vercel API (branch: ${branch}, target: preview, type: encrypted):`,
+  );
   const vercel = new Vercel({ bearerToken: token });
   const failures: string[] = [];
 
   for (const { key, value } of vars) {
+    log.debug(`  Setting ${key} = ${redact(value)} ...`);
     try {
       await vercel.projects.createProjectEnv({
         idOrName: projectId,
@@ -1032,9 +1198,13 @@ async function setVercelEnvVars(
           gitBranch: branch,
         },
       });
+      log.debug(`  ${key} set successfully`);
     } catch (error) {
       log.error(
         `Failed to set env var ${key}: ${error instanceof Error ? error.message : error}`,
+      );
+      log.debug(
+        `  ${key} FAILED: ${error instanceof Error ? error.message : error}`,
       );
       failures.push(key);
     }
@@ -1262,10 +1432,16 @@ async function ensureProtectionBypass(
   // Fast path: Vercel auto-injects this env var when a bypass secret exists
   const existing = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
   if (existing) {
+    log.debug(
+      `Using existing VERCEL_AUTOMATION_BYPASS_SECRET: ${redact(existing)}`,
+    );
     return existing;
   }
 
   // No bypass secret yet -- generate one via the Vercel API
+  log.debug(
+    "No VERCEL_AUTOMATION_BYPASS_SECRET found, generating via Vercel API...",
+  );
   const vercel = new Vercel({ bearerToken: token });
 
   const result = await vercel.projects.updateProjectProtectionBypass({
@@ -1279,6 +1455,9 @@ async function ensureProtectionBypass(
   });
 
   const bypasses = result.protectionBypass;
+  log.debug(
+    `  Protection bypass entries returned: ${bypasses ? Object.keys(bypasses).length : 0}`,
+  );
   if (!bypasses || Object.keys(bypasses).length === 0) {
     throw new Error("Vercel API returned empty protectionBypass response");
   }
@@ -1303,6 +1482,9 @@ async function ensureProtectionBypass(
     );
   }
 
+  log.debug(`  Generated bypass secret: ${redact(newSecret)}`);
+  log.debug("  Marking bypass secret as env var for future builds...");
+
   // Mark this secret as the VERCEL_AUTOMATION_BYPASS_SECRET env var so
   // future builds get it automatically without an API call
   await vercel.projects.updateProjectProtectionBypass({
@@ -1317,6 +1499,7 @@ async function ensureProtectionBypass(
     },
   });
 
+  log.debug("  Bypass secret saved as VERCEL_AUTOMATION_BYPASS_SECRET");
   return newSecret;
 }
 
@@ -1337,6 +1520,9 @@ async function ensureVercelWebhook(
   token: string,
   teamId?: string | null,
 ): Promise<string | null> {
+  log.debug(
+    `Checking for existing deployment.cleanup webhook at: ${webhookUrl}`,
+  );
   const vercel = new Vercel({ bearerToken: token });
 
   // List existing webhooks and check for a match
@@ -1344,15 +1530,19 @@ async function ensureVercelWebhook(
     ...(teamId ? { teamId } : {}),
   });
 
+  log.debug(`  Found ${(webhooks as Array<unknown>).length} webhook(s) total`);
+
   const existing = (webhooks as Array<{ url: string; events: string[] }>).find(
     (w) => w.url === webhookUrl && w.events.includes("deployment.cleanup"),
   );
 
   if (existing) {
+    log.debug("  Matching webhook already exists, skipping creation");
     return null;
   }
 
   // Create a new webhook scoped to this project
+  log.debug("  No matching webhook found, creating new one...");
   const result = await vercel.webhooks.createWebhook({
     ...(teamId ? { teamId } : {}),
     requestBody: {
@@ -1362,6 +1552,7 @@ async function ensureVercelWebhook(
     },
   });
 
+  log.debug(`  Webhook created, secret: ${redact(result.secret)}`);
   return result.secret;
 }
 
