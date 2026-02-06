@@ -1,12 +1,13 @@
 {
   "display_information": {
-    "name": "Hello World Bot",
-    "description": "A simple hello world Slack app",
+    "name": "v0",
+    "description": "AI-powered chat and code generation",
+    "long_description": "v0 is an AI-powered assistant that helps you build, iterate, and ship web applications. Chat with v0 to generate UI components, debug code, and get answers to your development questions — all without leaving Slack.",
     "background_color": "#000000"
   },
   "features": {
     "bot_user": {
-      "display_name": "Hello World Bot",
+      "display_name": "v0",
       "always_online": false
     },
     "slash_commands": [

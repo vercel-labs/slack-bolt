@@ -13,7 +13,25 @@
       },
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./preview": {
+      "types": {
+        "import": "./dist/preview.d.mts",
+        "require": "./dist/preview.d.ts"
+      },
+      "import": "./dist/preview.mjs",
+      "require": "./dist/preview.js"
     }
+  },
+  "typesVersions": {
+    "*": {
+      "preview": [
+        "./dist/preview.d.ts"
+      ]
+    }
+  },
+  "bin": {
+    "vercel-slack": "./dist/bin/vercel-slack.mjs"
   },
   "files": [
     "dist"
@@ -36,7 +54,9 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "prepare": "husky",
-    "attw": "attw --pack ."
+    "attw": "attw --pack .",
+    "test:create": "tsx scripts/test-create-app.ts",
+    "test:delete": "tsx scripts/test-delete-app.ts"
   },
   "keywords": [
     "vercel",
@@ -47,7 +67,8 @@
   "license": "MIT",
   "dependencies": {
     "@slack/logger": "^4.0.0",
-    "@vercel/functions": "^3.3.5"
+    "@vercel/functions": "^3.3.5",
+    "@vercel/sdk": "^1.19.1"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
@@ -56,14 +77,19 @@
     "@types/node": "^20.19.27",
     "husky": "^9.1.7",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"
   },
   "peerDependencies": {
-    "@slack/bolt": "^4.4.0"
+    "@slack/bolt": "^4.4.0",
+    "@slack/web-api": "^7.0.0"
   },
   "peerDependenciesMeta": {
     "@slack/bolt": {
+      "optional": false
+    },
+    "@slack/web-api": {
       "optional": false
     }
   },

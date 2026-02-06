@@ -1,366 +1,415 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { WebClient } from "@slack/web-api";
+import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
+import { Vercel } from "@vercel/sdk";
 
 // =============================================================================
-// Vercel Webhook Payload Types
+// Pretty Build Output
 // =============================================================================
 
-/** Base payload structure shared by deployment webhook events */
-interface DeploymentPayloadBase {
-  /** The ID of the webhook delivery */
-  id: string;
-  /** The date and time the webhook event was generated */
-  createdAt: number;
-  /** The region the event occurred in (possibly null) */
-  region: string | null;
-  /** The payload of the webhook */
-  payload: {
-    /** Team information */
-    team: {
-      /** The ID of the event's team (possibly null) */
-      id: string | null;
-    };
-    /** User information */
-    user: {
-      /** The ID of the event's user */
-      id: string;
-    };
-    /** Deployment information */
-    deployment: {
-      /** The ID of the deployment */
-      id: string;
-      /** A Map of deployment metadata (includes git info like githubCommitSha, githubCommitRepo, githubCommitRef) */
-      meta: Record<string, string>;
-      /** The URL of the deployment */
-      url: string;
-      /** The project name used in the deployment URL */
-      name: string;
-    };
-    /** Links to Vercel Dashboard */
-    links: {
-      /** The URL on the Vercel Dashboard to inspect the deployment */
-      deployment: string;
-      /** The URL on the Vercel Dashboard to the project */
-      project: string;
-    };
-    /** A String that indicates the target. Possible values are `production`, `staging` or `null` */
-    target: "production" | "staging" | null;
-    /** Project information */
-    project: {
-      /** The ID of the project */
-      id: string;
-    };
-    /** The plan type of the deployment */
-    plan: string;
-    /** An array of the supported regions for the deployment */
-    regions: string[];
-  };
-}
+const useColor = !process.env.NO_COLOR;
 
-/** Payload for deployment.succeeded webhook event */
-export interface DeploymentSucceededPayload extends DeploymentPayloadBase {
-  /** The event type */
-  type: "deployment.succeeded";
-}
+const c = {
+  reset: useColor ? "\x1b[0m" : "",
+  bold: useColor ? "\x1b[1m" : "",
+  dim: useColor ? "\x1b[2m" : "",
+  green: useColor ? "\x1b[32m" : "",
+  yellow: useColor ? "\x1b[33m" : "",
+  cyan: useColor ? "\x1b[36m" : "",
+};
 
-/** Payload for deployment.ready webhook event (deployment is accessible) */
-export interface DeploymentReadyPayload extends DeploymentPayloadBase {
-  /** The event type */
-  type: "deployment.ready";
-}
-
-/** Payload for deployment.cleanup webhook event (deployment is being removed) */
-export interface DeploymentCleanupPayload {
-  /** The event type */
-  type: "deployment.cleanup";
-  /** The ID of the webhook delivery */
-  id: string;
-  /** The date and time the webhook event was generated */
-  createdAt: number;
-  /** The region the event occurred in (possibly null) */
-  region: string | null;
-  /** The payload of the webhook */
-  payload: {
-    /** Team information */
-    team: {
-      /** The ID of the event's team (possibly null) */
-      id: string | null;
-    };
-    /** User information */
-    user: {
-      /** The ID of the event's user */
-      id: string;
-    };
-    /** Deployment information */
-    deployment: {
-      /** The ID of the deployment */
-      id: string;
-      /** A Map of deployment metadata */
-      meta: Record<string, string>;
-      /** The URL of the deployment */
-      url: string;
-      /** The project name used in the deployment URL */
-      name: string;
-      /** An array of aliases assigned to the deployment */
-      alias: string[];
-      /** The deployment target */
-      target: "production" | "staging" | null;
-      /** The ID of the custom environment, if used */
-      customEnvironmentId?: string;
-      /** An array of the supported regions for the deployment */
-      regions: string[];
-    };
-    /** Project information */
-    project: {
-      /** The ID of the project */
-      id: string;
-    };
-  };
-}
+const log = {
+  header() {
+    console.log(`${c.bold}▲ Vercel Slack Bolt${c.reset}`);
+  },
+  info(label: string, value: string) {
+    console.log(`${c.dim}-${c.reset} ${label}: ${value}`);
+  },
+  success(msg: string) {
+    console.log(`${c.green}✓${c.reset} ${msg}`);
+  },
+  warn(msg: string) {
+    console.log(`${c.yellow}⚠${c.reset} ${msg}`);
+  },
+  error(msg: string) {
+    console.error(`${c.dim}✖${c.reset} ${msg}`);
+  },
+  skip(msg: string) {
+    console.log(`${c.dim}○ ${msg}${c.reset}`);
+  },
+  tree(items: { label: string; value: string }[]) {
+    const maxLen = Math.max(...items.map((i) => i.label.length));
+    for (let i = 0; i < items.length; i++) {
+      const prefix = i === 0 ? "┌" : i === items.length - 1 ? "└" : "├";
+      const padded = items[i].label.padEnd(maxLen);
+      console.log(
+        `${c.dim}${prefix}${c.reset} ${padded}  ${c.cyan}${items[i].value}${c.reset}`,
+      );
+    }
+  },
+};
 
 // =============================================================================
 // Slack App Manifest Types
 // =============================================================================
 
-/** Slack App Manifest structure for apps.manifest.create API */
-export interface SlackAppManifest {
-  /** Display information for the app */
-  display_information: {
-    /** The name of the app (max 35 characters) */
-    name: string;
-    /** A short description of the app */
-    description?: string;
-    /** A longer description of the app */
-    long_description?: string;
-    /** The background color of the app (hex color code) */
-    background_color?: string;
-  };
-  /** App features configuration */
-  features?: {
-    /** Bot user configuration */
-    bot_user?: {
-      /** The display name of the bot */
-      display_name: string;
-      /** Whether the bot should always appear online */
-      always_online?: boolean;
+/**
+ * Re-export of the Slack SDK's Manifest type.
+ * @see {@link https://docs.slack.dev/reference/app-manifest Slack App Manifest reference}
+ */
+export type SlackAppManifest = Manifest;
+
+// =============================================================================
+// Vercel Webhook Payload Types
+// =============================================================================
+
+/** Payload for deployment.cleanup webhook event */
+export interface DeploymentCleanupPayload {
+  type: "deployment.cleanup";
+  id: string;
+  createdAt: number;
+  region: string | null;
+  payload: {
+    team: { id: string | null };
+    user: { id: string };
+    deployment: {
+      id: string;
+      meta: Record<string, string>;
+      url: string;
+      name: string;
+      alias: string[];
+      target: "production" | "staging" | null;
+      customEnvironmentId?: string;
+      regions: string[];
     };
-    /** Slash commands configuration */
-    slash_commands?: Array<{
-      /** The command name (e.g., "/weather") */
-      command: string;
-      /** The URL to send the command payload to */
-      url?: string;
-      /** A short description of the command */
-      description: string;
-      /** Hint text for the command */
-      usage_hint?: string;
-      /** Whether to escape special characters */
-      should_escape?: boolean;
-    }>;
-  };
-  /** OAuth configuration */
-  oauth_config?: {
-    /** OAuth scopes */
-    scopes?: {
-      /** Bot token scopes */
-      bot?: string[];
-      /** User token scopes */
-      user?: string[];
-    };
-    /** Redirect URLs for OAuth */
-    redirect_urls?: string[];
-  };
-  /** App settings */
-  settings?: {
-    /** Event subscriptions configuration */
-    event_subscriptions?: {
-      /** The URL to send events to */
-      request_url?: string;
-      /** Bot events to subscribe to */
-      bot_events?: string[];
-      /** User events to subscribe to */
-      user_events?: string[];
-    };
-    /** Interactivity configuration */
-    interactivity?: {
-      /** Whether interactivity is enabled */
-      is_enabled?: boolean;
-      /** The URL to send interactive payloads to */
-      request_url?: string;
-      /** The URL for message menu options */
-      message_menu_options_url?: string;
-    };
-    /** Whether socket mode is enabled */
-    socket_mode_enabled?: boolean;
-    /** Whether token rotation is enabled */
-    token_rotation_enabled?: boolean;
+    project: { id: string };
   };
 }
 
-/** Response from Slack's apps.manifest.create API */
-export interface SlackManifestCreateResponse {
-  /** Whether the request was successful */
-  ok: boolean;
-  /** The ID of the created app */
-  app_id?: string;
-  /** App credentials */
-  credentials?: {
-    /** The client ID for OAuth */
-    client_id: string;
-    /** The client secret for OAuth */
-    client_secret: string;
-    /** The verification token (deprecated, use signing secret) */
-    verification_token: string;
-    /** The signing secret for request verification */
-    signing_secret: string;
-  };
-  /** The URL to authorize/install the app */
-  oauth_authorize_url?: string;
-  /** Error code if the request failed */
-  error?: string;
-  /** Detailed errors for invalid manifest */
-  errors?: Array<{
-    message: string;
-    pointer: string;
-  }>;
-}
+// =============================================================================
+// Setup Script (pre-build)
+// =============================================================================
 
-/** Response from Slack's apps.manifest.delete API */
-export interface SlackManifestDeleteResponse {
-  /** Whether the request was successful */
-  ok: boolean;
-  /** Error code if the request failed */
-  error?: string;
-}
-
-/** Response from Slack's apps.manifest.validate API */
-export interface SlackManifestValidateResponse {
-  /** Whether the request was successful */
-  ok: boolean;
-  /** Error code if the request failed */
-  error?: string;
-  /** Detailed errors for invalid manifest */
-  errors?: Array<{
-    message: string;
-    pointer: string;
-  }>;
-}
-
-/** Options for createSlackAppFromDeployment function */
-export interface CreateSlackAppOptions {
+/** Options for setupSlackPreview */
+export interface SetupSlackPreviewOptions {
   /**
-   * Path to the manifest file in the repository
+   * Path to the manifest.json file (relative to repo root)
    * @default "manifest.json"
    */
   manifestPath?: string;
   /**
-   * Override the repository to fetch the manifest from.
-   * Format: "owner/repo" (e.g., "vercel/slack-bolt")
-   * @default Uses Vercel deployment metadata (githubCommitRepo)
-   */
-  repository?: string;
-  /**
-   * Override the git ref (branch/tag/commit) to fetch the manifest from.
-   * @default Uses Vercel deployment metadata (githubCommitSha)
-   */
-  gitRef?: string;
-  /**
-   * Slack configuration token for creating apps
+   * Slack configuration token for creating/updating apps
    * @default process.env.SLACK_CONFIGURATION_TOKEN
    */
   slackConfigToken?: string;
   /**
-   * GitHub token for accessing private repositories
-   * @default process.env.GITHUB_TOKEN
+   * Vercel API token for setting/querying environment variables
+   * @default process.env.VERCEL_API_TOKEN
    */
-  githubToken?: string;
+  vercelToken?: string;
+  /**
+   * Path to the cleanup webhook handler route.
+   * Used to automatically register a Vercel webhook for `deployment.cleanup` events
+   * so deleted branches trigger Slack app cleanup.
+   * @default "/api/webhooks/vercel"
+   */
+  webhookPath?: string;
+}
+
+/**
+ * Pre-build setup script for Slack preview deployments.
+ *
+ * Call this before your framework build command to:
+ * - Create a Slack app on the first deployment for a branch
+ * - Sync manifest changes on subsequent deployments
+ * - Set branch-scoped environment variables in Vercel
+ *
+ * @example
+ * ```typescript
+ * // scripts/setup-slack.ts
+ * import { setupSlackPreview } from '@vercel/slack-bolt/preview';
+ *
+ * // Uses manifest.json in the repo root by default
+ * await setupSlackPreview();
+ *
+ * // Or specify a custom path
+ * await setupSlackPreview({ manifestPath: 'config/manifest.json' });
+ * ```
+ *
+ * Build command: `tsx scripts/setup-slack.ts && next build`
+ */
+export async function setupSlackPreview(
+  options: SetupSlackPreviewOptions = {},
+): Promise<void> {
+  const {
+    manifestPath = "manifest.json",
+    slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
+    vercelToken = process.env.VERCEL_API_TOKEN,
+    webhookPath = "/api/webhooks/vercel",
+  } = options;
+
+  const branch = process.env.VERCEL_GIT_COMMIT_REF;
+  const projectId = process.env.VERCEL_PROJECT_ID;
+  const branchUrl = process.env.VERCEL_BRANCH_URL;
+  const teamId = process.env.VERCEL_TEAM_ID || null;
+
+  log.header();
+
+  // Skip for production deployments
+  if (process.env.VERCEL_ENV === "production") {
+    log.skip("Skipped (production deployment)");
+    return;
+  }
+
+  if (!branch || !projectId || !branchUrl) {
+    log.skip(
+      "Skipped (missing VERCEL_GIT_COMMIT_REF, VERCEL_PROJECT_ID, or VERCEL_BRANCH_URL)",
+    );
+    return;
+  }
+
+  if (!slackConfigToken) {
+    throw new Error(
+      "SLACK_CONFIGURATION_TOKEN is required. Set it in environment variables or pass via options.",
+    );
+  }
+
+  if (!vercelToken) {
+    throw new Error(
+      "VERCEL_API_TOKEN is required for querying and setting branch-scoped env vars.",
+    );
+  }
+
+  log.info("Branch", branch);
+  log.info("Manifest", manifestPath);
+  console.log();
+
+  // Load and prepare manifest
+  const manifest = await loadManifest(manifestPath);
+  const baseUrl = `https://${branchUrl}`;
+
+  // Read deployment context from Vercel system env vars
+  const commitSha = process.env.VERCEL_GIT_COMMIT_SHA ?? "unknown";
+  const shortSha = commitSha.slice(0, 7);
+  const commitMsg = process.env.VERCEL_GIT_COMMIT_MESSAGE ?? "";
+  const commitAuthor = process.env.VERCEL_GIT_COMMIT_AUTHOR_LOGIN ?? "unknown";
+
+  // Format name as "name (branch)"
+  manifest.display_information.name = formatPreviewName(
+    manifest.display_information.name,
+    branch,
+  );
+
+  // Update bot_user display_name if present
+  if (manifest.features?.bot_user?.display_name) {
+    manifest.features.bot_user.display_name = formatPreviewName(
+      manifest.features.bot_user.display_name,
+      branch,
+    );
+  }
+
+  // Append deployment context to long description (preserve user's original)
+  const deploymentInfo = [
+    `\n`, // ensure a new line after the user's long description
+    `:globe_with_meridians: *Deployment URL:* ${branchUrl}`,
+    `:seedling: *Branch:* ${branch}`,
+    `:technologist: *Commit:* ${shortSha} ${commitMsg}`,
+    `:bust_in_silhouette: *Last updated by:* ${commitAuthor}`,
+    `\n`,
+    `_Automatically created by ▲ Vercel_`,
+    ``,
+  ].join("\n");
+
+  // Slack limits long_description to 4000 characters
+  const maxLongDesc = 4000;
+  const existingDesc = manifest.display_information.long_description ?? "";
+  const combined = existingDesc + deploymentInfo;
+
+  if (combined.length > maxLongDesc) {
+    // Truncate the user's description to make room for deployment info
+    const available = maxLongDesc - deploymentInfo.length;
+    manifest.display_information.long_description =
+      existingDesc.slice(0, available) + deploymentInfo;
+  } else {
+    manifest.display_information.long_description = combined;
+  }
+
+  // Inject branch URL into manifest
+  injectUrls(manifest, baseUrl);
+
+  // Check if app already exists for this branch by querying Vercel env vars
+  let resolvedAppId: string | null = null;
+  let resolvedInstallUrl: string | null = null;
+  let existingAppId = await getSlackAppIdForBranch(
+    projectId,
+    branch,
+    vercelToken,
+    teamId,
+  );
+
+  // If app exists, always update the manifest (safe upsert)
+  if (existingAppId) {
+    console.log(`  Updating Slack app ${existingAppId} ...`);
+    try {
+      await updateSlackAppManifest(existingAppId, manifest, slackConfigToken);
+      resolvedAppId = existingAppId;
+      log.success(`Synced manifest with preview deployment URL: ${branchUrl}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+
+      // App was deleted externally -- clean up env vars and recreate below
+      if (msg.includes("app_not_found") || msg.includes("internal_error")) {
+        log.warn(`App ${existingAppId} no longer exists, recreating`);
+        // Clean up stale env vars before recreating
+        try {
+          await deleteVercelEnvVars(projectId, branch, vercelToken, teamId);
+        } catch {
+          // Best effort cleanup
+        }
+        existingAppId = null;
+      } else {
+        // Real error (e.g. invalid manifest) -- surface it clearly
+        throw error;
+      }
+    }
+  }
+
+  // Create a new app for this branch (only if one doesn't already exist)
+  if (!existingAppId) {
+    console.log(`  Creating Slack app for branch: ${branch} ...`);
+    const result = await createSlackAppFromManifest(manifest, slackConfigToken);
+
+    const appId = result.app_id;
+    const clientId = result.credentials?.client_id;
+    const clientSecret = result.credentials?.client_secret;
+    const signingSecret = result.credentials?.signing_secret;
+
+    if (!appId || !clientId || !clientSecret || !signingSecret) {
+      throw new Error(
+        `Slack app creation succeeded but missing app_id or credentials. Response: ${JSON.stringify(result)}`,
+      );
+    }
+
+    // Set Vercel environment variables (branch-scoped), including SLACK_APP_ID as our "store"
+    await setVercelEnvVars(
+      projectId,
+      branch,
+      vercelToken,
+      [
+        { key: "SLACK_APP_ID", value: appId },
+        { key: "SLACK_CLIENT_ID", value: clientId },
+        { key: "SLACK_CLIENT_SECRET", value: clientSecret },
+        { key: "SLACK_SIGNING_SECRET", value: signingSecret },
+      ],
+      teamId,
+    );
+
+    resolvedAppId = appId;
+    resolvedInstallUrl = result.oauth_authorize_url ?? null;
+    log.success(`Created Slack app for branch: ${branch}`);
+    log.success("Set environment variables");
+    log.info("App ID", appId);
+    log.info("URL", baseUrl);
+  }
+
+  // ── Ensure Vercel webhook is registered for cleanup events ──
+  // The webhook targets the production deployment so it has a stable URL.
+  // Failures here are non-fatal; the webhook can be retried on the next deploy.
+  const productionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (!productionUrl) {
+    log.warn("Skipping webhook registration (no production URL yet)");
+  } else {
+    const webhookUrl = `https://${productionUrl}${webhookPath}`;
+    try {
+      const webhookSecret = await ensureVercelWebhook(
+        projectId,
+        webhookUrl,
+        vercelToken,
+        teamId,
+      );
+      if (webhookSecret) {
+        await setWebhookSecretEnvVar(
+          projectId,
+          webhookSecret,
+          vercelToken,
+          teamId,
+        );
+        log.success("Registered cleanup webhook");
+      } else {
+        log.success("Cleanup webhook already registered");
+      }
+    } catch (error) {
+      log.warn(
+        `Failed to register webhook: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
+
+  if (resolvedInstallUrl || resolvedAppId) {
+    console.log();
+    if (resolvedInstallUrl) {
+      console.log(`${c.dim}→ Install app: ${resolvedInstallUrl}${c.reset}`);
+    }
+    if (resolvedAppId) {
+      console.log(
+        `${c.dim}→ Manage app: https://api.slack.com/apps/${resolvedAppId}${c.reset}`,
+      );
+    }
+  }
+
+  console.log();
 }
 
 // =============================================================================
-// Webhook Handler Options
+// Cleanup Webhook Handler
 // =============================================================================
 
-export interface VercelWebhookHandlerOptions {
+/** Options for createCleanupHandler */
+export interface CleanupHandlerOptions {
   /**
-   * The secret used to verify webhook signatures.
-   * For integrations, use the Integration Secret (Client Secret).
-   * For account webhooks, use the secret displayed when creating the webhook.
+   * Vercel webhook secret for signature verification
    * @default process.env.VERCEL_WEBHOOK_SECRET
    */
   secret?: string;
   /**
-   * If true, verifies the webhook signature.
-   * @default true
+   * Slack configuration token for deleting apps
+   * @default process.env.SLACK_CONFIGURATION_TOKEN
    */
-  signatureVerification?: boolean;
+  slackConfigToken?: string;
   /**
-   * Callback function invoked when a deployment.succeeded event is received.
-   * This fires after all blocking checks have passed.
+   * Vercel API token for querying/deleting environment variables
+   * @default process.env.VERCEL_API_TOKEN
    */
-  onDeploymentSucceeded?: (
-    payload: DeploymentSucceededPayload,
-  ) => Promise<void> | void;
-  /**
-   * Callback function invoked when a deployment.cleanup event is received.
-   * This fires when a deployment is fully removed (due to explicit removal or retention rules).
-   * Use this to clean up associated resources like Slack apps.
-   */
-  onDeploymentCleanup?: (
-    payload: DeploymentCleanupPayload,
-  ) => Promise<void> | void;
+  vercelToken?: string;
 }
 
 /**
- * Computes HMAC SHA1 signature for webhook verification.
- */
-function computeSignature(body: string, secret: string): string {
-  return crypto.createHmac("sha1", secret).update(body).digest("hex");
-}
-
-/**
- * Verifies the webhook signature using constant-time comparison.
- */
-function verifySignature(
-  body: string,
-  signature: string,
-  secret: string,
-): boolean {
-  const expectedSignature = computeSignature(body, secret);
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expectedSignature),
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Creates a Vercel webhook handler for deployment events.
+ * Creates a Vercel webhook handler for deployment.cleanup events.
+ * When a branch is deleted and Vercel removes the preview deployment,
+ * this handler queries Vercel env vars for the branch's SLACK_APP_ID,
+ * deletes the Slack app, and removes the env vars.
+ *
+ * No external store required -- Vercel env vars are the source of truth.
+ *
+ * Register this endpoint in Vercel Webhook settings for `deployment.cleanup` events.
  *
  * @example
  * ```typescript
- * import { createVercelWebhookHandler } from '@vercel/slack-bolt/preview';
+ * // app/api/webhooks/vercel/route.ts
+ * import { createCleanupHandler } from '@vercel/slack-bolt/preview';
  *
- * const handler = createVercelWebhookHandler({
- *   secret: process.env.VERCEL_WEBHOOK_SECRET,
- *   onDeploymentSucceeded: async (event) => {
- *     console.log(`Deployment ${event.payload.deployment.id} succeeded!`);
- *     console.log(`URL: https://${event.payload.deployment.url}`);
- *   },
- * });
- *
- * export const POST = handler;
+ * export const POST = createCleanupHandler();
  * ```
  */
-export function createVercelWebhookHandler(
-  options: VercelWebhookHandlerOptions = {},
+export function createCleanupHandler(
+  options: CleanupHandlerOptions = {},
 ): (req: Request) => Promise<Response> {
   const {
     secret = process.env.VERCEL_WEBHOOK_SECRET,
-    signatureVerification = true,
-    onDeploymentSucceeded,
-    onDeploymentCleanup,
+    slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
+    vercelToken = process.env.VERCEL_API_TOKEN,
   } = options;
 
   return async (req: Request): Promise<Response> => {
@@ -368,150 +417,129 @@ export function createVercelWebhookHandler(
       const rawBody = await req.text();
 
       // Verify webhook signature
-      if (signatureVerification) {
-        if (!secret) {
-          console.error(
-            "VERCEL_WEBHOOK_SECRET is not set. Set it or disable signature verification.",
-          );
-          return new Response(
-            JSON.stringify({
-              error: "Webhook secret not configured",
-              code: "missing_secret",
-            }),
-            {
-              status: 500,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
-        }
-
+      if (secret) {
         const signature = req.headers.get("x-vercel-signature");
-
-        if (!signature) {
-          return new Response(
-            JSON.stringify({
-              error: "Missing x-vercel-signature header",
-              code: "missing_signature",
-            }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
-        }
-
-        if (!verifySignature(rawBody, signature, secret)) {
-          return new Response(
-            JSON.stringify({
-              error: "Invalid signature",
-              code: "invalid_signature",
-            }),
-            {
-              status: 403,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+        if (!signature || !verifySignature(rawBody, signature, secret)) {
+          return new Response(JSON.stringify({ error: "Invalid signature" }), {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          });
         }
       }
 
-      // Parse the webhook payload
-      const event = JSON.parse(rawBody) as
-        | DeploymentSucceededPayload
-        | DeploymentCleanupPayload;
+      const event = JSON.parse(rawBody) as DeploymentCleanupPayload;
 
-      console.log(`[slack-bolt] Received Vercel webhook: ${event.type}`);
-      console.log(`[slack-bolt] Deployment ID: ${event.payload?.deployment?.id}`);
-      // @ts-expect-error - target only exists on some event types
-      console.log(`[slack-bolt] Target: ${event.payload?.target ?? "N/A"}`);
-
-      switch (event.type) {
-        case "deployment.succeeded":
-          if (onDeploymentSucceeded) {
-            console.log("[slack-bolt] Calling onDeploymentSucceeded handler");
-            await onDeploymentSucceeded(event);
-          }
-          break;
-
-        case "deployment.cleanup":
-          if (onDeploymentCleanup) {
-            console.log("[slack-bolt] Calling onDeploymentCleanup handler");
-            await onDeploymentCleanup(event);
-          }
-          break;
-
-        default:
-          console.log(`[slack-bolt] No handler for event type: ${(event as { type: string }).type}`);
+      if (event.type !== "deployment.cleanup") {
+        return new Response(JSON.stringify({ received: true, skipped: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
       }
 
-      return new Response(JSON.stringify({ received: true, type: event.type }), {
+      const { meta } = event.payload.deployment;
+      const projectId = event.payload.project.id;
+      const teamId = event.payload.team.id;
+      const branch = extractBranchFromMeta(meta);
+
+      if (!branch) {
+        console.warn(
+          "[slack-bolt] No branch found in cleanup event metadata. Skipping.",
+        );
+        return new Response(JSON.stringify({ received: true, skipped: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      console.log(`[slack-bolt] Processing cleanup for branch: ${branch}`);
+
+      if (!vercelToken) {
+        console.error(
+          "[slack-bolt] VERCEL_API_TOKEN not set. Cannot query env vars for cleanup.",
+        );
+        return new Response(
+          JSON.stringify({ error: "VERCEL_API_TOKEN required for cleanup" }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      // Query Vercel env vars to find the app ID for this branch
+      const appId = await getSlackAppIdForBranch(
+        projectId,
+        branch,
+        vercelToken,
+        teamId,
+      );
+
+      if (!appId) {
+        console.log(
+          `[slack-bolt] No SLACK_APP_ID found for branch ${branch}. Nothing to clean up.`,
+        );
+        return new Response(
+          JSON.stringify({ received: true, cleaned: false }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      // Delete the Slack app -- requires slackConfigToken
+      if (!slackConfigToken) {
+        console.error(
+          "[slack-bolt] SLACK_CONFIGURATION_TOKEN not set. " +
+            "Cannot delete Slack app. Skipping cleanup to avoid orphaning the app.",
+        );
+        return new Response(
+          JSON.stringify({ error: "SLACK_CONFIGURATION_TOKEN required" }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      try {
+        await deleteSlackApp(appId, slackConfigToken);
+        console.log(`[slack-bolt] Deleted Slack app: ${appId}`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes("app_not_found")) {
+          console.log(`[slack-bolt] App ${appId} already deleted`);
+        } else {
+          console.error("[slack-bolt] Failed to delete Slack app:", error);
+        }
+      }
+
+      // Delete Vercel env vars (including SLACK_APP_ID)
+      try {
+        await deleteVercelEnvVars(projectId, branch, vercelToken, teamId);
+      } catch (error) {
+        console.error("[slack-bolt] Failed to delete Vercel env vars:", error);
+      }
+
+      console.log(`[slack-bolt] Cleanup complete for branch ${branch}`);
+
+      return new Response(JSON.stringify({ received: true, cleaned: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     } catch (error) {
-      console.error("Error processing Vercel webhook:", error);
-      return new Response(
-        JSON.stringify({
-          error: "Internal server error",
-          code: "internal_error",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      console.error("[slack-bolt] Error processing cleanup webhook:", error);
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   };
 }
 
 // =============================================================================
-// Slack App Creation Functions
+// Manifest Helpers
 // =============================================================================
 
 /**
- * Fetches a Slack app manifest from a GitHub repository at a specific commit.
- *
- * @param owner - The GitHub repository owner
- * @param repo - The GitHub repository name
- * @param commitSha - The commit SHA to fetch the manifest from
- * @param manifestPath - The path to the manifest file in the repository
- * @param githubToken - Optional GitHub token for private repositories
- * @returns The parsed Slack app manifest
- * @throws Error if the fetch fails or the manifest is invalid
+ * Loads a Slack app manifest from a local file.
  */
-async function fetchManifestFromGitHub(
-  owner: string,
-  repo: string,
-  commitSha: string,
-  manifestPath: string,
-  githubToken?: string,
-): Promise<SlackAppManifest> {
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${commitSha}/${manifestPath}`;
-
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-  };
-
-  if (githubToken) {
-    headers.Authorization = `token ${githubToken}`;
-  }
-
-  const response = await fetch(url, { headers });
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(
-        `Manifest file not found at ${manifestPath} in ${owner}/${repo}@${commitSha.slice(0, 7)}`,
-      );
-    }
-    throw new Error(
-      `Failed to fetch manifest from GitHub: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  const text = await response.text();
-
+async function loadManifest(manifestPath: string): Promise<Manifest> {
+  const resolved = path.resolve(process.cwd(), manifestPath);
+  const content = await fs.readFile(resolved, "utf-8");
   try {
-    return JSON.parse(text) as SlackAppManifest;
+    return JSON.parse(content) as Manifest;
   } catch {
     throw new Error(
       `Failed to parse manifest as JSON from ${manifestPath}. Ensure it's valid JSON.`,
@@ -520,511 +548,441 @@ async function fetchManifestFromGitHub(
 }
 
 /**
- * Updates URLs in a Slack app manifest with the deployment URL.
- * Updates: event_subscriptions.request_url, interactivity.request_url, slash_commands[].url
- *
- * @param manifest - The original manifest
- * @param deploymentUrl - The Vercel deployment URL (without protocol)
- * @returns A new manifest with updated URLs
+ * Injects a base URL into all URL fields in a manifest.
+ * Preserves the path portion of existing URLs.
  */
-function updateManifestUrls(
-  manifest: SlackAppManifest,
-  deploymentUrl: string,
-): SlackAppManifest {
-  const baseUrl = `https://${deploymentUrl}`;
-  const updated = structuredClone(manifest);
-
-  // Update event subscriptions request URL
-  if (updated.settings?.event_subscriptions?.request_url) {
-    const path = extractPath(updated.settings.event_subscriptions.request_url);
-    updated.settings.event_subscriptions.request_url = `${baseUrl}${path}`;
+function injectUrls(manifest: Manifest, baseUrl: string): void {
+  if (manifest.settings?.event_subscriptions?.request_url) {
+    const p = extractPath(manifest.settings.event_subscriptions.request_url);
+    manifest.settings.event_subscriptions.request_url = `${baseUrl}${p}`;
   }
-
-  // Update interactivity request URL
-  if (updated.settings?.interactivity?.request_url) {
-    const path = extractPath(updated.settings.interactivity.request_url);
-    updated.settings.interactivity.request_url = `${baseUrl}${path}`;
+  if (manifest.settings?.interactivity?.request_url) {
+    const p = extractPath(manifest.settings.interactivity.request_url);
+    manifest.settings.interactivity.request_url = `${baseUrl}${p}`;
   }
-
-  // Update slash commands URLs
-  if (updated.features?.slash_commands) {
-    for (const command of updated.features.slash_commands) {
-      if (command.url) {
-        const path = extractPath(command.url);
-        command.url = `${baseUrl}${path}`;
+  if (manifest.features?.slash_commands) {
+    for (const cmd of manifest.features.slash_commands) {
+      if (cmd.url) {
+        const p = extractPath(cmd.url);
+        cmd.url = `${baseUrl}${p}`;
       }
     }
   }
-
-  return updated;
 }
 
 /**
- * Extracts the path portion from a URL or returns the original string if it's just a path.
+ * Extracts the path portion from a URL, or returns the string as-is if it's already a path.
  */
 function extractPath(urlOrPath: string): string {
   try {
     const url = new URL(urlOrPath);
     return url.pathname + url.search;
   } catch {
-    // If it's not a valid URL, assume it's already a path
     return urlOrPath.startsWith("/") ? urlOrPath : `/${urlOrPath}`;
   }
 }
 
 /**
- * Updates the app name in the manifest to include the branch name.
- * Format: "AppName (branch-name)"
- * Truncates to 35 characters (Slack's limit).
- *
- * @param manifest - The original manifest
- * @param branchName - The git branch name
- * @returns A new manifest with the updated name
+ * Formats a preview app name as "name (branch @ sha)".
+ * Sanitizes branch for Slack (replaces / with -).
+ * Truncates branch to fit Slack's 35-char limit.
  */
-function updateManifestName(
-  manifest: SlackAppManifest,
-  branchName: string,
-): SlackAppManifest {
-  const updated = structuredClone(manifest);
-
-  // Clean up branch name (remove refs/heads/ prefix if present)
-  const cleanBranch = branchName.replace(/^refs\/heads\//, "");
-
-  // Update display_information.name
+function formatPreviewName(originalName: string, branch: string): string {
   const maxLength = 35;
-  updated.display_information.name = formatNameWithBranch(
-    updated.display_information.name,
-    cleanBranch,
-    maxLength,
-  );
+  const cleanBranch = branch.replace(/^refs\/heads\//, "").replace(/\//g, "-");
 
-  // Update bot_user.display_name if present
-  if (updated.features?.bot_user?.display_name) {
-    updated.features.bot_user.display_name = formatNameWithBranch(
-      updated.features.bot_user.display_name,
-      cleanBranch,
-      maxLength,
-    );
+  const full = `${originalName} (${cleanBranch})`;
+
+  if (full.length <= maxLength) {
+    return full;
   }
 
-  return updated;
+  // Truncate branch to fit
+  const prefix = `${originalName} (`;
+  const suffix = ")";
+  const availableForBranch = maxLength - prefix.length - suffix.length;
+
+  if (availableForBranch <= 0) {
+    return full.slice(0, maxLength);
+  }
+
+  return `${prefix}${cleanBranch.slice(0, availableForBranch)}${suffix}`;
+}
+
+// =============================================================================
+// Slack API Functions
+// =============================================================================
+
+/**
+ * Extracts structured error information from a Slack WebClient platform error.
+ */
+function extractSlackApiError(error: unknown): {
+  code: string;
+  validationErrors?: Array<{ message: string; pointer: string }>;
+} | null {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data: Record<string, unknown> }).data;
+    return {
+      code: typeof data.error === "string" ? data.error : "unknown_error",
+      validationErrors: Array.isArray(data.errors)
+        ? (data.errors as Array<{ message: string; pointer: string }>)
+        : undefined,
+    };
+  }
+  return null;
 }
 
 /**
- * Formats a name with a branch suffix, truncating if necessary.
- */
-function formatNameWithBranch(
-  originalName: string,
-  branch: string,
-  maxLength: number,
-): string {
-  const suffix = ` (${branch})`;
-
-  if (originalName.length + suffix.length <= maxLength) {
-    return `${originalName}${suffix}`;
-  }
-
-  // Truncate the name to fit (use .. instead of ellipsis which Slack doesn't allow)
-  const availableForName = maxLength - suffix.length - 2; // -2 for ".."
-  if (availableForName > 3) {
-    const truncatedName = `${originalName.slice(0, availableForName)}..`;
-    return `${truncatedName}${suffix}`;
-  }
-
-  // Branch name is very long, just truncate everything
-  return `${originalName} (${branch})`.slice(0, maxLength);
-}
-
-/**
- * Creates a new Slack app using the apps.manifest.create API.
- *
- * @param manifest - The Slack app manifest
- * @param token - The Slack configuration token
- * @returns The API response with app details and credentials
- * @throws Error if the API call fails
- */
-/**
- * Validates a Slack app manifest using the apps.manifest.validate API.
+ * Validates a Slack app manifest.
  */
 async function validateSlackManifest(
-  manifest: SlackAppManifest,
+  manifest: Manifest,
   token: string,
 ): Promise<void> {
-  console.log("[slack-bolt] Validating Slack app manifest...");
-
-  const response = await fetch("https://slack.com/api/apps.manifest.validate", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ manifest: JSON.stringify(manifest) }),
-  });
-
-  if (!response.ok) {
+  const client = new WebClient(token);
+  try {
+    await client.apps.manifest.validate({ manifest });
+  } catch (error) {
+    const apiError = extractSlackApiError(error);
+    const details = apiError?.validationErrors
+      ? apiError.validationErrors
+          .map((e) => `  - ${e.message} (${e.pointer})`)
+          .join("\n")
+      : (apiError?.code ??
+        (error instanceof Error ? error.message : String(error)));
     throw new Error(
-      `Slack API request failed: ${response.status} ${response.statusText}`,
+      `[slack-bolt] Invalid manifest.json:\n${details}\n\nFix your manifest.json and redeploy.`,
     );
   }
-
-  const result = (await response.json()) as SlackManifestValidateResponse;
-
-  if (!result.ok) {
-    const errorDetails = result.errors
-      ? result.errors.map((e) => `${e.pointer}: ${e.message}`).join("; ")
-      : result.error;
-    throw new Error(`Invalid Slack app manifest: ${errorDetails}`);
-  }
-
-  console.log("[slack-bolt] Manifest validation passed");
 }
 
-async function createSlackAppFromManifest(
-  manifest: SlackAppManifest,
-  token: string,
-): Promise<SlackManifestCreateResponse> {
-  // Validate manifest before creating
+/**
+ * Creates a new Slack app from a manifest.
+ */
+async function createSlackAppFromManifest(manifest: Manifest, token: string) {
   await validateSlackManifest(manifest, token);
 
-  console.log("[slack-bolt] Creating Slack app...");
-
-  const response = await fetch("https://slack.com/api/apps.manifest.create", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ manifest: JSON.stringify(manifest) }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Slack API request failed: ${response.status} ${response.statusText}`,
-    );
+  const client = new WebClient(token);
+  try {
+    return await client.apps.manifest.create({ manifest });
+  } catch (error) {
+    const apiError = extractSlackApiError(error);
+    const details = apiError?.validationErrors
+      ? apiError.validationErrors
+          .map((e) => `${e.pointer}: ${e.message}`)
+          .join("; ")
+      : (apiError?.code ??
+        (error instanceof Error ? error.message : String(error)));
+    throw new Error(`Failed to create Slack app: ${details}`);
   }
-
-  const result = (await response.json()) as SlackManifestCreateResponse;
-
-  if (!result.ok) {
-    const errorDetails = result.errors
-      ? result.errors.map((e) => `${e.pointer}: ${e.message}`).join("; ")
-      : result.error;
-    throw new Error(`Failed to create Slack app: ${errorDetails}`);
-  }
-
-  return result;
 }
 
 /**
- * Creates a new Slack app from a Vercel deployment event.
- *
- * This function:
- * 1. Extracts GitHub metadata from the deployment
- * 2. Fetches the app manifest from the repository at the deployed commit
- * 3. Updates manifest URLs to point to the deployment
- * 4. Appends the branch name to the app name
- * 5. Creates the Slack app via the API
- *
- * @param event - The Vercel deployment.ready webhook payload
- * @param options - Configuration options
- * @returns The created Slack app details including app_id and credentials
- * @throws Error if GitHub metadata is missing or any step fails
- *
- * @example
- * ```typescript
- * const handler = createVercelWebhookHandler({
- *   onDeploymentSucceeded: async (event) => {
- *     if (event.payload.target !== 'production') {
- *       const result = await createSlackAppFromDeployment(event, {
- *         manifestPath: 'slack-manifest.json',
- *       });
- *       console.log(`Created Slack app: ${result.app_id}`);
- *     }
- *   },
- * });
- * ```
+ * Updates an existing Slack app's manifest.
  */
-export async function createSlackAppFromDeployment(
-  event: DeploymentSucceededPayload,
-  options: CreateSlackAppOptions = {},
-): Promise<SlackManifestCreateResponse> {
-  const {
-    manifestPath = "manifest.json",
-    repository,
-    gitRef,
-    slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
-    githubToken = process.env.GITHUB_TOKEN,
-  } = options;
-
-  // Validate Slack token
-  if (!slackConfigToken) {
-    throw new Error(
-      "SLACK_CONFIGURATION_TOKEN is required. Set it in environment variables or pass via options.",
-    );
-  }
-
-  // Extract GitHub metadata from deployment
-  const { meta } = event.payload.deployment;
-  console.log("[slack-bolt] Deployment metadata:", JSON.stringify(meta, null, 2));
-
-  let owner: string | undefined;
-  let repo: string | undefined;
-  let ref: string | undefined;
-
-  // Use override repository if provided
-  if (repository) {
-    const parts = repository.split("/");
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      throw new Error(
-        `Invalid repository format: ${repository}. Expected "owner/repo".`,
-      );
-    }
-    [owner, repo] = parts;
-    console.log(`[slack-bolt] Using override repository: ${owner}/${repo}`);
-  } else {
-    // Try to get owner and repo from Vercel deployment metadata
-    const githubCommitRepo = meta.githubCommitRepo;
-    if (githubCommitRepo?.includes("/")) {
-      [owner, repo] = githubCommitRepo.split("/");
-    } else {
-      // Try to get owner from separate field (githubOrg or githubRepoOwner)
-      owner = meta.githubOrg || meta.githubRepoOwner || meta.githubCommitOrg;
-      repo = githubCommitRepo;
-    }
-  }
-
-  // Use override gitRef or fall back to deployment metadata
-  ref = gitRef || meta.githubCommitSha;
-  const branchRef = meta.githubCommitRef;
-
-  // Validate we have all required info
-  if (!ref || !owner || !repo) {
-    throw new Error(
-      "GitHub metadata not found in deployment. Either provide 'repository' and 'gitRef' options, " +
-        "or ensure this is a GitHub-connected Vercel project. " +
-        `Available meta keys: ${Object.keys(meta).join(", ")}. ` +
-        `Found: ref=${ref}, owner=${owner}, repo=${repo}`,
-    );
-  }
-
-  console.log(`[slack-bolt] Fetching manifest from ${owner}/${repo}@${ref}/${manifestPath}`);
-
-  // Fetch manifest from GitHub
-  const manifest = await fetchManifestFromGitHub(
-    owner,
-    repo,
-    ref,
-    manifestPath,
-    githubToken,
-  );
-
-  // Update manifest URLs with deployment URL
-  let updatedManifest = updateManifestUrls(
-    manifest,
-    event.payload.deployment.url,
-  );
-
-  // Update app name with branch name if available
-  if (branchRef) {
-    updatedManifest = updateManifestName(updatedManifest, branchRef);
-  }
-
-  // Create the Slack app
-  return createSlackAppFromManifest(updatedManifest, slackConfigToken);
-}
-
-/**
- * Deletes a Slack app using the apps.manifest.delete API.
- *
- * Note: You must track the mapping of deployment ID to Slack app ID yourself
- * (e.g., in a database or KV store) when creating apps, then use this function
- * to delete them when the deployment is cleaned up.
- *
- * @param appId - The Slack app ID to delete
- * @param options - Configuration options
- * @returns The API response
- * @throws Error if the API call fails
- *
- * @example
- * ```typescript
- * const handler = createVercelWebhookHandler({
- *   onDeploymentSucceeded: async (event) => {
- *     const result = await createSlackAppFromDeployment(event);
- *     // Store mapping: event.payload.deployment.id -> result.app_id
- *     await db.set(`slack-app:${event.payload.deployment.id}`, result.app_id);
- *   },
- *   onDeploymentCleanup: async (event) => {
- *     // Retrieve the app ID for this deployment
- *     const appId = await db.get(`slack-app:${event.payload.deployment.id}`);
- *     if (appId) {
- *       await deleteSlackApp(appId);
- *       await db.delete(`slack-app:${event.payload.deployment.id}`);
- *     }
- *   },
- * });
- * ```
- */
-export async function deleteSlackApp(
+async function updateSlackAppManifest(
   appId: string,
-  options: {
-    /**
-     * Slack configuration token for deleting apps
-     * @default process.env.SLACK_CONFIGURATION_TOKEN
-     */
-    slackConfigToken?: string;
-  } = {},
-): Promise<SlackManifestDeleteResponse> {
-  const { slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN } = options;
+  manifest: Manifest,
+  token: string,
+): Promise<void> {
+  await validateSlackManifest(manifest, token);
 
-  if (!slackConfigToken) {
+  const client = new WebClient(token);
+  try {
+    await client.apps.manifest.update({ app_id: appId, manifest });
+  } catch (error) {
+    const apiError = extractSlackApiError(error);
+    const details = apiError?.validationErrors
+      ? apiError.validationErrors
+          .map((e) => `${e.pointer}: ${e.message}`)
+          .join("; ")
+      : (apiError?.code ??
+        (error instanceof Error ? error.message : String(error)));
+    throw new Error(`Failed to update Slack app: ${details}`);
+  }
+}
+
+/**
+ * Deletes a Slack app.
+ */
+async function deleteSlackApp(appId: string, token: string): Promise<void> {
+  const client = new WebClient(token);
+  try {
+    await client.apps.manifest.delete({ app_id: appId });
+  } catch (error) {
+    const apiError = extractSlackApiError(error);
     throw new Error(
-      "SLACK_CONFIGURATION_TOKEN is required. Set it in environment variables or pass via options.",
+      `Failed to delete Slack app: ${apiError?.code ?? (error instanceof Error ? error.message : String(error))}`,
     );
   }
-
-  const response = await fetch("https://slack.com/api/apps.manifest.delete", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${slackConfigToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ app_id: appId }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Slack API request failed: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  const result = (await response.json()) as SlackManifestDeleteResponse;
-
-  if (!result.ok) {
-    throw new Error(`Failed to delete Slack app: ${result.error}`);
-  }
-
-  return result;
 }
 
 // =============================================================================
-// Simple Preview Handler
+// Vercel API Functions
 // =============================================================================
 
-/**
- * Interface for storing deployment ID to Slack app ID mappings.
- */
-export interface DeploymentStore {
-  /** Get the Slack app ID for a deployment */
-  get(deploymentId: string): Promise<string | null | undefined>;
-  /** Store the Slack app ID for a deployment */
-  set(deploymentId: string, appId: string): Promise<void>;
-  /** Delete the mapping for a deployment */
-  delete(deploymentId: string): Promise<void>;
-}
+/** The env var keys we manage in Vercel */
+const SLACK_ENV_VAR_KEYS = [
+  "SLACK_APP_ID",
+  "SLACK_CLIENT_ID",
+  "SLACK_CLIENT_SECRET",
+  "SLACK_SIGNING_SECRET",
+] as const;
 
 /**
- * Options for createPreviewHandler.
+ * Queries Vercel env vars for a specific branch and returns the
+ * decrypted SLACK_APP_ID if it exists.
+ * Uses the per-env-var endpoint to get decrypted values for encrypted vars.
  */
-export interface CreatePreviewHandlerOptions {
-  /**
-   * Store for mapping deployment IDs to Slack app IDs.
-   * Required for automatic cleanup when deployments are deleted.
-   */
-  deployments: DeploymentStore;
+async function getSlackAppIdForBranch(
+  projectId: string,
+  branch: string,
+  token: string,
+  teamId?: string | null,
+): Promise<string | null> {
+  const vercel = new Vercel({ bearerToken: token });
 
-  /**
-   * Path to the manifest file in the repository.
-   * @default "manifest.json"
-   */
-  manifestPath?: string;
-
-  /**
-   * Override the repository to fetch the manifest from.
-   * Format: "owner/repo" (e.g., "vercel/slack-bolt")
-   * @default Uses Vercel deployment metadata
-   */
-  repository?: string;
-}
-
-/**
- * Creates a Vercel webhook handler that automatically creates and deletes
- * Slack apps for preview deployments.
- *
- * Required environment variables:
- * - SLACK_CONFIGURATION_TOKEN - Slack app configuration token
- * - VERCEL_WEBHOOK_SECRET - Vercel webhook secret for signature verification
- *
- * Optional environment variables:
- * - GITHUB_TOKEN - For private repositories
- *
- * @example
- * ```typescript
- * // app/api/webhooks/vercel/route.ts
- * import { createPreviewHandler } from '@vercel/slack-bolt/preview';
- * import { kv } from '@vercel/kv';
- *
- * export const POST = createPreviewHandler({
- *   deployments: {
- *     get: (id) => kv.get(`slack:${id}`),
- *     set: (id, appId) => kv.set(`slack:${id}`, appId),
- *     delete: (id) => kv.del(`slack:${id}`),
- *   },
- * });
- * ```
- */
-export function createPreviewHandler(
-  options: CreatePreviewHandlerOptions,
-): (req: Request) => Promise<Response> {
-  const { deployments, manifestPath = "manifest.json", repository } = options;
-
-  return createVercelWebhookHandler({
-    onDeploymentSucceeded: async (event) => {
-      // Only create apps for non-production deployments
-      if (event.payload.target === "production") {
-        console.log("[slack-bolt] Skipping production deployment");
-        return;
+  let envs: Array<{ id?: string; key: string; gitBranch?: string }>;
+  try {
+    const data = await vercel.projects.filterProjectEnvs({
+      idOrName: projectId,
+      teamId: teamId ?? undefined,
+    });
+    envs = "envs" in data ? data.envs : [];
+  } catch (error) {
+    if (error && typeof error === "object" && "statusCode" in error) {
+      const statusCode = (error as { statusCode: number }).statusCode;
+      if (statusCode === 401 || statusCode === 403) {
+        console.error(
+          "[slack-bolt] Vercel API auth failed. Check VERCEL_API_TOKEN has correct permissions.",
+        );
       }
+    }
+    throw new Error(
+      `Failed to fetch env vars: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
-      console.log("[slack-bolt] Creating Slack app for preview deployment...");
-      const result = await createSlackAppFromDeployment(event, {
-        manifestPath,
-        repository,
+  // Find the SLACK_APP_ID env var for this branch
+  const appIdEnv = envs.find(
+    (env) => env.key === "SLACK_APP_ID" && env.gitBranch === branch,
+  );
+
+  if (!appIdEnv?.id) {
+    return null;
+  }
+
+  // Fetch the individual env var to get the decrypted value
+  try {
+    const decrypted = await vercel.projects.getProjectEnv({
+      idOrName: projectId,
+      id: appIdEnv.id,
+      teamId: teamId ?? undefined,
+    });
+    return "value" in decrypted ? (decrypted.value ?? null) : null;
+  } catch (error) {
+    console.error(
+      `[slack-bolt] Failed to decrypt SLACK_APP_ID:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+/**
+ * Sets branch-scoped environment variables in a Vercel project.
+ * Uses upsert to create or update vars in a single call per variable.
+ */
+async function setVercelEnvVars(
+  projectId: string,
+  branch: string,
+  token: string,
+  vars: { key: string; value: string }[],
+  teamId?: string | null,
+): Promise<void> {
+  const vercel = new Vercel({ bearerToken: token });
+  const failures: string[] = [];
+
+  for (const { key, value } of vars) {
+    try {
+      await vercel.projects.createProjectEnv({
+        idOrName: projectId,
+        upsert: "true",
+        teamId: teamId ?? undefined,
+        requestBody: {
+          key,
+          value,
+          type: "encrypted",
+          target: ["preview"],
+          gitBranch: branch,
+        },
       });
-
-      if (result.app_id) {
-        await deployments.set(event.payload.deployment.id, result.app_id);
-      }
-
-      console.log(`[slack-bolt] Created Slack app for preview deployment`);
-      console.log(`[slack-bolt]   App ID: ${result.app_id}`);
-      console.log(
-        `[slack-bolt]   URL: https://${event.payload.deployment.url}`,
+    } catch (error) {
+      log.error(
+        `Failed to set env var ${key}: ${error instanceof Error ? error.message : error}`,
       );
-      console.log(`[slack-bolt]   Install: ${result.oauth_authorize_url}`);
-    },
+      failures.push(key);
+    }
+  }
 
-    onDeploymentCleanup: async (event) => {
-      const appId = await deployments.get(event.payload.deployment.id);
+  if (failures.length > 0) {
+    throw new Error(
+      `Failed to set env vars: ${failures.join(", ")}. ` +
+        `The Slack app was created but cannot be tracked. ` +
+        `Delete it manually in Slack and retry.`,
+    );
+  }
+}
 
-      if (!appId) {
-        return;
+/**
+ * Deletes branch-scoped Slack environment variables from a Vercel project.
+ */
+async function deleteVercelEnvVars(
+  projectId: string,
+  branch: string,
+  token: string,
+  teamId?: string | null,
+): Promise<void> {
+  console.log(
+    `[slack-bolt] Deleting env vars for project ${projectId} branch ${branch}`,
+  );
+
+  const vercel = new Vercel({ bearerToken: token });
+
+  let envs: Array<{ id?: string; key: string; gitBranch?: string }>;
+  try {
+    const data = await vercel.projects.filterProjectEnvs({
+      idOrName: projectId,
+      teamId: teamId ?? undefined,
+    });
+    envs = "envs" in data ? data.envs : [];
+  } catch (error) {
+    console.error(
+      `[slack-bolt] Failed to fetch env vars for deletion:`,
+      error instanceof Error ? error.message : error,
+    );
+    return;
+  }
+
+  for (const env of envs) {
+    if (
+      env.id &&
+      env.gitBranch === branch &&
+      (SLACK_ENV_VAR_KEYS as readonly string[]).includes(env.key)
+    ) {
+      try {
+        await vercel.projects.removeProjectEnv({
+          idOrName: projectId,
+          id: env.id,
+          teamId: teamId ?? undefined,
+        });
+        console.log(`[slack-bolt] Deleted env var: ${env.key}`);
+      } catch (error) {
+        console.error(
+          `[slack-bolt] Failed to delete env var ${env.key}:`,
+          error instanceof Error ? error.message : error,
+        );
       }
+    }
+  }
+}
 
-      await deleteSlackApp(appId);
-      await deployments.delete(event.payload.deployment.id);
+// =============================================================================
+// Vercel Webhook Registration
+// =============================================================================
 
-      console.log(`[slack-bolt] Deleted Slack app for deployment cleanup`);
-      console.log(`[slack-bolt]   App ID: ${appId}`);
+/**
+ * Ensures a Vercel webhook exists for `deployment.cleanup` events targeting
+ * the given URL. If one already exists, this is a no-op. If not, it creates
+ * one and returns the webhook secret for signature verification.
+ *
+ * @returns The webhook secret if a new webhook was created, or `null` if one already exists.
+ */
+async function ensureVercelWebhook(
+  projectId: string,
+  webhookUrl: string,
+  token: string,
+  teamId?: string | null,
+): Promise<string | null> {
+  const vercel = new Vercel({ bearerToken: token });
+
+  // List existing webhooks and check for a match
+  const webhooks = await vercel.webhooks.getWebhooks({
+    ...(teamId ? { teamId } : {}),
+  });
+
+  const existing = (webhooks as Array<{ url: string; events: string[] }>).find(
+    (w) => w.url === webhookUrl && w.events.includes("deployment.cleanup"),
+  );
+
+  if (existing) {
+    return null;
+  }
+
+  // Create a new webhook scoped to this project
+  const result = await vercel.webhooks.createWebhook({
+    ...(teamId ? { teamId } : {}),
+    requestBody: {
+      url: webhookUrl,
+      events: ["deployment.cleanup"],
+      projectIds: [projectId],
+    },
+  });
+
+  return result.secret;
+}
+
+/**
+ * Stores VERCEL_WEBHOOK_SECRET as a project-level env var targeting all
+ * environments (production, preview, development) so the cleanup handler
+ * can verify webhook signatures regardless of which environment serves it.
+ */
+async function setWebhookSecretEnvVar(
+  projectId: string,
+  secret: string,
+  token: string,
+  teamId?: string | null,
+): Promise<void> {
+  const vercel = new Vercel({ bearerToken: token });
+
+  await vercel.projects.createProjectEnv({
+    idOrName: projectId,
+    upsert: "true",
+    teamId: teamId ?? undefined,
+    requestBody: {
+      key: "VERCEL_WEBHOOK_SECRET",
+      value: secret,
+      type: "encrypted",
+      target: ["production", "preview", "development"],
     },
   });
 }
 
 // =============================================================================
-// Default Exports
+// Webhook Signature Verification
 // =============================================================================
 
+function verifySignature(
+  body: string,
+  signature: string,
+  secret: string,
+): boolean {
+  const expected = crypto.createHmac("sha1", secret).update(body).digest("hex");
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expected),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Default preview deployment webhook handler.
- * Override the behavior by using `createVercelWebhookHandler` with custom options.
+ * Extracts and cleans the branch name from deployment metadata.
  */
-export const previewHandler = createVercelWebhookHandler();
+function extractBranchFromMeta(meta: Record<string, string>): string | null {
+  const branchRef = meta.githubCommitRef;
+  if (!branchRef) return null;
+  return branchRef.replace(/^refs\/heads\//, "");
+}
