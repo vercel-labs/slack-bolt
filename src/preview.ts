@@ -464,10 +464,24 @@ export async function setupSlackPreview(
       );
     }
 
-    console.log();
-    // Exit with non-zero to prevent the framework build (e.g. next build)
-    // from running -- it would fail because the env vars aren't available.
-    process.exit(1);
+    // Cancel the current deployment so it shows as "Canceled" in the
+    // dashboard instead of "Error". The redeploy we just triggered will
+    // pick up the env vars and succeed.
+    const deploymentId = process.env.VERCEL_DEPLOYMENT_ID;
+    if (deploymentId) {
+      try {
+        const vercel = new Vercel({ bearerToken: vercelToken });
+        await vercel.deployments.cancelDeployment({
+          id: deploymentId,
+          ...(teamId ? { teamId } : {}),
+        });
+        log.debug(`Canceled current deployment: ${deploymentId}`);
+      } catch {
+        // Best effort -- if cancel fails, process.exit(0) still stops the build
+      }
+    }
+
+    process.exit(0);
   }
 
   // ── Install app and set SLACK_BOT_TOKEN ──
