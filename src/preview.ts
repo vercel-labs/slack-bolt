@@ -391,28 +391,6 @@ export async function setupSlackPreview(
       );
     }
 
-    // Warn if the environment already has a stale signing secret from a
-    // global (non-branch-scoped) env var (e.g. production app credentials
-    // set for "All Environments").
-    const existingSecret = process.env.SLACK_SIGNING_SECRET;
-    if (existingSecret && existingSecret !== signingSecret) {
-      log.warn(
-        `Detected a stale SLACK_SIGNING_SECRET in the environment that belongs to a different Slack app.`,
-      );
-      log.warn(
-        `Tip: Scope your production Slack env vars to the "Production" environment only in Vercel project settings.`,
-      );
-    }
-
-    // Inject credentials into process.env so the rest of the build pipeline
-    // (e.g. next build) can access them immediately. Without this, the
-    // framework build would fail because these values were only set via the
-    // Vercel API and aren't in the current build's environment yet.
-    process.env.SLACK_APP_ID = appId;
-    process.env.SLACK_CLIENT_ID = clientId;
-    process.env.SLACK_CLIENT_SECRET = clientSecret;
-    process.env.SLACK_SIGNING_SECRET = signingSecret;
-
     // Set Vercel environment variables (branch-scoped), including SLACK_APP_ID as our "store"
     await setVercelEnvVars(
       projectId,
@@ -433,6 +411,63 @@ export async function setupSlackPreview(
     log.success("Set environment variables");
     log.info("App ID", appId);
     log.info("URL", baseUrl);
+
+    // ── Install app (first deploy only) ──
+    if (slackServiceToken) {
+      try {
+        const botToken = await installSlackApp(
+          resolvedAppId,
+          manifest,
+          slackServiceToken,
+        );
+        await setVercelEnvVars(
+          projectId,
+          branch,
+          vercelToken,
+          [{ key: "SLACK_BOT_TOKEN", value: botToken }],
+          teamId,
+        );
+        log.success("Installed app and set SLACK_BOT_TOKEN");
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes("app_approval")) {
+          log.warn(
+            `App requires admin approval before it can be installed: ${msg}`,
+          );
+        } else {
+          log.warn(`Failed to auto-install app: ${msg}`);
+        }
+      }
+    }
+
+    // ── Trigger redeploy and exit ──
+    // Env vars set via the Vercel API during a build are not available to
+    // this build (Vercel snapshots env vars before the build starts). We
+    // trigger a fresh deployment so the next build picks them up, then exit
+    // this build early. The redeploy will take the "update" path (app
+    // already exists) and the framework build will succeed.
+    console.log();
+    log.warn(
+      "First-time setup complete. Environment variables are not yet available to this build.",
+    );
+    log.warn("Triggering a redeploy so the next build picks them up...");
+
+    try {
+      await triggerRedeploy(projectId, vercelToken, teamId);
+      log.success("Redeploy triggered successfully.");
+    } catch (error) {
+      log.warn(
+        `Failed to trigger redeploy: ${error instanceof Error ? error.message : error}`,
+      );
+      log.warn(
+        "Push a new commit or redeploy manually from the Vercel dashboard.",
+      );
+    }
+
+    console.log();
+    // Exit with non-zero to prevent the framework build (e.g. next build)
+    // from running -- it would fail because the env vars aren't available.
+    process.exit(1);
   }
 
   // ── Install app and set SLACK_BOT_TOKEN ──
@@ -447,7 +482,6 @@ export async function setupSlackPreview(
         manifest,
         slackServiceToken,
       );
-      process.env.SLACK_BOT_TOKEN = botToken;
       await setVercelEnvVars(
         projectId,
         branch,
@@ -547,18 +581,9 @@ export async function setupSlackPreview(
     console.log();
     log.debug("--- Build summary ---");
     log.debug(`App ID: ${resolvedAppId ?? "<none>"}`);
-    log.debug(`Is new app: ${!existingAppId}`);
     log.debug(
       `SLACK_SIGNING_SECRET in process.env: ${redact(process.env.SLACK_SIGNING_SECRET)}`,
     );
-    if (!existingAppId) {
-      log.debug(
-        "IMPORTANT: This was the first deployment for this branch. " +
-          "Env vars (SLACK_SIGNING_SECRET, etc.) were set via the Vercel API during this build, " +
-          "but this deployment's runtime may not have them. " +
-          "The next deployment will pick them up.",
-      );
-    }
     log.debug("--- End build summary ---");
   }
 
@@ -1103,6 +1128,56 @@ async function uninstallSlackApp(
 // =============================================================================
 // Vercel API Functions
 // =============================================================================
+
+/**
+ * Triggers a fresh deployment for the current project/branch via the Vercel API.
+ * Used after first-time Slack app creation so the next build picks up the
+ * newly-set environment variables.
+ */
+async function triggerRedeploy(
+  projectId: string,
+  token: string,
+  teamId?: string | null,
+): Promise<void> {
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID;
+  if (!deploymentId) {
+    throw new Error(
+      "VERCEL_DEPLOYMENT_ID is not set. Cannot trigger redeploy.",
+    );
+  }
+
+  log.debug(`Triggering redeploy based on deployment: ${deploymentId}`);
+
+  const params = new URLSearchParams({ forceNew: "1" });
+  if (teamId) params.set("teamId", teamId);
+
+  const response = await fetch(
+    `https://api.vercel.com/v13/deployments?${params}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: projectId,
+        deploymentId,
+        meta: {
+          redeployedBy: "@vercel/slack-bolt",
+          reason: "First-time Slack app setup — env vars now available",
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Vercel API returned ${response.status}: ${body}`);
+  }
+
+  const data = (await response.json()) as { id?: string; url?: string };
+  log.debug(`Redeploy created: id=${data.id}, url=${data.url}`);
+}
 
 /** The env var keys we manage in Vercel */
 const SLACK_ENV_VAR_KEYS = [
