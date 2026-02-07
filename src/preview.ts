@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WebClient } from "@slack/web-api";
@@ -75,33 +74,6 @@ function redact(value: string | undefined | null): string {
 export type SlackAppManifest = Manifest;
 
 // =============================================================================
-// Vercel Webhook Payload Types
-// =============================================================================
-
-/** Payload for deployment.cleanup webhook event */
-export interface DeploymentCleanupPayload {
-  type: "deployment.cleanup";
-  id: string;
-  createdAt: number;
-  region: string | null;
-  payload: {
-    team: { id: string | null };
-    user: { id: string };
-    deployment: {
-      id: string;
-      meta: Record<string, string>;
-      url: string;
-      name: string;
-      alias: string[];
-      target: "production" | "staging" | null;
-      customEnvironmentId?: string;
-      regions: string[];
-    };
-    project: { id: string };
-  };
-}
-
-// =============================================================================
 // Setup Script (pre-build)
 // =============================================================================
 
@@ -122,13 +94,6 @@ export interface SetupSlackPreviewOptions {
    * @default process.env.VERCEL_API_TOKEN
    */
   vercelToken?: string;
-  /**
-   * Path to the cleanup webhook handler route.
-   * Used to automatically register a Vercel webhook for `deployment.cleanup` events
-   * so deleted branches trigger Slack app cleanup.
-   * @default "/api/webhooks/vercel"
-   */
-  webhookPath?: string;
   /**
    * Slack CLI service token (xoxp-...) for automatic app installation.
    * When provided, the app is installed to the workspace automatically via
@@ -178,7 +143,6 @@ export async function setupSlackPreview(
     manifestPath = "manifest.json",
     slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
     vercelToken = process.env.VERCEL_API_TOKEN,
-    webhookPath = "/api/webhooks/vercel",
     slackServiceToken = process.env.SLACK_SERVICE_TOKEN,
     debug = false,
   } = options;
@@ -524,43 +488,6 @@ export async function setupSlackPreview(
     );
   }
 
-  // ── Ensure Vercel webhook is registered for cleanup events ──
-  // The webhook targets the production deployment so it has a stable URL.
-  // Failures here are non-fatal; the webhook can be retried on the next deploy.
-  const productionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (!productionUrl) {
-    log.warn("Skipping webhook registration (no production URL yet)");
-    log.debug("VERCEL_PROJECT_PRODUCTION_URL is not set");
-  } else {
-    const webhookUrl = `https://${productionUrl}${webhookPath}`;
-    log.debug(`Registering cleanup webhook at: ${webhookUrl}`);
-    try {
-      const webhookSecret = await ensureVercelWebhook(
-        projectId,
-        webhookUrl,
-        vercelToken,
-        teamId,
-      );
-      if (webhookSecret) {
-        await setWebhookSecretEnvVar(
-          projectId,
-          webhookSecret,
-          vercelToken,
-          teamId,
-        );
-        log.success("Registered cleanup webhook");
-        log.debug(`Webhook secret: ${redact(webhookSecret)}`);
-      } else {
-        log.success("Cleanup webhook already registered");
-        log.debug("Webhook already exists, no update needed");
-      }
-    } catch (error) {
-      log.warn(
-        `Failed to register webhook: ${error instanceof Error ? error.message : error}`,
-      );
-    }
-  }
-
   // ── Best-effort orphan cleanup ──────────────────────────────────────────
   log.debug("Running orphan cleanup...");
   try {
@@ -602,189 +529,6 @@ export async function setupSlackPreview(
   }
 
   console.log();
-}
-
-// =============================================================================
-// Cleanup Webhook Handler
-// =============================================================================
-
-/** Options for createCleanupHandler */
-export interface CleanupHandlerOptions {
-  /**
-   * Vercel webhook secret for signature verification
-   * @default process.env.VERCEL_WEBHOOK_SECRET
-   */
-  secret?: string;
-  /**
-   * Slack configuration token for deleting apps
-   * @default process.env.SLACK_CONFIGURATION_TOKEN
-   */
-  slackConfigToken?: string;
-  /**
-   * Vercel API token for querying/deleting environment variables
-   * @default process.env.VERCEL_API_TOKEN
-   */
-  vercelToken?: string;
-  /**
-   * Slack CLI service token for uninstalling apps from the workspace.
-   * When provided, the app is uninstalled before deletion.
-   * @default process.env.SLACK_SERVICE_TOKEN
-   */
-  slackServiceToken?: string;
-}
-
-/**
- * Creates a Vercel webhook handler for deployment.cleanup events.
- * When a branch is deleted and Vercel removes the preview deployment,
- * this handler queries Vercel env vars for the branch's SLACK_APP_ID,
- * deletes the Slack app, and removes the env vars.
- *
- * No external store required -- Vercel env vars are the source of truth.
- *
- * Register this endpoint in Vercel Webhook settings for `deployment.cleanup` events.
- *
- * @example
- * ```typescript
- * // app/api/webhooks/vercel/route.ts
- * import { createCleanupHandler } from '@vercel/slack-bolt/preview';
- *
- * export const POST = createCleanupHandler();
- * ```
- */
-export function createCleanupHandler(
-  options: CleanupHandlerOptions = {},
-): (req: Request) => Promise<Response> {
-  const {
-    secret = process.env.VERCEL_WEBHOOK_SECRET,
-    slackConfigToken = process.env.SLACK_CONFIGURATION_TOKEN,
-    vercelToken = process.env.VERCEL_API_TOKEN,
-    slackServiceToken = process.env.SLACK_SERVICE_TOKEN,
-  } = options;
-
-  return async (req: Request): Promise<Response> => {
-    try {
-      const rawBody = await req.text();
-
-      // Verify webhook signature
-      if (secret) {
-        const signature = req.headers.get("x-vercel-signature");
-        if (!signature || !verifySignature(rawBody, signature, secret)) {
-          return new Response(JSON.stringify({ error: "Invalid signature" }), {
-            status: 403,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-      }
-
-      const event = JSON.parse(rawBody) as DeploymentCleanupPayload;
-
-      if (event.type !== "deployment.cleanup") {
-        return new Response(JSON.stringify({ received: true, skipped: true }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      const { meta } = event.payload.deployment;
-      const projectId = event.payload.project.id;
-      const teamId = event.payload.team.id;
-      const branch = extractBranchFromMeta(meta);
-
-      if (!branch) {
-        console.warn(
-          "[slack-bolt] No branch found in cleanup event metadata. Skipping.",
-        );
-        return new Response(JSON.stringify({ received: true, skipped: true }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      console.log(`[slack-bolt] Processing cleanup for branch: ${branch}`);
-
-      if (!vercelToken) {
-        console.error(
-          "[slack-bolt] VERCEL_API_TOKEN not set. Cannot query env vars for cleanup.",
-        );
-        return new Response(
-          JSON.stringify({ error: "VERCEL_API_TOKEN required for cleanup" }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      // Query Vercel env vars to find the app ID for this branch
-      const appId = await getSlackAppIdForBranch(
-        projectId,
-        branch,
-        vercelToken,
-        teamId,
-      );
-
-      if (!appId) {
-        console.log(
-          `[slack-bolt] No SLACK_APP_ID found for branch ${branch}. Nothing to clean up.`,
-        );
-        return new Response(
-          JSON.stringify({ received: true, cleaned: false }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      // Uninstall the app from the workspace (if service token is available)
-      if (slackServiceToken && teamId) {
-        try {
-          await uninstallSlackApp(appId, teamId, slackServiceToken);
-          console.log(`[slack-bolt] Uninstalled Slack app: ${appId}`);
-        } catch (error) {
-          console.error("[slack-bolt] Failed to uninstall Slack app:", error);
-        }
-      }
-
-      // Delete the Slack app -- requires slackConfigToken
-      if (!slackConfigToken) {
-        console.error(
-          "[slack-bolt] SLACK_CONFIGURATION_TOKEN not set. " +
-            "Cannot delete Slack app. Skipping cleanup to avoid orphaning the app.",
-        );
-        return new Response(
-          JSON.stringify({ error: "SLACK_CONFIGURATION_TOKEN required" }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      try {
-        await deleteSlackApp(appId, slackConfigToken);
-        console.log(`[slack-bolt] Deleted Slack app: ${appId}`);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (msg.includes("app_not_found")) {
-          console.log(`[slack-bolt] App ${appId} already deleted`);
-        } else {
-          console.error("[slack-bolt] Failed to delete Slack app:", error);
-        }
-      }
-
-      // Delete Vercel env vars (including SLACK_APP_ID)
-      try {
-        await deleteVercelEnvVars(projectId, branch, vercelToken, teamId);
-      } catch (error) {
-        console.error("[slack-bolt] Failed to delete Vercel env vars:", error);
-      }
-
-      console.log(`[slack-bolt] Cleanup complete for branch ${branch}`);
-
-      return new Response(JSON.stringify({ received: true, cleaned: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (error) {
-      console.error("[slack-bolt] Error processing cleanup webhook:", error);
-      return new Response(JSON.stringify({ error: "Internal server error" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-  };
 }
 
 // =============================================================================
@@ -1104,39 +848,6 @@ async function installSlackApp(
   }
 
   return botToken;
-}
-
-/**
- * Uninstalls a Slack app from a workspace using the `apps.developerUninstall` API.
- * Used during cleanup when a preview branch is deleted.
- */
-async function uninstallSlackApp(
-  appId: string,
-  teamId: string,
-  serviceToken: string,
-): Promise<void> {
-  const response = await fetch(
-    "https://slack.com/api/apps.developerUninstall",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${serviceToken}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify({
-        app_id: appId,
-        team_id: teamId,
-      }),
-    },
-  );
-
-  const data = (await response.json()) as { ok: boolean; error?: string };
-
-  if (!data.ok && data.error !== "not_installed") {
-    throw new Error(
-      `Failed to uninstall Slack app: ${data.error ?? "unknown error"}`,
-    );
-  }
 }
 
 // =============================================================================
@@ -1614,112 +1325,4 @@ async function ensureProtectionBypass(
 
   log.debug("  Bypass secret saved as VERCEL_AUTOMATION_BYPASS_SECRET");
   return newSecret;
-}
-
-// =============================================================================
-// Vercel Webhook Registration
-// =============================================================================
-
-/**
- * Ensures a Vercel webhook exists for `deployment.cleanup` events targeting
- * the given URL. If one already exists, this is a no-op. If not, it creates
- * one and returns the webhook secret for signature verification.
- *
- * @returns The webhook secret if a new webhook was created, or `null` if one already exists.
- */
-async function ensureVercelWebhook(
-  projectId: string,
-  webhookUrl: string,
-  token: string,
-  teamId?: string | null,
-): Promise<string | null> {
-  log.debug(
-    `Checking for existing deployment.cleanup webhook at: ${webhookUrl}`,
-  );
-  const vercel = new Vercel({ bearerToken: token });
-
-  // List existing webhooks and check for a match
-  const webhooks = await vercel.webhooks.getWebhooks({
-    ...(teamId ? { teamId } : {}),
-  });
-
-  log.debug(`  Found ${(webhooks as Array<unknown>).length} webhook(s) total`);
-
-  const existing = (webhooks as Array<{ url: string; events: string[] }>).find(
-    (w) => w.url === webhookUrl && w.events.includes("deployment.cleanup"),
-  );
-
-  if (existing) {
-    log.debug("  Matching webhook already exists, skipping creation");
-    return null;
-  }
-
-  // Create a new webhook scoped to this project
-  log.debug("  No matching webhook found, creating new one...");
-  const result = await vercel.webhooks.createWebhook({
-    ...(teamId ? { teamId } : {}),
-    requestBody: {
-      url: webhookUrl,
-      events: ["deployment.cleanup"],
-      projectIds: [projectId],
-    },
-  });
-
-  log.debug(`  Webhook created, secret: ${redact(result.secret)}`);
-  return result.secret;
-}
-
-/**
- * Stores VERCEL_WEBHOOK_SECRET as a project-level env var targeting all
- * environments (production, preview, development) so the cleanup handler
- * can verify webhook signatures regardless of which environment serves it.
- */
-async function setWebhookSecretEnvVar(
-  projectId: string,
-  secret: string,
-  token: string,
-  teamId?: string | null,
-): Promise<void> {
-  const vercel = new Vercel({ bearerToken: token });
-
-  await vercel.projects.createProjectEnv({
-    idOrName: projectId,
-    upsert: "true",
-    teamId: teamId ?? undefined,
-    requestBody: {
-      key: "VERCEL_WEBHOOK_SECRET",
-      value: secret,
-      type: "encrypted",
-      target: ["production", "preview", "development"],
-    },
-  });
-}
-
-// =============================================================================
-// Webhook Signature Verification
-// =============================================================================
-
-function verifySignature(
-  body: string,
-  signature: string,
-  secret: string,
-): boolean {
-  const expected = crypto.createHmac("sha1", secret).update(body).digest("hex");
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expected),
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Extracts and cleans the branch name from deployment metadata.
- */
-function extractBranchFromMeta(meta: Record<string, string>): string | null {
-  const branchRef = meta.githubCommitRef;
-  if (!branchRef) return null;
-  return branchRef.replace(/^refs\/heads\//, "");
 }
