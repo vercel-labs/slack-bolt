@@ -31,7 +31,8 @@
     }
   },
   "bin": {
-    "vercel-slack": "./dist/bin/vercel-slack.mjs"
+    "vercel-slack": "./dist/bin/vercel-slack.mjs",
+    "vc-slack": "./dist/bin/vercel-slack.mjs"
   },
   "files": [
     "dist"

@@ -2,11 +2,17 @@
 import fs from "node:fs";
 import { setupSlackPreview } from "../preview.js";
 
+declare const __PKG_VERSION__: string;
+
 // Load .env.local if it exists (for local development).
 // On Vercel, env vars are injected by the platform so this is a no-op.
 if (fs.existsSync(".env.local")) {
   process.loadEnvFile(".env.local");
 }
+
+// Gracefully handle termination signals (e.g. Docker, CI cancellation)
+process.on("SIGTERM", () => process.exit(0));
+process.on("SIGINT", () => process.exit(0));
 
 const HELP = `
 Usage: vercel-slack <command> [options]
@@ -17,7 +23,8 @@ Commands:
 Options:
   --manifest <path>  Path to manifest.json (default: "manifest.json")
   --debug            Enable verbose debug logging
-  --help             Show this help message
+  --version, -v      Print version number
+  --help, -h         Show this help message
 `.trim();
 
 function parseFlags(args: string[]): {
@@ -43,6 +50,11 @@ async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
 
+  if (command === "--version" || command === "-v") {
+    console.log(__PKG_VERSION__);
+    process.exit(0);
+  }
+
   if (!command || command === "--help" || command === "-h") {
     console.log(HELP);
     process.exit(0);
@@ -65,6 +77,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`\n  vercel-slack: ${msg}\n`);
+  if (process.argv.includes("--debug") && err instanceof Error) {
+    console.error(err.stack);
+  }
   process.exit(1);
 });

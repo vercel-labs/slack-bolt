@@ -1406,6 +1406,11 @@ async function getActiveBranches(
     { headers: { Authorization: `Bearer ${token}` } },
   );
 
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Vercel branches API returned ${response.status}: ${body}`);
+  }
+
   const data = (await response.json()) as VercelBranchesResponse;
   return new Set(data.branches?.map((b) => b.branch) ?? []);
 }
