@@ -337,12 +337,12 @@ export async function setupSlackPreview(
       branch,
     );
     if (installResult.installed) {
-      log.success("Installed app and set SLACK_BOT_TOKEN");
+      log.success(`Slack app ${appId} installed for preview branch: ${branch}`);
     } else if (installResult.error) {
       log.warn(`Failed to auto-install app: ${installResult.error}`);
       if (!isNew) {
         log.warn(
-          "Set SLACK_SERVICE_TOKEN to enable automatic installation, or install manually via the URL below.",
+          "Check that SLACK_SERVICE_TOKEN has the correct permissions, or install manually via the URL below.",
         );
       }
     }
@@ -400,9 +400,6 @@ export async function setupSlackPreview(
 
   if (installUrl || appId) {
     console.log();
-    if (installUrl && !slackServiceToken) {
-      console.log(`${c.dim}→ Install app: ${installUrl}${c.reset}`);
-    }
     if (appId) {
       console.log(
         `${c.dim}→ Manage app: https://api.slack.com/apps/${appId}${c.reset}`,
