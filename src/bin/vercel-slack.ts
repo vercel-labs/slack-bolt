@@ -63,10 +63,13 @@ async function main() {
   switch (command) {
     case "build": {
       const flags = parseFlags(args.slice(1));
-      await setupSlackPreview({
+      const result = await setupSlackPreview({
         manifestPath: flags.manifestPath,
         debug: flags.debug,
       });
+      if (result.shouldExit) {
+        process.exit(0);
+      }
       break;
     }
     default:

@@ -85,7 +85,9 @@ describe("vercel-slack CLI", () => {
 
     // Default: .env.local does not exist, setupSlackPreview resolves.
     mockExistsSync.mockReturnValue(false);
-    mockSetupSlackPreview.mockReset().mockResolvedValue(undefined);
+    mockSetupSlackPreview
+      .mockReset()
+      .mockResolvedValue({ appId: null, isNew: false, shouldExit: false });
   });
 
   afterEach(() => {
@@ -300,6 +302,17 @@ describe("vercel-slack CLI", () => {
       await runCLI(["build"]);
 
       expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it("calls process.exit(0) when result.shouldExit is true", async () => {
+      mockSetupSlackPreview.mockResolvedValueOnce({
+        appId: "A123",
+        isNew: true,
+        shouldExit: true,
+      });
+      await runCLI(["build"]);
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
     it("calls setupSlackPreview exactly once", async () => {

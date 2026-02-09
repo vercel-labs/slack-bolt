@@ -138,7 +138,6 @@ describe("log", () => {
     ]);
     // The shorter label should be padded to match the longer one
     const firstLine = logSpy.mock.calls[0][0] as string;
-    const secondLine = logSpy.mock.calls[1][0] as string;
     // "A" is padded to 12 chars to match "Longer label"
     expect(firstLine).toContain("A           ");
   });
