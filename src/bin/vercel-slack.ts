@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { log } from "../logger.js";
 import { setupSlackPreview } from "../preview.js";
 
 declare const __PKG_VERSION__: string;
@@ -67,8 +68,25 @@ async function main() {
         manifestPath: flags.manifestPath,
         debug: flags.debug,
       });
-      if (result.shouldExit) {
-        process.exit(0);
+
+      for (const w of result.warnings) {
+        log.warn(w);
+      }
+
+      switch (result.status) {
+        case "skipped":
+          log.skip(result.reason);
+          break;
+        case "failed":
+          log.warn(result.error);
+          break;
+        case "created":
+          log.success(`Created Slack app: ${result.appId}`);
+          process.exit(0);
+          break;
+        case "updated":
+          log.success(`Synced manifest for app: ${result.appId}`);
+          break;
       }
       break;
     }

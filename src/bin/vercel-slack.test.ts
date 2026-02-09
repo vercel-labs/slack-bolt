@@ -85,9 +85,11 @@ describe("vercel-slack CLI", () => {
 
     // Default: .env.local does not exist, setupSlackPreview resolves.
     mockExistsSync.mockReturnValue(false);
-    mockSetupSlackPreview
-      .mockReset()
-      .mockResolvedValue({ appId: null, isNew: false, shouldExit: false });
+    mockSetupSlackPreview.mockReset().mockResolvedValue({
+      status: "updated",
+      appId: "A_DEFAULT",
+      warnings: [],
+    });
   });
 
   afterEach(() => {
@@ -298,21 +300,70 @@ describe("vercel-slack CLI", () => {
       });
     });
 
-    it("does not call process.exit on successful build", async () => {
+    it("does not call process.exit on successful build (updated)", async () => {
+      mockSetupSlackPreview.mockResolvedValueOnce({
+        status: "updated",
+        appId: "A123",
+        warnings: [],
+      });
       await runCLI(["build"]);
 
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
-    it("calls process.exit(0) when result.shouldExit is true", async () => {
+    it("calls process.exit(0) when result.status is created", async () => {
       mockSetupSlackPreview.mockResolvedValueOnce({
+        status: "created",
         appId: "A123",
-        isNew: true,
-        shouldExit: true,
+        warnings: [],
       });
       await runCLI(["build"]);
 
       expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it("does not call process.exit when result.status is failed", async () => {
+      mockSetupSlackPreview.mockResolvedValueOnce({
+        status: "failed",
+        error: "Vercel API auth failed",
+        warnings: [],
+      });
+      await runCLI(["build"]);
+
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not call process.exit when result.status is skipped", async () => {
+      mockSetupSlackPreview.mockResolvedValueOnce({
+        status: "skipped",
+        reason: "missing VERCEL_API_TOKEN",
+        warnings: [],
+      });
+      await runCLI(["build"]);
+
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it("logs warnings from result.warnings", async () => {
+      mockSetupSlackPreview.mockResolvedValueOnce({
+        status: "updated",
+        appId: "A1",
+        warnings: [
+          "Failed to configure deployment protection bypass",
+          "Orphan cleanup failed",
+        ],
+      });
+      await runCLI(["build"]);
+
+      // log.warn calls console.log under the hood
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Failed to configure deployment protection bypass",
+        ),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Orphan cleanup failed"),
+      );
     });
 
     it("calls setupSlackPreview exactly once", async () => {
