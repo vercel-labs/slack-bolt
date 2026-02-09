@@ -57,6 +57,12 @@ describe("log", () => {
     expect(logSpy.mock.calls[0][0]).toContain("Vercel Slack Bolt");
   });
 
+  it("task() logs with a 2-space prefix for alignment", () => {
+    log.task("Loading manifest...");
+    expect(logSpy).toHaveBeenCalledOnce();
+    expect(logSpy.mock.calls[0][0]).toBe("  Loading manifest...");
+  });
+
   it("info() logs a label: value pair", () => {
     log.info("Branch", "main");
     expect(logSpy).toHaveBeenCalledOnce();
@@ -99,11 +105,11 @@ describe("log", () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it("debug() logs when _debug is true", () => {
+  it("debug() logs when _debug is true with aligned prefix", () => {
     log._debug = true;
     log.debug("verbose info");
     expect(logSpy).toHaveBeenCalledOnce();
-    expect(logSpy.mock.calls[0][0]).toContain("[debug]");
+    expect(logSpy.mock.calls[0][0]).toContain("  [debug]");
     expect(logSpy.mock.calls[0][0]).toContain("verbose info");
   });
 

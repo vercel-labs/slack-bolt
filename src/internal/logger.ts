@@ -18,6 +18,9 @@ export const log = {
   header() {
     console.log(`${c.bold}▲ Vercel Slack Bolt${c.reset}`);
   },
+  task(msg: string) {
+    console.log(`  ${msg}`);
+  },
   info(label: string, value: string) {
     console.log(`${c.dim}-${c.reset} ${label}: ${value}`);
   },
@@ -35,7 +38,7 @@ export const log = {
   },
   debug(msg: string) {
     if (this._debug) {
-      console.log(`${c.dim}[debug] ${msg}${c.reset}`);
+      console.log(`${c.dim}  [debug] ${msg}${c.reset}`);
     }
   },
   tree(items: { label: string; value: string }[]) {

@@ -74,16 +74,11 @@ async function main() {
       log.header();
 
       const flags = parseFlags(args.slice(1));
+
       const result = await setupSlackPreview({
         manifestPath: flags.manifestPath,
         debug: flags.debug,
       });
-
-      // #region agent log
-      console.error(
-        `[DBG] H1: CLI received result, status=${result.status}, warnings=${JSON.stringify(result.warnings)}`,
-      );
-      // #endregion
 
       for (const w of result.warnings) {
         log.warn(w);

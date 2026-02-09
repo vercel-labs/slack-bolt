@@ -75,7 +75,14 @@ export async function setupSlackPreview(
 
   const warnings: string[] = [];
 
-  log.debug("Running orphan cleanup...");
+  const slack = createSlackOps(slackConfigTokenOpt, slackServiceToken);
+  const vercel = createVercelOps(projectId, vercelTokenOpt, teamId);
+
+  log.info("Branch", branch);
+  log.info("Manifest", manifestPath);
+  console.log();
+
+  log.task("Cleaning up orphaned apps...");
   try {
     await cleanupOrphanedApps(
       projectId,
@@ -84,26 +91,18 @@ export async function setupSlackPreview(
       teamId,
       slackConfigTokenOpt,
     );
-    log.debug("Orphan cleanup completed");
   } catch (error) {
-    warnings.push(
+    log.warn(
       `Orphan cleanup failed: ${error instanceof Error ? error.message : error}`,
     );
   }
-
-  const slack = createSlackOps(slackConfigTokenOpt, slackServiceToken);
-  const vercel = createVercelOps(projectId, vercelTokenOpt, teamId);
-
-  log.info("Branch", branch);
-  log.info("Manifest", manifestPath);
-  console.log();
-
-  console.log(`Loading manifest from: ${manifestPath}...`);
+  log.success("Orphan cleanup completed");
+  log.task(`Loading manifest from: ${manifestPath}...`);
   const manifest = await loadManifest(manifestPath);
   log.success(`Loaded manifest from: ${manifestPath}`);
 
   let bypassSecret: string | null = null;
-  console.log("Setting up deployment protection bypass...");
+  log.task("Setting up deployment protection bypass...");
   try {
     bypassSecret = await vercel.ensureProtectionBypass();
     log.debug(
@@ -121,7 +120,7 @@ export async function setupSlackPreview(
   }
   log.success("Deployment protection bypass setup complete");
 
-  console.log("Preparing manifest...");
+  log.task("Preparing manifest...");
   prepareManifest(manifest, {
     branch,
     branchUrl,
@@ -143,7 +142,7 @@ export async function setupSlackPreview(
   const { appId, isNew } = result;
 
   if (slackServiceToken) {
-    console.log("Installing Slack app...");
+    log.task("Installing Slack app...");
     const installResult = await tryInstallApp(
       appId,
       manifest,
@@ -168,7 +167,7 @@ export async function setupSlackPreview(
   }
 
   if (isNew) {
-    console.log("Redeploying preview branch...");
+    log.task("Redeploying preview branch...");
     try {
       await vercel.triggerRedeploy();
       log.debug("Redeploy triggered successfully.");

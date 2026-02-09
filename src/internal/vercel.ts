@@ -227,9 +227,7 @@ export async function deleteVercelEnvVars(
   token: string,
   teamId?: string | null,
 ): Promise<void> {
-  console.log(
-    `[slack-bolt] Deleting env vars for project ${projectId} branch ${branch}`,
-  );
+  log.debug(`Deleting env vars for project ${projectId} branch ${branch}`);
 
   const vercel = new Vercel({ bearerToken: token });
 
@@ -260,7 +258,7 @@ export async function deleteVercelEnvVars(
           id: env.id,
           teamId: teamId ?? undefined,
         });
-        console.log(`[slack-bolt] Deleted env var: ${env.key}`);
+        log.debug(`Deleted env var: ${env.key}`);
       } catch (error) {
         console.error(
           `[slack-bolt] Failed to delete env var ${env.key}:`,

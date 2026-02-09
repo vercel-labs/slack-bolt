@@ -163,8 +163,8 @@ export async function cleanupOrphanedApps(
     return;
   }
 
-  console.log(
-    `[slack-bolt] Found ${staleBranches.size} orphaned branch(es): ${[...staleBranches.keys()].join(", ")}`,
+  log.task(
+    `Found ${staleBranches.size} orphaned branch(es): ${[...staleBranches.keys()].join(", ")}`,
   );
 
   for (const [branch, envId] of staleBranches) {
@@ -178,36 +178,33 @@ export async function cleanupOrphanedApps(
         });
         appId = "value" in decrypted ? (decrypted.value ?? null) : null;
       } catch {
-        console.warn(
-          `[slack-bolt] Failed to decrypt SLACK_APP_ID for branch ${branch}`,
-        );
+        log.warn(`Failed to decrypt SLACK_APP_ID for branch ${branch}`);
       }
     }
 
     if (appId) {
       try {
         await deleteSlackApp(appId, slackConfigToken);
-        console.log(
-          `[slack-bolt] Deleted orphaned Slack app ${appId} (branch: ${branch})`,
-        );
+        log.success(`Deleted Slack app ${appId} (branch: ${branch})`);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.includes("app_not_found")) {
-          console.log(
-            `[slack-bolt] App ${appId} already deleted (branch: ${branch})`,
-          );
+          log.warn(`App ${appId} already deleted (branch: ${branch})`);
         } else {
-          console.warn(`[slack-bolt] Failed to delete app ${appId}: ${msg}`);
+          log.warn(`Failed to delete app ${appId}: ${msg}`);
         }
       }
     }
 
     try {
       await deleteVercelEnvVars(projectId, branch, vercelToken, teamId);
+      log.success(`Deleted env vars for branch ${branch}`);
     } catch (error) {
-      console.warn(
-        `[slack-bolt] Failed to delete env vars for branch ${branch}: ${error instanceof Error ? error.message : error}`,
+      log.warn(
+        `Failed to delete env vars for branch ${branch}: ${error instanceof Error ? error.message : error}`,
       );
     }
   }
+
+  log.success("Finished cleaning up orphaned apps");
 }
