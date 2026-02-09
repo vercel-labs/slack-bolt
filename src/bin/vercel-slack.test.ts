@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks – these are available inside vi.mock() factories which are
@@ -125,10 +133,7 @@ describe("vercel-slack CLI", () => {
     it("registers a SIGINT handler", async () => {
       await runCLI(["--help"]);
 
-      expect(processOnSpy).toHaveBeenCalledWith(
-        "SIGINT",
-        expect.any(Function),
-      );
+      expect(processOnSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
     });
 
     it("SIGTERM handler calls process.exit(0)", async () => {
@@ -283,12 +288,7 @@ describe("vercel-slack CLI", () => {
     });
 
     it("passes both --manifest and --debug together", async () => {
-      await runCLI([
-        "build",
-        "--manifest",
-        "my-manifest.json",
-        "--debug",
-      ]);
+      await runCLI(["build", "--manifest", "my-manifest.json", "--debug"]);
 
       expect(mockSetupSlackPreview).toHaveBeenCalledWith({
         manifestPath: "my-manifest.json",
