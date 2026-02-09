@@ -3,65 +3,7 @@ import path from "node:path";
 import { WebClient } from "@slack/web-api";
 import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
 import { Vercel } from "@vercel/sdk";
-
-// =============================================================================
-// Pretty Build Output
-// =============================================================================
-
-const useColor = !process.env.NO_COLOR;
-
-const c = {
-  reset: useColor ? "\x1b[0m" : "",
-  bold: useColor ? "\x1b[1m" : "",
-  dim: useColor ? "\x1b[2m" : "",
-  green: useColor ? "\x1b[32m" : "",
-  yellow: useColor ? "\x1b[33m" : "",
-  cyan: useColor ? "\x1b[36m" : "",
-};
-
-const log = {
-  _debug: false,
-  header() {
-    console.log(`${c.bold}▲ Vercel Slack Bolt${c.reset}`);
-  },
-  info(label: string, value: string) {
-    console.log(`${c.dim}-${c.reset} ${label}: ${value}`);
-  },
-  success(msg: string) {
-    console.log(`${c.green}✓${c.reset} ${msg}`);
-  },
-  warn(msg: string) {
-    console.log(`${c.yellow}⚠${c.reset} ${msg}`);
-  },
-  error(msg: string) {
-    console.error(`${c.dim}✖${c.reset} ${msg}`);
-  },
-  skip(msg: string) {
-    console.log(`${c.dim}○ ${msg}${c.reset}`);
-  },
-  debug(msg: string) {
-    if (this._debug) {
-      console.log(`${c.dim}[debug] ${msg}${c.reset}`);
-    }
-  },
-  tree(items: { label: string; value: string }[]) {
-    const maxLen = Math.max(...items.map((i) => i.label.length));
-    for (let i = 0; i < items.length; i++) {
-      const prefix = i === 0 ? "┌" : i === items.length - 1 ? "└" : "├";
-      const padded = items[i].label.padEnd(maxLen);
-      console.log(
-        `${c.dim}${prefix}${c.reset} ${padded}  ${c.cyan}${items[i].value}${c.reset}`,
-      );
-    }
-  },
-};
-
-/** Redact a secret for debug output: show first 4 chars + length */
-function redact(value: string | undefined | null): string {
-  if (!value) return "<not set>";
-  if (value.length <= 4) return "***";
-  return `${value.slice(0, 4)}... (${value.length} chars)`;
-}
+import { c, log, redact } from "./logger";
 
 // =============================================================================
 // Slack App Manifest Types
@@ -556,28 +498,35 @@ async function loadManifest(manifestPath: string): Promise<Manifest> {
  * When a bypass secret is provided, appends it as a query parameter
  * so Slack's webhook requests can reach protected preview deployments.
  */
-function injectUrls(
+/** @internal Exported for testing. */
+export function injectUrls(
   manifest: Manifest,
   baseUrl: string,
   bypassSecret?: string | null,
 ): void {
-  const bypassParam = bypassSecret
-    ? `?x-vercel-protection-bypass=${bypassSecret}`
-    : "";
+  /** Build the final URL, appending the bypass query param with the correct separator. */
+  function buildUrl(originalUrl: string): string {
+    const p = extractPath(originalUrl);
+    const url = `${baseUrl}${p}`;
+    if (!bypassSecret) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}x-vercel-protection-bypass=${bypassSecret}`;
+  }
 
   if (manifest.settings?.event_subscriptions?.request_url) {
-    const p = extractPath(manifest.settings.event_subscriptions.request_url);
-    manifest.settings.event_subscriptions.request_url = `${baseUrl}${p}${bypassParam}`;
+    manifest.settings.event_subscriptions.request_url = buildUrl(
+      manifest.settings.event_subscriptions.request_url,
+    );
   }
   if (manifest.settings?.interactivity?.request_url) {
-    const p = extractPath(manifest.settings.interactivity.request_url);
-    manifest.settings.interactivity.request_url = `${baseUrl}${p}${bypassParam}`;
+    manifest.settings.interactivity.request_url = buildUrl(
+      manifest.settings.interactivity.request_url,
+    );
   }
   if (manifest.features?.slash_commands) {
     for (const cmd of manifest.features.slash_commands) {
       if (cmd.url) {
-        const p = extractPath(cmd.url);
-        cmd.url = `${baseUrl}${p}${bypassParam}`;
+        cmd.url = buildUrl(cmd.url);
       }
     }
   }
@@ -586,7 +535,8 @@ function injectUrls(
 /**
  * Extracts the path portion from a URL, or returns the string as-is if it's already a path.
  */
-function extractPath(urlOrPath: string): string {
+/** @internal Exported for testing. */
+export function extractPath(urlOrPath: string): string {
   // If it looks like a full URL (http:// or https://), extract the path after the host.
   // We use string manipulation instead of `new URL()` because manifests often contain
   // placeholder domains like `<your-domain>` that are not valid URLs.
