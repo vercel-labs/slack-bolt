@@ -104,9 +104,25 @@ describe("VercelReceiver", () => {
       expect(receiver).toHaveProperty("customPropertiesExtractor", undefined);
     });
 
-    it("should throw error when signingSecret is not provided", () => {
-      expect(() => new VercelReceiver()).toThrow(
-        "SLACK_SIGNING_SECRET is required for VercelReceiver",
+    it("should warn when signingSecret is not provided and signatureVerification is true", () => {
+      const mockLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        setLevel: vi.fn(),
+        getLevel: vi.fn(),
+      };
+      const receiver = new VercelReceiver({
+        // biome-ignore lint/suspicious/noExplicitAny: mock logger for testing
+        logger: mockLogger as any,
+      });
+
+      // signatureVerification stays true — requests will fail at verify time
+      expect(receiver).toHaveProperty("signatureVerification", true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("[@vercel/slack-bolt]"),
+        expect.stringContaining("SLACK_SIGNING_SECRET is not set"),
       );
     });
   });

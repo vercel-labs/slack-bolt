@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { log } from "../logger.js";
+import { log } from "../internal/logger.js";
 import { setupSlackPreview } from "../preview.js";
 
 declare const __PKG_VERSION__: string;
@@ -12,8 +12,16 @@ if (fs.existsSync(".env.local")) {
 }
 
 // Gracefully handle termination signals (e.g. Docker, CI cancellation)
-process.on("SIGTERM", () => process.exit(0));
-process.on("SIGINT", () => process.exit(0));
+// #region agent log
+process.on("SIGTERM", () => {
+  console.error("[DBG] H1: SIGTERM received, exiting");
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  console.error("[DBG] H1: SIGINT received, exiting");
+  process.exit(0);
+});
+// #endregion
 
 const HELP = `
 Usage: vercel-slack <command> [options]
@@ -63,11 +71,19 @@ async function main() {
 
   switch (command) {
     case "build": {
+      log.header();
+
       const flags = parseFlags(args.slice(1));
       const result = await setupSlackPreview({
         manifestPath: flags.manifestPath,
         debug: flags.debug,
       });
+
+      // #region agent log
+      console.error(
+        `[DBG] H1: CLI received result, status=${result.status}, warnings=${JSON.stringify(result.warnings)}`,
+      );
+      // #endregion
 
       for (const w of result.warnings) {
         log.warn(w);
@@ -75,26 +91,33 @@ async function main() {
 
       switch (result.status) {
         case "skipped":
-          log.skip(result.reason);
+          log.info("Skipping build", result.reason);
           break;
         case "failed":
-          log.warn(result.error);
+          log.error(result.error);
           break;
         case "created":
           log.success(`Created Slack app: ${result.appId}`);
+          console.log();
+          log.info("Manage app", `https://api.slack.com/apps/${result.appId}`);
           process.exit(0);
           break;
         case "updated":
           log.success(`Synced manifest for app: ${result.appId}`);
+          console.log();
+          log.info("Manage app", `https://api.slack.com/apps/${result.appId}`);
           break;
       }
+
       break;
     }
+
     default:
       console.error(`Unknown command: ${command}\n`);
       console.log(HELP);
       process.exit(1);
   }
+  console.log();
 }
 
 main().catch((err) => {

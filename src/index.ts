@@ -17,7 +17,7 @@ import {
   getStatusCode,
   RequestParsingError,
   VercelReceiverError,
-} from "./errors";
+} from "./internal/errors";
 
 // Types
 /**
@@ -97,11 +97,11 @@ const SLACK_SIGNATURE_HEADER = "x-slack-signature";
  *
  */
 export class VercelReceiver implements Receiver {
-  private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
   private readonly logger: Logger;
   private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly ackTimeoutMs: number;
+  private readonly signingSecret?: string;
   private app?: App;
 
   /**
@@ -131,16 +131,20 @@ export class VercelReceiver implements Receiver {
     customPropertiesExtractor,
     ackTimeoutMs = ACK_TIMEOUT_MS,
   }: VercelReceiverOptions = {}) {
-    if (!signingSecret) {
-      throw new VercelReceiverError(ERROR_MESSAGES.SIGNING_SECRET_REQUIRED);
-    }
-
-    this.signingSecret = signingSecret;
-    this.signatureVerification = signatureVerification;
     this.logger = this.createScopedLogger(
       logger ?? new ConsoleLogger(),
       logLevel,
     );
+
+    if (!signingSecret && signatureVerification) {
+      this.logger.warn(
+        "SLACK_SIGNING_SECRET is not set. " +
+          "Requests with signature verification enabled will be rejected.",
+      );
+    }
+
+    this.signingSecret = signingSecret;
+    this.signatureVerification = signatureVerification;
     this.customPropertiesExtractor = customPropertiesExtractor;
     this.ackTimeoutMs = ackTimeoutMs;
 
@@ -347,7 +351,7 @@ export class VercelReceiver implements Receiver {
 
     try {
       verifySlackRequest({
-        signingSecret: this.signingSecret,
+        signingSecret: this.signingSecret ?? "",
         body,
         headers: {
           "x-slack-signature": signature,

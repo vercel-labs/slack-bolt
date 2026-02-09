@@ -1,3 +1,30 @@
+/** Thrown when a Slack app no longer exists (deleted externally). */
+export class SlackAppNotFoundError extends Error {
+  constructor(public readonly appId: string) {
+    super(`Slack app ${appId} not found`);
+    this.name = "SlackAppNotFoundError";
+  }
+}
+
+/** Thrown when a Slack app requires admin approval before installation. */
+export class SlackAppApprovalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SlackAppApprovalError";
+  }
+}
+
+/** Thrown when a Vercel API call fails. Carries the HTTP status code. */
+export class VercelApiError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "VercelApiError";
+  }
+}
+
 // Error messages constants
 export const ERROR_MESSAGES = {
   // VercelReceiver errors
