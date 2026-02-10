@@ -26,24 +26,27 @@ Commands:
   build   Create or update the Slack app for the current preview branch
 
 Options:
-  --manifest <path>              Path to manifest.json (default: "manifest.json")
-  --slack-config-token <token>   Slack configuration token (default: process.env.SLACK_CONFIGURATION_TOKEN)
-  --vercel-token <token>         Vercel API token (default: process.env.VERCEL_API_TOKEN)
-  --slack-service-token <token>  Slack service token for auto-install (default: process.env.SLACK_SERVICE_TOKEN)
-  --debug                        Enable verbose debug logging
-  --version, -v                  Print version number
-  --help, -h                     Show this help message
+  --manifest <path>                       Path to manifest.json (default: "manifest.json")
+  --slack-config-token <token>            Slack configuration token (default: process.env.SLACK_CONFIGURATION_TOKEN)
+  --slack-config-refresh-token <token>    Refresh token for auto-rotating expired config tokens (default: process.env.SLACK_CONFIG_REFRESH_TOKEN)
+  --vercel-token <token>                  Vercel API token (default: process.env.VERCEL_API_TOKEN)
+  --slack-service-token <token>           Slack service token for auto-install (default: process.env.SLACK_SERVICE_TOKEN)
+  --debug                                 Enable verbose debug logging
+  --version, -v                           Print version number
+  --help, -h                              Show this help message
 `.trim();
 
 function parseFlags(args: string[]): {
   manifestPath?: string;
   slackConfigToken?: string;
+  slackConfigRefreshToken?: string;
   vercelToken?: string;
   slackServiceToken?: string;
   debug?: boolean;
 } {
   let manifestPath: string | undefined;
   let slackConfigToken: string | undefined;
+  let slackConfigRefreshToken: string | undefined;
   let vercelToken: string | undefined;
   let slackServiceToken: string | undefined;
   let debug = false;
@@ -54,6 +57,9 @@ function parseFlags(args: string[]): {
       i++;
     } else if (args[i] === "--slack-config-token" && args[i + 1]) {
       slackConfigToken = args[i + 1];
+      i++;
+    } else if (args[i] === "--slack-config-refresh-token" && args[i + 1]) {
+      slackConfigRefreshToken = args[i + 1];
       i++;
     } else if (args[i] === "--vercel-token" && args[i + 1]) {
       vercelToken = args[i + 1];
@@ -69,6 +75,7 @@ function parseFlags(args: string[]): {
   return {
     manifestPath,
     slackConfigToken,
+    slackConfigRefreshToken,
     vercelToken,
     slackServiceToken,
     debug,
@@ -98,6 +105,7 @@ async function main() {
       const result = await setupSlackPreview({
         manifestPath: flags.manifestPath,
         slackConfigToken: flags.slackConfigToken,
+        slackConfigRefreshToken: flags.slackConfigRefreshToken,
         vercelToken: flags.vercelToken,
         slackServiceToken: flags.slackServiceToken,
         debug: flags.debug,

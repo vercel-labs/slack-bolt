@@ -1,6 +1,6 @@
 import { log, redact } from "./internal/logger";
 import { loadManifest, prepareManifest } from "./internal/manifest";
-import { createSlackOps } from "./internal/slack";
+import { checkSlackConfigToken, createSlackOps } from "./internal/slack";
 import type {
   SetupResult,
   SetupSlackPreviewOptions,
@@ -45,6 +45,7 @@ export async function setupSlackPreview(
       .SLACK_CONFIGURATION_TOKEN,
     vercelToken: vercelTokenOpt = process.env.VERCEL_API_TOKEN,
     slackServiceToken = process.env.SLACK_SERVICE_TOKEN,
+    slackConfigRefreshToken = process.env.SLACK_CONFIG_REFRESH_TOKEN,
     debug = false,
   } = options;
 
@@ -74,9 +75,47 @@ export async function setupSlackPreview(
   const { branch, projectId, branchUrl, teamId } = env;
 
   const warnings: string[] = [];
-
-  const slack = createSlackOps(slackConfigTokenOpt, slackServiceToken);
   const vercel = createVercelOps(projectId, vercelTokenOpt, teamId);
+
+  log.task("Checking Slack configuration token...");
+  let slackConfigToken = slackConfigTokenOpt;
+  try {
+    const tokenResult = await checkSlackConfigToken(
+      slackConfigTokenOpt,
+      slackConfigRefreshToken,
+    );
+    slackConfigToken = tokenResult.token;
+
+    if (tokenResult.rotated) {
+      log.success("Configuration token was expired — rotated successfully");
+
+      try {
+        const tokenVars: { key: string; value: string }[] = [
+          { key: "SLACK_CONFIGURATION_TOKEN", value: tokenResult.token },
+        ];
+        if (tokenResult.newRefreshToken) {
+          tokenVars.push({
+            key: "SLACK_CONFIG_REFRESH_TOKEN",
+            value: tokenResult.newRefreshToken,
+          });
+        }
+        await vercel.setEnvVars(null, tokenVars);
+        log.success("Rotated tokens persisted to Vercel project env vars");
+      } catch (error) {
+        warnings.push(
+          `Token was rotated but failed to persist to Vercel: ${error instanceof Error ? error.message : error}. ` +
+            "You may need to update SLACK_CONFIGURATION_TOKEN and SLACK_CONFIG_REFRESH_TOKEN manually.",
+        );
+      }
+    } else {
+      log.success("Configuration token is valid");
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { status: "failed", error: msg, warnings };
+  }
+
+  const slack = createSlackOps(slackConfigToken, slackServiceToken);
 
   log.info("Branch", branch);
   log.info("Manifest", manifestPath);
@@ -89,7 +128,7 @@ export async function setupSlackPreview(
       branch,
       vercelTokenOpt,
       teamId,
-      slackConfigTokenOpt,
+      slackConfigToken,
     );
   } catch (error) {
     log.warn(

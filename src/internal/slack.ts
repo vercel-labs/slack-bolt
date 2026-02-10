@@ -3,9 +3,11 @@ import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
 import { SlackAppApprovalError, SlackAppNotFoundError } from "./errors";
 import { log, redact } from "./logger";
 import type {
+  CheckTokenResult,
   CreateAppResult,
   DeveloperInstallResponse,
   SlackOps,
+  TokenRotationResponse,
 } from "./types";
 
 /**
@@ -91,7 +93,7 @@ export async function deleteSlackApp(
   }
 }
 
-function extractSlackApiError(error: unknown): {
+export function extractSlackApiError(error: unknown): {
   code: string;
   validationErrors?: Array<{ message: string; pointer: string }>;
 } | null {
@@ -256,4 +258,81 @@ async function installSlackApp(
   }
 
   return botToken;
+}
+
+const AUTH_ERROR_CODES = new Set([
+  "invalid_auth",
+  "token_expired",
+  "token_revoked",
+  "not_authed",
+]);
+
+export async function checkSlackConfigToken(
+  configToken: string,
+  refreshToken?: string,
+): Promise<CheckTokenResult> {
+  log.debug("Checking Slack configuration token validity...");
+  const client = new WebClient(configToken);
+
+  try {
+    await client.auth.test();
+    log.debug("Configuration token is valid");
+    return { token: configToken, rotated: false };
+  } catch (error) {
+    const apiError = extractSlackApiError(error);
+    const code = apiError?.code ?? "";
+
+    if (!AUTH_ERROR_CODES.has(code)) {
+      // Not an auth error — something else went wrong
+      throw error;
+    }
+
+    log.debug(`Configuration token is expired or invalid (${code})`);
+
+    if (!refreshToken) {
+      throw new Error(
+        `Slack configuration token is expired (${code}). ` +
+          "Set SLACK_CONFIG_REFRESH_TOKEN to enable automatic token refresh.",
+      );
+    }
+
+    log.debug("Rotating configuration token via tooling.tokens.rotate...");
+    return rotateSlackConfigToken(refreshToken);
+  }
+}
+
+export async function rotateSlackConfigToken(
+  refreshToken: string,
+): Promise<CheckTokenResult> {
+  const response = await fetch("https://slack.com/api/tooling.tokens.rotate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ refresh_token: refreshToken }),
+  });
+
+  const data = (await response.json()) as TokenRotationResponse;
+
+  log.debug("tooling.tokens.rotate response:");
+  log.debug(`  ok = ${data.ok}`);
+  log.debug(`  error = ${data.error ?? "<none>"}`);
+  log.debug(`  token = ${redact(data.token)}`);
+  log.debug(`  refresh_token = ${redact(data.refresh_token)}`);
+  if (data.exp) {
+    log.debug(`  expires = ${new Date(data.exp * 1000).toISOString()}`);
+  }
+
+  if (!data.ok || !data.token || !data.refresh_token) {
+    throw new Error(
+      `Failed to rotate Slack configuration token: ${data.error ?? "missing token in response"}`,
+    );
+  }
+
+  log.debug("Configuration token rotated successfully");
+  return {
+    token: data.token,
+    newRefreshToken: data.refresh_token,
+    rotated: true,
+  };
 }

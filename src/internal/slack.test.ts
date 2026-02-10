@@ -1,6 +1,7 @@
 import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SlackAppApprovalError, SlackAppNotFoundError } from "./errors";
+import { checkSlackConfigToken, rotateSlackConfigToken } from "./slack";
 import type { CreateAppResult, SlackOps, VercelOps } from "./types";
 import { tryInstallApp, upsertSlackApp } from "./utils";
 
@@ -271,5 +272,157 @@ describe("tryInstallApp", () => {
 
     expect(result.installed).toBe(false);
     expect(result.error).toContain("env var write failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkSlackConfigToken
+// ---------------------------------------------------------------------------
+
+// Mock the WebClient to avoid real API calls
+vi.mock("@slack/web-api", () => {
+  const MockWebClient = vi.fn();
+  return { WebClient: MockWebClient };
+});
+
+// We need to import the mocked WebClient after vi.mock
+const { WebClient } = await import("@slack/web-api");
+
+function mockWebClient(authTestResult: {
+  resolve?: unknown;
+  reject?: unknown;
+}) {
+  const testFn = authTestResult.reject
+    ? vi.fn().mockRejectedValue(authTestResult.reject)
+    : vi.fn().mockResolvedValue(authTestResult.resolve ?? { ok: true });
+
+  vi.mocked(WebClient).mockImplementation(function (this: unknown) {
+    Object.assign(this as Record<string, unknown>, {
+      auth: { test: testFn },
+    });
+  } as unknown as typeof WebClient);
+}
+
+describe("checkSlackConfigToken", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the same token when auth.test succeeds", async () => {
+    mockWebClient({ resolve: { ok: true } });
+
+    const result = await checkSlackConfigToken("xoxe.xoxp-valid-token");
+
+    expect(result.token).toBe("xoxe.xoxp-valid-token");
+    expect(result.rotated).toBe(false);
+    expect(result.newRefreshToken).toBeUndefined();
+  });
+
+  it("throws when token is expired and no refresh token is provided", async () => {
+    mockWebClient({ reject: { data: { error: "invalid_auth" } } });
+
+    await expect(
+      checkSlackConfigToken("xoxe.xoxp-expired-token"),
+    ).rejects.toThrow("SLACK_CONFIG_REFRESH_TOKEN");
+  });
+
+  it("rotates token when expired and refresh token is provided", async () => {
+    mockWebClient({ reject: { data: { error: "token_expired" } } });
+
+    // Mock the fetch call to tooling.tokens.rotate
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          token: "xoxe.xoxp-new-token",
+          refresh_token: "xoxe-new-refresh",
+          exp: Math.floor(Date.now() / 1000) + 43200,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await checkSlackConfigToken(
+      "xoxe.xoxp-expired-token",
+      "xoxe-old-refresh",
+    );
+
+    expect(result.token).toBe("xoxe.xoxp-new-token");
+    expect(result.newRefreshToken).toBe("xoxe-new-refresh");
+    expect(result.rotated).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://slack.com/api/tooling.tokens.rotate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("rethrows non-auth errors without attempting rotation", async () => {
+    mockWebClient({ reject: new Error("network failure") });
+
+    await expect(
+      checkSlackConfigToken("xoxe.xoxp-token", "xoxe-refresh"),
+    ).rejects.toThrow("network failure");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rotateSlackConfigToken
+// ---------------------------------------------------------------------------
+
+describe("rotateSlackConfigToken", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns new token and refresh token on success", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          token: "xoxe.xoxp-rotated",
+          refresh_token: "xoxe-rotated-refresh",
+          exp: Math.floor(Date.now() / 1000) + 43200,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await rotateSlackConfigToken("xoxe-old-refresh");
+
+    expect(result.token).toBe("xoxe.xoxp-rotated");
+    expect(result.newRefreshToken).toBe("xoxe-rotated-refresh");
+    expect(result.rotated).toBe(true);
+  });
+
+  it("throws when the rotation API returns an error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: "invalid_refresh_token",
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(rotateSlackConfigToken("xoxe-bad-refresh")).rejects.toThrow(
+      "invalid_refresh_token",
+    );
+  });
+
+  it("throws when token is missing from response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          // token and refresh_token deliberately missing
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(rotateSlackConfigToken("xoxe-refresh")).rejects.toThrow(
+      "missing token in response",
+    );
   });
 });

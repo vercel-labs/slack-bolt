@@ -19,7 +19,7 @@ export interface SlackOps {
 export interface VercelOps {
   getSlackAppId(branch: string): Promise<string | null>;
   setEnvVars(
-    branch: string,
+    branch: string | null,
     vars: { key: string; value: string }[],
   ): Promise<void>;
   deleteSlackEnvVars(branch: string): Promise<void>;
@@ -86,6 +86,17 @@ export interface SetupSlackPreviewOptions {
    */
   slackServiceToken?: string;
   /**
+   * Slack configuration refresh token for automatic token rotation.
+   * When provided, expired configuration tokens are automatically refreshed
+   * via `tooling.tokens.rotate` and the new tokens are persisted as
+   * project-level Vercel environment variables.
+   *
+   * Generate a configuration token (and its refresh token) at the bottom of
+   * {@link https://api.slack.com/apps}.
+   * @default process.env.SLACK_CONFIG_REFRESH_TOKEN
+   */
+  slackConfigRefreshToken?: string;
+  /**
    * Enable verbose debug logging.
    * Logs detailed information about each step of the build process including
    * environment variable state, API calls, and timing.
@@ -107,4 +118,26 @@ export interface DeveloperInstallResponse {
 
 export interface VercelBranchesResponse {
   branches?: Array<{ branch: string }>;
+}
+
+/** Result from `tooling.tokens.rotate` Slack API call. */
+export interface TokenRotationResponse {
+  ok: boolean;
+  error?: string;
+  token?: string;
+  refresh_token?: string;
+  team_id?: string;
+  user_id?: string;
+  iat?: number;
+  exp?: number;
+}
+
+/** Result from checking/refreshing a Slack configuration token. */
+export interface CheckTokenResult {
+  /** The valid configuration token to use (may be the original or a refreshed one). */
+  token: string;
+  /** If the token was rotated, the new refresh token that must be persisted. */
+  newRefreshToken?: string;
+  /** Whether the token was rotated. */
+  rotated: boolean;
 }

@@ -21,7 +21,7 @@ export function createVercelOps(
     },
 
     async setEnvVars(
-      branch: string,
+      branch: string | null,
       vars: { key: string; value: string }[],
     ): Promise<void> {
       return setVercelEnvVars(projectId, branch, token, vars, teamId);
@@ -171,16 +171,23 @@ async function getSlackAppIdForBranch(
   }
 }
 
+/**
+ * Sets env vars via the Vercel API.
+ * When `branch` is a string, vars are branch-scoped (preview only, encrypted).
+ * When `branch` is null, vars are project-level (preview + development, sensitive).
+ */
 async function setVercelEnvVars(
   projectId: string,
-  branch: string,
+  branch: string | null,
   token: string,
   vars: { key: string; value: string }[],
   teamId?: string | null,
 ): Promise<void> {
-  log.debug(
-    `Setting ${vars.length} env var(s) via Vercel API (branch: ${branch}, target: preview, type: encrypted):`,
-  );
+  const scope = branch
+    ? `branch: ${branch}, target: preview, type: encrypted`
+    : "project-level, target: preview+development, type: sensitive";
+  log.debug(`Setting ${vars.length} env var(s) via Vercel API (${scope}):`);
+
   const vercel = new Vercel({ bearerToken: token });
   const failures: string[] = [];
 
@@ -191,21 +198,25 @@ async function setVercelEnvVars(
         idOrName: projectId,
         upsert: "true",
         teamId: teamId ?? undefined,
-        requestBody: {
-          key,
-          value,
-          type: "encrypted",
-          target: ["preview"],
-          gitBranch: branch,
-        },
+        requestBody: branch
+          ? {
+              key,
+              value,
+              type: "encrypted",
+              target: ["preview"],
+              gitBranch: branch,
+            }
+          : {
+              key,
+              value,
+              type: "encrypted",
+              target: ["preview", "development", "production"],
+            },
       });
       log.debug(`  ${key} set successfully`);
     } catch (error) {
       log.error(
         `Failed to set env var ${key}: ${error instanceof Error ? error.message : error}`,
-      );
-      log.debug(
-        `  ${key} FAILED: ${error instanceof Error ? error.message : error}`,
       );
       failures.push(key);
     }
@@ -213,9 +224,7 @@ async function setVercelEnvVars(
 
   if (failures.length > 0) {
     throw new VercelApiError(
-      `Failed to set env vars: ${failures.join(", ")}. ` +
-        `The Slack app was created but cannot be tracked. ` +
-        `Delete it manually in Slack and retry.`,
+      `Failed to set env vars: ${failures.join(", ")}.`,
       0,
     );
   }
