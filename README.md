@@ -87,7 +87,7 @@ Starter templates: [Next.js](https://github.com/vercel-labs/slack-bolt/tree/exam
 
 ## Vercel Preview Deployments
 
-This package exports a custom build script to automate the creation and installation of Slack apps into your internal workspace when a preview deployment is created.
+This package automates the creation and installation of Slack apps into your internal workspace when a preview deployment is created. You can set this up using the CLI build command or the programmatic API.
 
 ### Update Project Level Environment Variables
 
@@ -95,13 +95,64 @@ This package exports a custom build script to automate the creation and installa
 - `SLACK_SERVICE_TOKEN`: Create a Slack service token to allow for automatic app installs by running `slack auth token` in your terminal and following the instructions
 - `VERCEL_API_TOKEN`: Create a PAT [here](https://vercel.com/account/settings/tokens) to allow for automatic environment variable updates
 
-### Update build script
+### Option 1: CLI Build Command
 
-In your package.json file update the build command to include `vercel-slack build`. You can put this before your frameworks build command. For example, `vercel-slack build && next build`.
+In your `package.json` file update the build command to include `vercel-slack build`. You can put this before your framework's build command. For example, `vercel-slack build && next build`.
+
+### Option 2: `setupSlackPreview`
+
+If you prefer programmatic control, you can use the `setupSlackPreview` function exported from `@vercel/slack-bolt/preview` instead of the CLI.
+
+```typescript
+// scripts/setup-slack.ts
+import { setupSlackPreview } from "@vercel/slack-bolt/preview";
+
+const result = await setupSlackPreview();
+
+switch (result.status) {
+  case "skipped":
+    console.log(`Skipped: ${result.reason}`);
+    break;
+  case "failed":
+    console.error(`Failed: ${result.error}`);
+    process.exit(1);
+  case "created":
+    console.log(`Created Slack app: ${result.appId}`);
+    break;
+  case "updated":
+    console.log(`Updated Slack app: ${result.appId}`);
+    break;
+}
+```
+
+Then update your build command to run the script before your framework build. For example, `tsx scripts/setup-slack.ts && next build`.
+
+#### Parameters
+
+| Name               | Type      | Default                                | Required | Description                                                                          |
+| ------------------ | --------- | -------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| `manifestPath`     | `string`  | `"manifest.json"`                      | No       | Path to the manifest.json file (relative to repo root).                              |
+| `slackConfigToken` | `string`  | `process.env.SLACK_CONFIGURATION_TOKEN`| No       | Slack configuration token for creating/updating apps.                                |
+| `vercelToken`      | `string`  | `process.env.VERCEL_API_TOKEN`         | No       | Vercel API token for setting/querying environment variables.                         |
+| `slackServiceToken`| `string`  | `process.env.SLACK_SERVICE_TOKEN`      | No       | Slack CLI service token (`xoxp-...`) for automatic app installation.                 |
+| `debug`            | `boolean` | `false`                                | No       | Enable verbose debug logging.                                                        |
+
+#### Return Value
+
+Returns a `Promise<SetupResult>` indicating what action was taken:
+
+| Status      | Description                                          |
+| ----------- | ---------------------------------------------------- |
+| `"skipped"` | Setup was skipped (e.g. missing tokens, not preview). |
+| `"failed"`  | Setup encountered an error.                          |
+| `"created"` | A new Slack app was created for this branch.          |
+| `"updated"` | An existing Slack app's manifest was synced.          |
+
+Each result includes an `appId` (when applicable) and a `warnings` array.
 
 ### How it works
 
-The `vercel-slack build` command runs before your framework build and automates Slack app lifecycle management for preview branches:
+Both the CLI and the programmatic API perform the same steps before your framework build to automate Slack app lifecycle management for preview branches:
 
 1. **Cleans up orphaned apps** — deletes Slack apps tied to branches that no longer exist in your Vercel project.
 2. **Loads and prepares your manifest** — reads your `manifest.json`, injects the preview branch URL into all request URLs, and appends deployment metadata.
