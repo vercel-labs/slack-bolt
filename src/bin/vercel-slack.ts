@@ -12,16 +12,12 @@ if (fs.existsSync(".env.local")) {
 }
 
 // Gracefully handle termination signals (e.g. Docker, CI cancellation)
-// #region agent log
 process.on("SIGTERM", () => {
-  console.error("[DBG] H1: SIGTERM received, exiting");
   process.exit(0);
 });
 process.on("SIGINT", () => {
-  console.error("[DBG] H1: SIGINT received, exiting");
   process.exit(0);
 });
-// #endregion
 
 const HELP = `
 Usage: vercel-slack <command> [options]
