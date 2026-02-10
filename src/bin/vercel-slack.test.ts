@@ -249,6 +249,9 @@ describe("vercel-slack CLI", () => {
 
       const helpOutput = logSpy.mock.calls[0]?.[0] as string;
       expect(helpOutput).toContain("--manifest");
+      expect(helpOutput).toContain("--slack-config-token");
+      expect(helpOutput).toContain("--vercel-token");
+      expect(helpOutput).toContain("--slack-service-token");
       expect(helpOutput).toContain("--debug");
       expect(helpOutput).toContain("--version");
       expect(helpOutput).toContain("--help");
@@ -271,6 +274,9 @@ describe("vercel-slack CLI", () => {
 
       expect(mockSetupSlackPreview).toHaveBeenCalledWith({
         manifestPath: undefined,
+        slackConfigToken: undefined,
+        vercelToken: undefined,
+        slackServiceToken: undefined,
         debug: false,
       });
     });
@@ -296,6 +302,9 @@ describe("vercel-slack CLI", () => {
 
       expect(mockSetupSlackPreview).toHaveBeenCalledWith({
         manifestPath: "my-manifest.json",
+        slackConfigToken: undefined,
+        vercelToken: undefined,
+        slackServiceToken: undefined,
         debug: true,
       });
     });
@@ -377,6 +386,56 @@ describe("vercel-slack CLI", () => {
 
       expect(mockSetupSlackPreview).toHaveBeenCalledWith({
         manifestPath: "reversed.json",
+        slackConfigToken: undefined,
+        vercelToken: undefined,
+        slackServiceToken: undefined,
+        debug: true,
+      });
+    });
+
+    it("passes --slack-config-token to setupSlackPreview", async () => {
+      await runCLI(["build", "--slack-config-token", "xoxe.xoxp-config-123"]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ slackConfigToken: "xoxe.xoxp-config-123" }),
+      );
+    });
+
+    it("passes --vercel-token to setupSlackPreview", async () => {
+      await runCLI(["build", "--vercel-token", "vercel_token_abc"]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ vercelToken: "vercel_token_abc" }),
+      );
+    });
+
+    it("passes --slack-service-token to setupSlackPreview", async () => {
+      await runCLI(["build", "--slack-service-token", "xoxp-service-456"]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ slackServiceToken: "xoxp-service-456" }),
+      );
+    });
+
+    it("passes all token flags together", async () => {
+      await runCLI([
+        "build",
+        "--slack-config-token",
+        "cfg-tok",
+        "--vercel-token",
+        "v-tok",
+        "--slack-service-token",
+        "svc-tok",
+        "--manifest",
+        "m.json",
+        "--debug",
+      ]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith({
+        manifestPath: "m.json",
+        slackConfigToken: "cfg-tok",
+        vercelToken: "v-tok",
+        slackServiceToken: "svc-tok",
         debug: true,
       });
     });
@@ -486,6 +545,9 @@ describe("vercel-slack CLI", () => {
 
       expect(mockSetupSlackPreview).toHaveBeenCalledWith({
         manifestPath: undefined,
+        slackConfigToken: undefined,
+        vercelToken: undefined,
+        slackServiceToken: undefined,
         debug: false,
       });
     });
@@ -496,8 +558,35 @@ describe("vercel-slack CLI", () => {
 
       expect(mockSetupSlackPreview).toHaveBeenCalledWith({
         manifestPath: "--debug",
+        slackConfigToken: undefined,
+        vercelToken: undefined,
+        slackServiceToken: undefined,
         debug: false,
       });
+    });
+
+    it("--slack-config-token without a following value does not set slackConfigToken", async () => {
+      await runCLI(["build", "--slack-config-token"]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ slackConfigToken: undefined }),
+      );
+    });
+
+    it("--vercel-token without a following value does not set vercelToken", async () => {
+      await runCLI(["build", "--vercel-token"]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ vercelToken: undefined }),
+      );
+    });
+
+    it("--slack-service-token without a following value does not set slackServiceToken", async () => {
+      await runCLI(["build", "--slack-service-token"]);
+
+      expect(mockSetupSlackPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ slackServiceToken: undefined }),
+      );
     });
   });
 });

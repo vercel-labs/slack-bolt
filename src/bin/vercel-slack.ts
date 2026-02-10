@@ -26,29 +26,53 @@ Commands:
   build   Create or update the Slack app for the current preview branch
 
 Options:
-  --manifest <path>  Path to manifest.json (default: "manifest.json")
-  --debug            Enable verbose debug logging
-  --version, -v      Print version number
-  --help, -h         Show this help message
+  --manifest <path>              Path to manifest.json (default: "manifest.json")
+  --slack-config-token <token>   Slack configuration token (default: process.env.SLACK_CONFIGURATION_TOKEN)
+  --vercel-token <token>         Vercel API token (default: process.env.VERCEL_API_TOKEN)
+  --slack-service-token <token>  Slack service token for auto-install (default: process.env.SLACK_SERVICE_TOKEN)
+  --debug                        Enable verbose debug logging
+  --version, -v                  Print version number
+  --help, -h                     Show this help message
 `.trim();
 
 function parseFlags(args: string[]): {
   manifestPath?: string;
+  slackConfigToken?: string;
+  vercelToken?: string;
+  slackServiceToken?: string;
   debug?: boolean;
 } {
   let manifestPath: string | undefined;
+  let slackConfigToken: string | undefined;
+  let vercelToken: string | undefined;
+  let slackServiceToken: string | undefined;
   let debug = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--manifest" && args[i + 1]) {
       manifestPath = args[i + 1];
       i++;
+    } else if (args[i] === "--slack-config-token" && args[i + 1]) {
+      slackConfigToken = args[i + 1];
+      i++;
+    } else if (args[i] === "--vercel-token" && args[i + 1]) {
+      vercelToken = args[i + 1];
+      i++;
+    } else if (args[i] === "--slack-service-token" && args[i + 1]) {
+      slackServiceToken = args[i + 1];
+      i++;
     } else if (args[i] === "--debug") {
       debug = true;
     }
   }
 
-  return { manifestPath, debug };
+  return {
+    manifestPath,
+    slackConfigToken,
+    vercelToken,
+    slackServiceToken,
+    debug,
+  };
 }
 
 async function main() {
@@ -73,6 +97,9 @@ async function main() {
 
       const result = await setupSlackPreview({
         manifestPath: flags.manifestPath,
+        slackConfigToken: flags.slackConfigToken,
+        vercelToken: flags.vercelToken,
+        slackServiceToken: flags.slackServiceToken,
         debug: flags.debug,
       });
 
