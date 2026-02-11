@@ -7,14 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": [
-      "src/**/*.{ts,js}",
-      "tsup.config.ts",
-      "tsconfig.json",
-      "biome.json",
-      "vitest.config.ts",
-      ".github/**/*"
-    ]
+    "includes": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx"]
   },
   "formatter": {
     "enabled": true,

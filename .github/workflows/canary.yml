@@ -6,6 +6,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
+env:
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+
 jobs:
   canary:
     name: Publish Canary
@@ -23,15 +27,17 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm build
+        run: pnpm exec turbo run build --filter=@vercel/slack-bolt
 
       - name: Set canary version
+        working-directory: packages/slack-bolt
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          npm version "1.2.0-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
+          pnpm version "1.2.0-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
 
       - name: Publish canary
+        working-directory: packages/slack-bolt
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
           pnpm publish --tag canary --access public --no-git-checks
