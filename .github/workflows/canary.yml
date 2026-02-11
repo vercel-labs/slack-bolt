@@ -27,7 +27,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: turbo run build --filter=@vercel/slack-bolt
+        run: pnpm exec turbo run build --filter=@vercel/slack-bolt
 
       - name: Set canary version
         working-directory: packages/slack-bolt
