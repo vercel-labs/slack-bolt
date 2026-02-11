@@ -1,7 +1,10 @@
 node_modules
 dist
+.next
+.turbo
 tsconfig.tsbuildinfo
 vercel-bolt-*.tgz
 .DS_Store
 vercel-slack-bolt-*.tgz
 coverage
+.agents
