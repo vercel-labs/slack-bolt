@@ -208,14 +208,14 @@ describe("injectUrls", () => {
     ]);
   });
 
-  it("appends bypass secret to redirect_urls", () => {
+  it("does not append bypass secret to redirect_urls", () => {
     const m = makeManifest({
       redirectUrls: ["https://old-domain.com/slack/oauth_redirect"],
     });
     injectUrls(m, baseUrl, bypassSecret);
 
     expect(m.oauth_config?.redirect_urls).toEqual([
-      `https://my-branch.vercel.app/slack/oauth_redirect?x-vercel-protection-bypass=${bypassSecret}`,
+      "https://my-branch.vercel.app/slack/oauth_redirect",
     ]);
   });
 

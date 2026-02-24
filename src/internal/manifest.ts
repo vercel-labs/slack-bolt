@@ -62,34 +62,37 @@ export function injectUrls(
   baseUrl: string,
   bypassSecret?: string | null,
 ): void {
-  function buildUrl(originalUrl: string): string {
-    const p = extractPath(originalUrl);
-    const url = `${baseUrl}${p}`;
+  function rebaseUrl(originalUrl: string): string {
+    return `${baseUrl}${extractPath(originalUrl)}`;
+  }
+
+  function addDeploymentProtectionBypass(url: string): string {
     if (!bypassSecret) return url;
     const sep = url.includes("?") ? "&" : "?";
     return `${url}${sep}x-vercel-protection-bypass=${bypassSecret}`;
   }
 
   if (manifest.settings?.event_subscriptions?.request_url) {
-    manifest.settings.event_subscriptions.request_url = buildUrl(
-      manifest.settings.event_subscriptions.request_url,
-    );
+    manifest.settings.event_subscriptions.request_url =
+      addDeploymentProtectionBypass(
+        rebaseUrl(manifest.settings.event_subscriptions.request_url),
+      );
   }
   if (manifest.settings?.interactivity?.request_url) {
-    manifest.settings.interactivity.request_url = buildUrl(
-      manifest.settings.interactivity.request_url,
+    manifest.settings.interactivity.request_url = addDeploymentProtectionBypass(
+      rebaseUrl(manifest.settings.interactivity.request_url),
     );
   }
   if (manifest.features?.slash_commands) {
     for (const cmd of manifest.features.slash_commands) {
       if (cmd.url) {
-        cmd.url = buildUrl(cmd.url);
+        cmd.url = addDeploymentProtectionBypass(rebaseUrl(cmd.url));
       }
     }
   }
   if (manifest.oauth_config?.redirect_urls) {
     manifest.oauth_config.redirect_urls =
-      manifest.oauth_config.redirect_urls.map(buildUrl);
+      manifest.oauth_config.redirect_urls.map(rebaseUrl);
   }
 }
 
