@@ -87,6 +87,22 @@ export function injectUrls(
       }
     }
   }
+  if (manifest.oauth_config?.redirect_urls) {
+    manifest.oauth_config.redirect_urls =
+      manifest.oauth_config.redirect_urls.map(buildUrl);
+  }
+}
+
+export async function writeManifest(
+  manifest: Manifest,
+  manifestPath: string,
+): Promise<void> {
+  const resolved = path.resolve(process.cwd(), manifestPath);
+  await fs.writeFile(
+    resolved,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf-8",
+  );
 }
 
 export function extractPath(urlOrPath: string): string {

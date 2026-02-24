@@ -49,6 +49,7 @@ function makeManifest(
     eventUrl?: string;
     interactivityUrl?: string;
     slashCommands?: { command: string; url: string; description: string }[];
+    redirectUrls?: string[];
   } = {},
 ): Manifest {
   return {
@@ -64,6 +65,9 @@ function makeManifest(
     features: {
       slash_commands: overrides.slashCommands,
     },
+    oauth_config: overrides.redirectUrls
+      ? { redirect_urls: overrides.redirectUrls, scopes: { bot: [] } }
+      : undefined,
   } as Manifest;
 }
 
@@ -189,6 +193,52 @@ describe("injectUrls", () => {
     expect(m.settings?.event_subscriptions?.request_url).toBe(
       "https://my-branch.vercel.app/slack/events",
     );
+  });
+
+  // ── redirect_urls ──────────────────────────────────────────────────────
+
+  it("rewrites redirect_urls to the branch URL", () => {
+    const m = makeManifest({
+      redirectUrls: ["https://old-domain.com/slack/oauth_redirect"],
+    });
+    injectUrls(m, baseUrl);
+
+    expect(m.oauth_config?.redirect_urls).toEqual([
+      "https://my-branch.vercel.app/slack/oauth_redirect",
+    ]);
+  });
+
+  it("appends bypass secret to redirect_urls", () => {
+    const m = makeManifest({
+      redirectUrls: ["https://old-domain.com/slack/oauth_redirect"],
+    });
+    injectUrls(m, baseUrl, bypassSecret);
+
+    expect(m.oauth_config?.redirect_urls).toEqual([
+      `https://my-branch.vercel.app/slack/oauth_redirect?x-vercel-protection-bypass=${bypassSecret}`,
+    ]);
+  });
+
+  it("rewrites all entries when redirect_urls has multiple entries", () => {
+    const m = makeManifest({
+      redirectUrls: [
+        "https://old-domain.com/slack/oauth_redirect",
+        "https://old-domain.com/api/oauth_redirect",
+      ],
+    });
+    injectUrls(m, baseUrl);
+
+    expect(m.oauth_config?.redirect_urls).toEqual([
+      "https://my-branch.vercel.app/slack/oauth_redirect",
+      "https://my-branch.vercel.app/api/oauth_redirect",
+    ]);
+  });
+
+  it("does not set redirect_urls when not present in manifest", () => {
+    const m = makeManifest({ eventUrl: "https://old-domain.com/slack/events" });
+    injectUrls(m, baseUrl);
+
+    expect(m.oauth_config?.redirect_urls).toBeUndefined();
   });
 });
 

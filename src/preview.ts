@@ -1,5 +1,9 @@
 import { log, redact } from "./internal/logger";
-import { loadManifest, prepareManifest } from "./internal/manifest";
+import {
+  loadManifest,
+  prepareManifest,
+  writeManifest,
+} from "./internal/manifest";
 import { checkSlackConfigToken, createSlackOps } from "./internal/slack";
 import type {
   SetupResult,
@@ -169,6 +173,20 @@ export async function setupSlackPreview(
     bypassSecret,
   });
   log.success("Manifest prepared");
+
+  log.task("Writing prepared manifest to disk...");
+  try {
+    log.debug(
+      `Writing manifest to: ${manifestPath}: ${JSON.stringify(manifest, null, 2)}`,
+    );
+    await writeManifest(manifest, manifestPath);
+    log.success("Manifest written to disk");
+  } catch (error) {
+    warnings.push(
+      `Failed to write prepared manifest to disk: ${error instanceof Error ? error.message : error}. ` +
+        "Code that imports manifest.json directly may use stale redirect URLs.",
+    );
+  }
 
   let result: UpsertResult;
   try {
