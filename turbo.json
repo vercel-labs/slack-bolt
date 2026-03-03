@@ -1,6 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.v2.json",
   "ui": "tui",
+  "globalPassThroughEnv": ["SLACK_*", "VERCEL_*"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

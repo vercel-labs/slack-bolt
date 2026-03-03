@@ -8,3 +8,5 @@ vercel-bolt-*.tgz
 vercel-slack-bolt-*.tgz
 coverage
 .agents
+.vercel
+*.env.local

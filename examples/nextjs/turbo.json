@@ -1,9 +1,16 @@
 {
-  "$schema": "https://turborepo.dev/schema.v2.json",
-  "extends": ["//"],
-  "tasks": {
-    "build": {
-      "env": ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"]
-    }
-  }
+	"$schema": "https://turborepo.dev/schema.v2.json",
+	"extends": ["//"],
+	"tasks": {
+		"build": {
+			"env": ["VERCEL_*", "SLACK_*", "MANIFEST_PATH", "SLACK_SIGNING_SECRET"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				".env",
+				".env.local",
+				".env.production",
+				".env.production.local"
+			]
+		}
+	}
 }
