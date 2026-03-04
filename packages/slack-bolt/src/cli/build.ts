@@ -1,5 +1,9 @@
 import { WebClient } from "@slack/web-api";
-import { getAuthUser } from "../internal/vercel";
+import {
+  cancelDeployment,
+  createDeployment,
+  getAuthUser,
+} from "../internal/vercel";
 import { log, logger } from "../logger";
 import { type PreviewParams, preview } from "../preview";
 
@@ -43,5 +47,23 @@ export async function executeBuild(
     );
   }
 
-  await preview(params, "cli");
+  const result = await preview(params, "cli");
+
+  if (result.isNew && params.deploymentId) {
+    log.step("Creating new deployment to pick up new environment variables");
+    const { id, url } = await createDeployment({
+      deploymentId: params.deploymentId,
+      projectId: params.projectId,
+      token: params.vercelApiToken,
+      teamId: params.teamId,
+    });
+    log.success(`New deployment created: ${url} (${id})`);
+
+    log.step("Cancelling current deployment");
+    await cancelDeployment({
+      deploymentId: params.deploymentId,
+      token: params.vercelApiToken,
+      teamId: params.teamId,
+    });
+  }
 }

@@ -101,3 +101,63 @@ export async function addEnvironmentVariables({
 
   return response.json();
 }
+
+export async function cancelDeployment({
+  deploymentId,
+  token,
+  teamId,
+}: {
+  deploymentId: string;
+  token: string;
+  teamId?: string;
+}): Promise<void> {
+  const url = new URL(
+    `https://api.vercel.com/v12/deployments/${encodeURIComponent(deploymentId)}/cancel`,
+  );
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse("Failed to cancel deployment", response);
+  }
+}
+
+export async function createDeployment({
+  deploymentId,
+  projectId,
+  token,
+  teamId,
+}: {
+  deploymentId: string;
+  projectId: string;
+  token: string;
+  teamId?: string;
+}): Promise<{ id: string; url: string }> {
+  const url = new URL("https://api.vercel.com/v13/deployments");
+  if (teamId) url.searchParams.set("teamId", teamId);
+  url.searchParams.set("forceNew", "1");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      deploymentId,
+      name: projectId,
+      project: projectId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse("Failed to create deployment", response);
+  }
+
+  const data = await response.json();
+  return { id: data.id, url: data.url };
+}
