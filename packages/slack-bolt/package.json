@@ -6,7 +6,7 @@
 	"types": "./dist/index.d.ts",
 	"type": "commonjs",
 	"bin": {
-		"vercel-slack": "./dist/cli.js"
+		"vercel-slack": "./bin/vercel-slack.js"
 	},
 	"exports": {
 		".": {
@@ -34,6 +34,7 @@
 		}
 	},
 	"files": [
+		"bin",
 		"dist"
 	],
 	"repository": {
