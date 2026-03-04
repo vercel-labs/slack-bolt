@@ -1,4 +1,4 @@
-import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
+import type { Manifest } from "../manifest/types";
 
 export interface SlackManifestCreateResponse {
   ok: boolean;

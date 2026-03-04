@@ -22,8 +22,14 @@ export function run(version: string): void {
     cmd.option(`--${envKeyToFlag(key)} <value>`, `Override ${key}`);
   }
 
-  cmd.action(async (options: Record<string, string | undefined>) => {
-    const env = resolveEnv(options);
+  cmd.option(
+    "--cleanup",
+    "Clean up Slack apps and env vars for inactive preview branches",
+  );
+
+  cmd.action(async (options: Record<string, string | boolean | undefined>) => {
+    const cleanup = options.cleanup === true;
+    const env = resolveEnv(options as Record<string, string | undefined>);
 
     logger.info(
       startMessage(
@@ -46,7 +52,7 @@ export function run(version: string): void {
     }
 
     const params = validateAndBuildParams(env);
-    await executeBuild(params, version);
+    await executeBuild(params, version, { cleanup });
   });
 
   program.parseAsync().catch((error: unknown) => {

@@ -41,7 +41,7 @@ describe("updateProtectionBypass", () => {
     await updateProtectionBypass(defaultArgs);
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe(
+    expect(url.toString()).toBe(
       "https://api.vercel.com/v1/projects/prj_123/protection-bypass?teamId=team_456",
     );
     expect(mockFetch.mock.calls[0][1].method).toBe("PATCH");
@@ -75,15 +75,15 @@ describe("updateProtectionBypass", () => {
     expect(secret).toBe(body.generate.secret);
   });
 
-  it("includes literal 'teamId=undefined' in URL when teamId is omitted (unlike addEnvironmentVariables which omits it)", async () => {
+  it("should omit teamId query param when teamId is not provided", async () => {
     mockFetch.mockResolvedValueOnce(okResponse());
 
     await updateProtectionBypass({ projectId: "prj_123", token: "tok_abc" });
 
-    // Documents current behavior: template-literal interpolation produces
-    // "?teamId=undefined" rather than omitting the parameter entirely.
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toContain("?teamId=undefined");
+    expect(url.toString()).toBe(
+      "https://api.vercel.com/v1/projects/prj_123/protection-bypass",
+    );
   });
 
   it("should set Content-Type to application/json", async () => {

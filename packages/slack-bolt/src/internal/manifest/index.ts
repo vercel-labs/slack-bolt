@@ -1,4 +1,4 @@
-import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
+import type { Manifest } from "./types";
 
 export function rewriteUrl(
   originalUrl: string,

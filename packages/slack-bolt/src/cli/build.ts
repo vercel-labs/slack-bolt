@@ -1,4 +1,5 @@
-import { WebClient } from "@slack/web-api";
+import { cleanupOrphanedApps } from "../cleanup";
+import { authTest } from "../internal/slack";
 import {
   cancelDeployment,
   createDeployment,
@@ -10,6 +11,7 @@ import { type PreviewParams, preview } from "../preview";
 export async function executeBuild(
   params: PreviewParams,
   version: string,
+  options?: { cleanup?: boolean },
 ): Promise<void> {
   if (!params.slackConfigurationToken) {
     throw new Error(
@@ -18,7 +20,7 @@ export async function executeBuild(
   }
 
   try {
-    await new WebClient(params.slackConfigurationToken).auth.test();
+    await authTest({ token: params.slackConfigurationToken });
   } catch (error) {
     throw new Error(
       "Slack configuration token is invalid or expired. Generate a new configuration token and add it as SLACK_CONFIGURATION_TOKEN in your Vercel project:\nhttps://api.slack.com/apps",
@@ -28,7 +30,7 @@ export async function executeBuild(
 
   if (params.slackServiceToken) {
     try {
-      await new WebClient(params.slackServiceToken).auth.test();
+      await authTest({ token: params.slackServiceToken });
     } catch (error) {
       log.warning(
         "SLACK_SERVICE_TOKEN is invalid — app must be installed manually",
@@ -45,6 +47,23 @@ export async function executeBuild(
       "Vercel API token is invalid or expired. Create a new token and add it as VERCEL_API_TOKEN in your Vercel project:\nhttps://vercel.com/account/settings/tokens",
       { cause: error },
     );
+  }
+
+  if (options?.cleanup) {
+    log.step("Cleaning up orphaned preview apps");
+    try {
+      await cleanupOrphanedApps({
+        projectId: params.projectId,
+        currentBranch: params.branch,
+        vercelApiToken: params.vercelApiToken,
+        teamId: params.teamId,
+        slackConfigurationToken: params.slackConfigurationToken,
+      });
+    } catch (error) {
+      log.warning(
+        `Orphan cleanup failed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   const result = await preview(params, "cli");

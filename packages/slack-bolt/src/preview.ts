@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
-import type { CreateProjectEnv21 } from "@vercel/sdk/esm/models/createprojectenvop";
 import { createNewManifest } from "./internal/manifest";
+import type { Manifest } from "./internal/manifest/types";
 import { installApp, upsertSlackApp } from "./internal/slack";
 import type {
   SlackManifestCreateResponse,
@@ -12,6 +11,7 @@ import {
   addEnvironmentVariables,
   updateProtectionBypass,
 } from "./internal/vercel";
+import type { CreateProjectEnv } from "./internal/vercel/types";
 import { log } from "./logger";
 
 export type PreviewParams = {
@@ -104,7 +104,17 @@ export const preview = async (
   });
 
   if (isNew) {
-    const credentialEnvs: CreateProjectEnv21[] = [];
+    const credentialEnvs: CreateProjectEnv[] = [];
+    if (app.app_id) {
+      credentialEnvs.push({
+        key: "SLACK_APP_ID",
+        value: app.app_id,
+        type: "encrypted",
+        target: ["preview"],
+        gitBranch: branch,
+        comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
+      });
+    }
     if (app.credentials?.client_id) {
       credentialEnvs.push({
         key: "SLACK_CLIENT_ID",
@@ -156,7 +166,7 @@ export const preview = async (
   });
 
   if (isNew) {
-    const tokenEnvs: CreateProjectEnv21[] = [];
+    const tokenEnvs: CreateProjectEnv[] = [];
     if (botToken) {
       tokenEnvs.push({
         key: "SLACK_BOT_TOKEN",

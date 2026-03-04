@@ -1,4 +1,4 @@
-import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
+import type { Manifest } from "../manifest/types";
 import { HTTPError } from "../vercel/errors";
 import {
   SlackManifestCreateError,
@@ -159,6 +159,61 @@ export async function upsertSlackApp({
 
   const app = await createSlackApp({ token, manifest });
   return { isNew: true, app };
+}
+
+export async function deleteSlackApp({
+  token,
+  appId,
+}: {
+  token: string;
+  appId: string;
+}): Promise<void> {
+  const response = await fetch("https://slack.com/api/apps.manifest.delete", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ app_id: appId }),
+  });
+
+  if (!response.ok) {
+    throw new HTTPError(
+      "Failed to delete Slack app",
+      response.status,
+      response.statusText,
+    );
+  }
+
+  const data = (await response.json()) as { ok: boolean; error?: string };
+
+  if (!data.ok) {
+    throw new Error(data.error ?? "Unknown error");
+  }
+}
+
+export async function authTest({ token }: { token: string }): Promise<void> {
+  const response = await fetch("https://slack.com/api/auth.test", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+  });
+
+  if (!response.ok) {
+    throw new HTTPError(
+      "Auth test failed",
+      response.status,
+      response.statusText,
+    );
+  }
+
+  const data = (await response.json()) as { ok: boolean; error?: string };
+
+  if (!data.ok) {
+    throw new Error(data.error ?? "Unknown error");
+  }
 }
 
 export async function installApp(params: {

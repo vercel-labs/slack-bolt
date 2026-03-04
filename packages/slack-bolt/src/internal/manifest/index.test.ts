@@ -1,6 +1,6 @@
-import type { Manifest } from "@slack/web-api/dist/types/request/manifest";
 import { describe, expect, it } from "vitest";
 import { createNewManifest, rewriteUrl } from "./index";
+import type { Manifest } from "./types";
 
 describe("rewriteUrl", () => {
   it("should replace the host while preserving the path", () => {

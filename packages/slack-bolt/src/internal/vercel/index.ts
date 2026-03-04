@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
-import type { CreateProjectEnv21 } from "@vercel/sdk/esm/models/createprojectenvop";
 import { HTTPError } from "./errors";
-import type { AddEnvironmentVariablesResult, GetAuthUserResult } from "./types";
+import type {
+  AddEnvironmentVariablesResult,
+  CreateProjectEnv,
+  EnvironmentVariable,
+  GetAuthUserResult,
+} from "./types";
 
 export async function getAuthUser({
   token,
@@ -37,22 +41,24 @@ export async function updateProtectionBypass({
   const newSecret = crypto.randomBytes(32).toString("hex");
   const note = "Created by @vercel/slack-bolt";
 
-  const response = await fetch(
-    `https://api.vercel.com/v1/projects/${projectId}/protection-bypass?teamId=${teamId}`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        generate: {
-          secret: newSecret,
-          note: note,
-        },
-      }),
-    },
+  const url = new URL(
+    `https://api.vercel.com/v1/projects/${encodeURIComponent(projectId)}/protection-bypass`,
   );
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      generate: {
+        secret: newSecret,
+        note: note,
+      },
+    }),
+  });
 
   if (!response.ok) {
     throw await HTTPError.fromResponse(
@@ -74,7 +80,7 @@ export async function addEnvironmentVariables({
   projectId: string;
   token: string;
   teamId?: string;
-  envs: CreateProjectEnv21 | CreateProjectEnv21[];
+  envs: CreateProjectEnv | CreateProjectEnv[];
   upsert?: boolean;
 }): Promise<AddEnvironmentVariablesResult> {
   const url = new URL(
@@ -160,4 +166,121 @@ export async function createDeployment({
 
   const data = await response.json();
   return { id: data.id, url: data.url };
+}
+
+export async function getActiveBranches({
+  projectId,
+  token,
+  teamId,
+}: {
+  projectId: string;
+  token: string;
+  teamId?: string;
+}): Promise<Set<string>> {
+  const params = new URLSearchParams({ active: "1", limit: "100" });
+  if (teamId) params.set("teamId", teamId);
+
+  const response = await fetch(
+    `https://api.vercel.com/v5/projects/${encodeURIComponent(projectId)}/branches?${params}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse(
+      "Failed to fetch active branches",
+      response,
+    );
+  }
+
+  const data: { branches?: { branch: string }[] } = await response.json();
+  return new Set(data.branches?.map((b) => b.branch) ?? []);
+}
+
+export async function getEnvironmentVariables({
+  projectId,
+  token,
+  teamId,
+}: {
+  projectId: string;
+  token: string;
+  teamId?: string;
+}): Promise<EnvironmentVariable[]> {
+  const url = new URL(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}/env`,
+  );
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse(
+      "Failed to fetch environment variables",
+      response,
+    );
+  }
+
+  const data: { envs: EnvironmentVariable[] } = await response.json();
+  return data.envs ?? [];
+}
+
+export async function getEnvironmentVariable({
+  projectId,
+  envId,
+  token,
+  teamId,
+}: {
+  projectId: string;
+  envId: string;
+  token: string;
+  teamId?: string;
+}): Promise<string | null> {
+  const url = new URL(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(envId)}`,
+  );
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse(
+      "Failed to fetch environment variable",
+      response,
+    );
+  }
+
+  const data: { value?: string } = await response.json();
+  return data.value ?? null;
+}
+
+export async function deleteEnvironmentVariable({
+  projectId,
+  envId,
+  token,
+  teamId,
+}: {
+  projectId: string;
+  envId: string;
+  token: string;
+  teamId?: string;
+}): Promise<void> {
+  const url = new URL(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(envId)}`,
+  );
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse(
+      "Failed to delete environment variable",
+      response,
+    );
+  }
 }
