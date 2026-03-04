@@ -41,7 +41,7 @@ export function run(version: string): void {
 
     if (isLocal || isDev || isProd) {
       const reason = isLocal ? "local" : isDev ? "development" : "production";
-      log.info(`Environment: ${reason} (skipped)`);
+      log.info(`Environment: ${reason} (skipped)\n`);
       return;
     }
 
@@ -51,5 +51,6 @@ export function run(version: string): void {
 
   program.parseAsync().catch((error: unknown) => {
     logger.error(error instanceof Error ? error.message : String(error));
+    console.log();
   });
 }
