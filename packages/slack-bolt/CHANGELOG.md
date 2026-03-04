@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.2.1
+
+### Patch Changes
+
+- 2608ccb: fix readme location for monorepo
+
 ## 1.2.0
 
 ### Minor Changes
