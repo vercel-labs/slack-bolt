@@ -23,6 +23,11 @@ jobs:
         with:
           token: ${{ secrets.GH_TOKEN_PULL_REQUESTS }}
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: pnpm/action-setup@v4
         name: Install pnpm
         id: pnpm-setup
