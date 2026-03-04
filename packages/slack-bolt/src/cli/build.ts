@@ -41,7 +41,7 @@ export async function executeBuild(
   }
 
   try {
-    await getAuthUser({ token: params.vercelApiToken });
+    await getAuthUser({ token: params.vercelApiToken, teamId: params.teamId });
   } catch (error) {
     throw new Error(
       "Vercel API token is invalid or expired. Create a new token and add it as VERCEL_API_TOKEN in your Vercel project:\nhttps://vercel.com/account/settings/tokens",

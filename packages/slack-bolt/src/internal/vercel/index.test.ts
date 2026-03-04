@@ -164,8 +164,19 @@ describe("getAuthUser", () => {
     await getAuthUser(defaultArgs);
 
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("https://api.vercel.com/v2/user");
+    expect(url.toString()).toBe("https://api.vercel.com/v2/user");
     expect(opts.method).toBe("GET");
+  });
+
+  it("should include teamId query param when provided", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+
+    await getAuthUser({ token: "tok_abc", teamId: "team_456" });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url.toString()).toBe(
+      "https://api.vercel.com/v2/user?teamId=team_456",
+    );
   });
 
   it("should set the Authorization bearer header", async () => {

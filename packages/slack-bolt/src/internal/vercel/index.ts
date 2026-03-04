@@ -9,10 +9,15 @@ import type {
 
 export async function getAuthUser({
   token,
+  teamId,
 }: {
   token: string;
+  teamId?: string;
 }): Promise<GetAuthUserResult> {
-  const response = await fetch("https://api.vercel.com/v2/user", {
+  const url = new URL("https://api.vercel.com/v2/user");
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
