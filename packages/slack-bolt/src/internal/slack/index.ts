@@ -84,7 +84,7 @@ export async function updateSlackApp({
 
   if (!response.ok) {
     throw new HTTPError(
-      `Slack API request failed (${response.status}): ${response.statusText}`,
+      "Failed to update Slack app",
       response.status,
       response.statusText,
     );

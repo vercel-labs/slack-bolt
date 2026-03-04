@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HTTPError } from "./errors";
-import { addEnvironmentVariables, updateProtectionBypass } from "./index";
+import {
+  addEnvironmentVariables,
+  getAuthUser,
+  updateProtectionBypass,
+} from "./index";
 
 const mockFetch = vi.fn();
 
@@ -17,8 +21,11 @@ function okResponse(body: unknown = {}) {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
-function errorResponse(status: number, statusText: string) {
-  return new Response(null, { status, statusText });
+function errorResponse(status: number, statusText: string, body?: unknown) {
+  return new Response(body ? JSON.stringify(body) : null, {
+    status,
+    statusText,
+  });
 }
 
 describe("updateProtectionBypass", () => {
@@ -105,7 +112,27 @@ describe("updateProtectionBypass", () => {
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.status).toBe(403);
     expect(err.statusText).toBe("Forbidden");
-    expect(err.message).toBe("Failed to update protection bypass");
+    expect(err.message).toBe(
+      "Failed to update protection bypass: 403 Forbidden",
+    );
+  });
+
+  it("should include response body in error message when present", async () => {
+    mockFetch.mockResolvedValueOnce(
+      errorResponse(403, "Forbidden", {
+        error: { code: "forbidden", message: "Not allowed" },
+      }),
+    );
+
+    const err = await updateProtectionBypass(defaultArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.message).toBe(
+      'Failed to update protection bypass: 403 Forbidden - {"error":{"code":"forbidden","message":"Not allowed"}}',
+    );
+    expect(err.body).toBe(
+      '{"error":{"code":"forbidden","message":"Not allowed"}}',
+    );
   });
 
   it("should propagate network errors from fetch", async () => {
@@ -114,6 +141,100 @@ describe("updateProtectionBypass", () => {
     await expect(updateProtectionBypass(defaultArgs)).rejects.toThrow(
       TypeError,
     );
+  });
+});
+
+describe("getAuthUser", () => {
+  const defaultArgs = { token: "tok_abc" };
+
+  const userPayload = {
+    user: {
+      id: "user_123",
+      email: "test@example.com",
+      name: "Test User",
+      username: "testuser",
+      avatar: "abc123hash",
+      defaultTeamId: "team_456",
+    },
+  };
+
+  it("should send a GET to the /v2/user endpoint", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+
+    await getAuthUser(defaultArgs);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.vercel.com/v2/user");
+    expect(opts.method).toBe("GET");
+  });
+
+  it("should set the Authorization bearer header", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+
+    await getAuthUser(defaultArgs);
+
+    const headers = mockFetch.mock.calls[0][1].headers;
+    expect(headers.Authorization).toBe("Bearer tok_abc");
+  });
+
+  it("should not send a request body", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+
+    await getAuthUser(defaultArgs);
+
+    expect(mockFetch.mock.calls[0][1].body).toBeUndefined();
+  });
+
+  it("should return the parsed JSON response on success", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+
+    const result = await getAuthUser(defaultArgs);
+
+    expect(result).toEqual(userPayload);
+  });
+
+  it("should throw HTTPError with status and statusText on 401", async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse(401, "Unauthorized"));
+
+    const err = await getAuthUser(defaultArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.status).toBe(401);
+    expect(err.statusText).toBe("Unauthorized");
+    expect(err.message).toBe(
+      "Failed to get authenticated user: 401 Unauthorized",
+    );
+  });
+
+  it("should throw HTTPError with status and statusText on 403", async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse(403, "Forbidden"));
+
+    const err = await getAuthUser(defaultArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.status).toBe(403);
+    expect(err.statusText).toBe("Forbidden");
+  });
+
+  it("should include response body in error message when present", async () => {
+    mockFetch.mockResolvedValueOnce(
+      errorResponse(401, "Unauthorized", {
+        error: { code: "forbidden", message: "Invalid token" },
+      }),
+    );
+
+    const err = await getAuthUser(defaultArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.message).toBe(
+      'Failed to get authenticated user: 401 Unauthorized - {"error":{"code":"forbidden","message":"Invalid token"}}',
+    );
+  });
+
+  it("should propagate network errors from fetch", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    await expect(getAuthUser(defaultArgs)).rejects.toThrow(TypeError);
   });
 });
 
@@ -274,7 +395,9 @@ describe("addEnvironmentVariables", () => {
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.status).toBe(500);
     expect(err.statusText).toBe("Internal Server Error");
-    expect(err.message).toBe("Failed to create environment variables");
+    expect(err.message).toBe(
+      "Failed to create environment variables: 500 Internal Server Error",
+    );
   });
 
   it("should propagate network errors from fetch", async () => {

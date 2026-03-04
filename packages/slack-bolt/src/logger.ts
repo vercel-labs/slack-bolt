@@ -11,11 +11,17 @@ export const logger = {
   },
 };
 
-const fmtHeader = (version?: string) => `▲ @vercel/slack-bolt ${version ?? ""}`;
-const fmtBranch = (branch?: string) => (branch ? `- Branch: ${branch}` : "");
-const fmtCommit = (commit?: string) =>
-  commit ? `- Commit: ${commit.slice(0, 7)}` : "";
-const fmtAppId = (appId?: string) => (appId ? `- App ID: ${appId}` : "");
+const BOLD = "\x1b[1m";
+const RESET = "\x1b[0m";
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+
+export const log = {
+  step: (msg: string) => console.log(`  ${msg} ...`),
+  success: (msg: string) => console.log(`${GREEN}✓${RESET} ${msg}`),
+  info: (msg: string) => console.log(`  ${msg}`),
+  warning: (msg: string) => console.log(`${YELLOW}⚠${RESET} ${msg}`),
+};
 
 export const startMessage = (
   version?: string,
@@ -23,17 +29,9 @@ export const startMessage = (
   commit?: string,
   appId?: string,
 ) => {
-  const BOLD = "\x1b[1m";
-  const RESET = "\x1b[0m";
-  const msg = [
-    fmtHeader(version),
-    fmtBranch(branch),
-    fmtCommit(commit),
-    fmtAppId(appId),
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return `${BOLD}${msg}${RESET}`;
+  const lines = [`▲ @vercel/slack-bolt ${version ?? ""}`];
+  if (branch) lines.push(`  - Branch: ${branch}`);
+  if (commit) lines.push(`  - Commit: ${commit.slice(0, 7)}`);
+  if (appId) lines.push(`  - App ID: ${appId}`);
+  return `${BOLD}${lines.join("\n")}${RESET}\n`;
 };
-
-export const endMessage = () => "\n";

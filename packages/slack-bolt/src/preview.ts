@@ -12,6 +12,7 @@ import {
   addEnvironmentVariables,
   updateProtectionBypass,
 } from "./internal/vercel";
+import { log } from "./logger";
 
 export type PreviewParams = {
   automationBypassSecret?: string;
@@ -39,6 +40,7 @@ export type PreviewResult = {
 
 export const preview = async (
   params: PreviewParams,
+  context?: "cli",
 ): Promise<PreviewResult> => {
   const {
     branch,
@@ -55,26 +57,27 @@ export const preview = async (
     vercelApiToken,
   } = params;
 
+  const cli = context === "cli";
   const branchUrl = params.branchUrl ?? deploymentUrl;
   let bypassSecret = params.automationBypassSecret;
 
-  // generate bypass secret if not provided
   if (!bypassSecret) {
+    if (cli) log.step("Generating automation bypass secret");
     bypassSecret = await updateProtectionBypass({
       projectId,
       token: vercelApiToken,
       teamId,
     });
+    if (cli) log.success("Automation bypass secret generated");
   }
 
-  // read raw manifest from file for source of truth
+  if (cli) log.step(`Reading manifest from ${manifestPath}`);
   const rawFileManifest = fs.readFileSync(
     path.join(process.cwd(), manifestPath),
     "utf8",
   );
   const manifest = JSON.parse(rawFileManifest) as Manifest;
 
-  // create new manifest for preview deployment with deployment protection bypass
   const newManifest = createNewManifest({
     originalManifest: manifest,
     branchUrl,
@@ -85,25 +88,25 @@ export const preview = async (
     commitAuthor,
   });
 
-  // write new manifest to file so user land code that imports manifest.json sees the new one
-  // sometimes devs will import manifest.json so they can read scopes from manifest.json as single source of truth
+  // write new manifest so user-land imports of manifest.json see the updated version
   fs.writeFileSync(
     path.join(process.cwd(), manifestPath),
     JSON.stringify(newManifest, null, 2),
     "utf8",
   );
+  if (cli) log.success(`Manifest updated for ${branchUrl}`);
 
+  if (cli) log.step("Creating or updating Slack app");
   const { isNew, app } = await upsertSlackApp({
     token: slackConfigurationToken,
     appId: slackAppId,
     manifest: newManifest,
   });
 
-  // If new app, create env vars. These don't change when the app is updated.
   if (isNew) {
-    const envs: CreateProjectEnv21[] = [];
+    const credentialEnvs: CreateProjectEnv21[] = [];
     if (app.credentials?.client_id) {
-      envs.push({
+      credentialEnvs.push({
         key: "SLACK_CLIENT_ID",
         value: app.credentials.client_id,
         type: "encrypted",
@@ -113,7 +116,7 @@ export const preview = async (
       });
     }
     if (app.credentials?.client_secret) {
-      envs.push({
+      credentialEnvs.push({
         key: "SLACK_CLIENT_SECRET",
         value: app.credentials.client_secret,
         type: "encrypted",
@@ -123,7 +126,7 @@ export const preview = async (
       });
     }
     if (app.credentials?.signing_secret) {
-      envs.push({
+      credentialEnvs.push({
         key: "SLACK_SIGNING_SECRET",
         value: app.credentials.signing_secret,
         type: "encrypted",
@@ -132,61 +135,104 @@ export const preview = async (
         comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
       });
     }
-    await addEnvironmentVariables({
-      projectId,
-      token: vercelApiToken,
-      teamId,
-      envs,
-    });
+    if (credentialEnvs.length > 0) {
+      await addEnvironmentVariables({
+        projectId,
+        token: vercelApiToken,
+        teamId,
+        envs: credentialEnvs,
+      });
+    }
   }
 
+  if (cli)
+    log.success(`${isNew ? "Created" : "Updated"} Slack app ${app.app_id}`);
+
+  if (cli) log.step("Installing Slack app");
   const { status, botToken, appLevelToken, userToken } = await installApp({
     serviceToken: slackServiceToken,
     appId: app.app_id,
     botScopes: manifest.oauth_config?.scopes?.bot ?? [],
   });
 
-  const envs: CreateProjectEnv21[] = [];
-
-  if (botToken) {
-    envs.push({
-      key: "SLACK_BOT_TOKEN",
-      value: botToken,
-      type: "encrypted",
-      target: ["preview"],
-      gitBranch: branch,
-      comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
-    });
+  if (isNew) {
+    const tokenEnvs: CreateProjectEnv21[] = [];
+    if (botToken) {
+      tokenEnvs.push({
+        key: "SLACK_BOT_TOKEN",
+        value: botToken,
+        type: "encrypted",
+        target: ["preview"],
+        gitBranch: branch,
+        comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
+      });
+    }
+    if (appLevelToken) {
+      tokenEnvs.push({
+        key: "SLACK_APP_LEVEL_TOKEN",
+        value: appLevelToken,
+        type: "encrypted",
+        target: ["preview"],
+        gitBranch: branch,
+        comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
+      });
+    }
+    if (userToken) {
+      tokenEnvs.push({
+        key: "SLACK_USER_TOKEN",
+        value: userToken,
+        type: "encrypted",
+        target: ["preview"],
+        gitBranch: branch,
+        comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
+      });
+    }
+    if (tokenEnvs.length > 0) {
+      await addEnvironmentVariables({
+        projectId,
+        token: vercelApiToken,
+        teamId,
+        envs: tokenEnvs,
+      });
+    }
   }
 
-  if (appLevelToken) {
-    envs.push({
-      key: "SLACK_APP_LEVEL_TOKEN",
-      value: appLevelToken,
-      type: "encrypted",
-      target: ["preview"],
-      gitBranch: branch,
-      comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
-    });
+  if (cli) {
+    switch (status) {
+      case "missing_service_token":
+        log.warning(
+          "SLACK_SERVICE_TOKEN is not set — app must be installed manually",
+        );
+        log.info("https://docs.slack.dev/authentication/tokens/#service");
+        break;
+      case "installed":
+        log.success(`Installed Slack app ${app.app_id}`);
+        break;
+      case "app_approval_request_eligible":
+        log.warning("App requires approval before it can be installed");
+        break;
+      case "app_approval_request_pending":
+        log.warning("App is pending approval before it can be installed");
+        break;
+      case "app_approval_request_denied":
+        log.warning("App approval request was denied");
+        break;
+      case "slack_api_error":
+        log.warning("Slack API error while installing the app");
+        break;
+      case "unknown_error":
+        log.warning("Unknown error while installing the app");
+        break;
+    }
+    console.log();
+    if (app.app_id) {
+      log.info(`View app: https://api.slack.com/apps/${app.app_id}`);
+    }
+    if (isNew && app.oauth_authorize_url) {
+      log.info(`Install URL: ${app.oauth_authorize_url}`);
+    }
+    console.log();
   }
-
-  if (userToken) {
-    envs.push({
-      key: "SLACK_USER_TOKEN",
-      value: userToken,
-      type: "encrypted",
-      target: ["preview"],
-      gitBranch: branch,
-      comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
-    });
-  }
-
-  await addEnvironmentVariables({
-    projectId,
-    token: vercelApiToken,
-    teamId,
-    envs,
-  });
 
   return {
     isNew,

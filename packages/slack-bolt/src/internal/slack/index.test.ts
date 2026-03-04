@@ -183,7 +183,7 @@ describe("updateSlackApp", () => {
       expect(err).toBeInstanceOf(HTTPError);
       const httpErr = err as HTTPError;
       expect(httpErr.message).toBe(
-        "Slack API request failed (502): Bad Gateway",
+        "Failed to update Slack app: 502 Bad Gateway",
       );
       expect(httpErr.status).toBe(502);
       expect(httpErr.statusText).toBe("Bad Gateway");

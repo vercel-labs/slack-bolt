@@ -1,7 +1,29 @@
 import crypto from "node:crypto";
 import type { CreateProjectEnv21 } from "@vercel/sdk/esm/models/createprojectenvop";
 import { HTTPError } from "./errors";
-import type { AddEnvironmentVariablesResult } from "./types";
+import type { AddEnvironmentVariablesResult, GetAuthUserResult } from "./types";
+
+export async function getAuthUser({
+  token,
+}: {
+  token: string;
+}): Promise<GetAuthUserResult> {
+  const response = await fetch("https://api.vercel.com/v2/user", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse(
+      "Failed to get authenticated user",
+      response,
+    );
+  }
+
+  return response.json();
+}
 
 export async function updateProtectionBypass({
   projectId,
@@ -33,10 +55,9 @@ export async function updateProtectionBypass({
   );
 
   if (!response.ok) {
-    throw new HTTPError(
+    throw await HTTPError.fromResponse(
       "Failed to update protection bypass",
-      response.status,
-      response.statusText,
+      response,
     );
   }
 
@@ -72,10 +93,9 @@ export async function addEnvironmentVariables({
   });
 
   if (!response.ok) {
-    throw new HTTPError(
+    throw await HTTPError.fromResponse(
       "Failed to create environment variables",
-      response.status,
-      response.statusText,
+      response,
     );
   }
 
