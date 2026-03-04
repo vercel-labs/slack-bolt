@@ -169,9 +169,7 @@ describe("getProject", () => {
     await getProject({ projectId: "prj_123", token: "tok_abc" });
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url.toString()).toBe(
-      "https://api.vercel.com/v9/projects/prj_123",
-    );
+    expect(url.toString()).toBe("https://api.vercel.com/v9/projects/prj_123");
   });
 
   it("should set the Authorization bearer header", async () => {
