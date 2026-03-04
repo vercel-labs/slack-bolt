@@ -9,7 +9,7 @@
 		"test": "turbo run test",
 		"changeset": "changeset",
 		"version-packages": "changeset version",
-		"release": "turbo run build && changeset publish",
+		"release": "turbo run build --filter=@vercel/slack-bolt && changeset publish",
 		"prepare": "husky"
 	},
 	"devDependencies": {

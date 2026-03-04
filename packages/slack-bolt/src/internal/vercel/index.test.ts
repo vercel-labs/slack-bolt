@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HTTPError } from "./errors";
 import {
   addEnvironmentVariables,
-  getAuthUser,
+  getProject,
   updateProtectionBypass,
 } from "./index";
 
@@ -144,72 +144,73 @@ describe("updateProtectionBypass", () => {
   });
 });
 
-describe("getAuthUser", () => {
-  const defaultArgs = { token: "tok_abc" };
-
-  const userPayload = {
-    user: {
-      id: "user_123",
-      email: "test@example.com",
-      name: "Test User",
-      username: "testuser",
-      avatar: "abc123hash",
-      defaultTeamId: "team_456",
-    },
+describe("getProject", () => {
+  const defaultArgs = {
+    projectId: "prj_123",
+    token: "tok_abc",
+    teamId: "team_456",
   };
 
-  it("should send a GET to the /v2/user endpoint", async () => {
-    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+  it("should send a GET to the /v9/projects endpoint with projectId and teamId", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse());
 
-    await getAuthUser(defaultArgs);
+    await getProject(defaultArgs);
 
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("https://api.vercel.com/v2/user");
+    expect(url.toString()).toBe(
+      "https://api.vercel.com/v9/projects/prj_123?teamId=team_456",
+    );
     expect(opts.method).toBe("GET");
   });
 
-  it("should set the Authorization bearer header", async () => {
-    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+  it("should omit teamId query param when not provided", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse());
 
-    await getAuthUser(defaultArgs);
+    await getProject({ projectId: "prj_123", token: "tok_abc" });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url.toString()).toBe("https://api.vercel.com/v9/projects/prj_123");
+  });
+
+  it("should set the Authorization bearer header", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse());
+
+    await getProject(defaultArgs);
 
     const headers = mockFetch.mock.calls[0][1].headers;
     expect(headers.Authorization).toBe("Bearer tok_abc");
   });
 
   it("should not send a request body", async () => {
-    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+    mockFetch.mockResolvedValueOnce(okResponse());
 
-    await getAuthUser(defaultArgs);
+    await getProject(defaultArgs);
 
     expect(mockFetch.mock.calls[0][1].body).toBeUndefined();
   });
 
-  it("should return the parsed JSON response on success", async () => {
-    mockFetch.mockResolvedValueOnce(okResponse(userPayload));
+  it("should resolve on success", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse());
 
-    const result = await getAuthUser(defaultArgs);
-
-    expect(result).toEqual(userPayload);
+    await expect(getProject(defaultArgs)).resolves.toBeUndefined();
   });
 
-  it("should throw HTTPError with status and statusText on 401", async () => {
+  it("should throw HTTPError on 401", async () => {
     mockFetch.mockResolvedValueOnce(errorResponse(401, "Unauthorized"));
 
-    const err = await getAuthUser(defaultArgs).catch((e) => e);
+    const err = await getProject(defaultArgs).catch((e) => e);
 
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.status).toBe(401);
-    expect(err.statusText).toBe("Unauthorized");
     expect(err.message).toBe(
-      "Failed to get authenticated user: 401 Unauthorized",
+      "Failed to access Vercel project: 401 Unauthorized",
     );
   });
 
-  it("should throw HTTPError with status and statusText on 403", async () => {
+  it("should throw HTTPError on 403", async () => {
     mockFetch.mockResolvedValueOnce(errorResponse(403, "Forbidden"));
 
-    const err = await getAuthUser(defaultArgs).catch((e) => e);
+    const err = await getProject(defaultArgs).catch((e) => e);
 
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.status).toBe(403);
@@ -218,23 +219,23 @@ describe("getAuthUser", () => {
 
   it("should include response body in error message when present", async () => {
     mockFetch.mockResolvedValueOnce(
-      errorResponse(401, "Unauthorized", {
-        error: { code: "forbidden", message: "Invalid token" },
+      errorResponse(403, "Forbidden", {
+        error: { code: "forbidden", message: "Not authorized" },
       }),
     );
 
-    const err = await getAuthUser(defaultArgs).catch((e) => e);
+    const err = await getProject(defaultArgs).catch((e) => e);
 
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.message).toBe(
-      'Failed to get authenticated user: 401 Unauthorized - {"error":{"code":"forbidden","message":"Invalid token"}}',
+      'Failed to access Vercel project: 403 Forbidden - {"error":{"code":"forbidden","message":"Not authorized"}}',
     );
   });
 
   it("should propagate network errors from fetch", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    await expect(getAuthUser(defaultArgs)).rejects.toThrow(TypeError);
+    await expect(getProject(defaultArgs)).rejects.toThrow(TypeError);
   });
 });
 
