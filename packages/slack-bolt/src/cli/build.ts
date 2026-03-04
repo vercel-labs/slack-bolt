@@ -3,7 +3,7 @@ import { authTest } from "../internal/slack";
 import {
   cancelDeployment,
   createDeployment,
-  getAuthUser,
+  getProject,
 } from "../internal/vercel";
 import { log, logger } from "../logger";
 import { type PreviewParams, preview } from "../preview";
@@ -41,10 +41,14 @@ export async function executeBuild(
   }
 
   try {
-    await getAuthUser({ token: params.vercelApiToken, teamId: params.teamId });
+    await getProject({
+      projectId: params.projectId,
+      token: params.vercelApiToken,
+      teamId: params.teamId,
+    });
   } catch (error) {
     throw new Error(
-      "Vercel API token is invalid or expired. Create a new token and add it as VERCEL_API_TOKEN in your Vercel project:\nhttps://vercel.com/account/settings/tokens",
+      "Vercel API token cannot access this project. Ensure VERCEL_API_TOKEN is valid and has access to this team:\nhttps://vercel.com/account/settings/tokens",
       { cause: error },
     );
   }

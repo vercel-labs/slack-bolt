@@ -4,17 +4,20 @@ import type {
   AddEnvironmentVariablesResult,
   CreateProjectEnv,
   EnvironmentVariable,
-  GetAuthUserResult,
 } from "./types";
 
-export async function getAuthUser({
+export async function getProject({
+  projectId,
   token,
   teamId,
 }: {
+  projectId: string;
   token: string;
   teamId?: string;
-}): Promise<GetAuthUserResult> {
-  const url = new URL("https://api.vercel.com/v2/user");
+}): Promise<void> {
+  const url = new URL(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}`,
+  );
   if (teamId) url.searchParams.set("teamId", teamId);
 
   const response = await fetch(url, {
@@ -26,12 +29,10 @@ export async function getAuthUser({
 
   if (!response.ok) {
     throw await HTTPError.fromResponse(
-      "Failed to get authenticated user",
+      "Failed to access Vercel project",
       response,
     );
   }
-
-  return response.json();
 }
 
 export async function updateProtectionBypass({

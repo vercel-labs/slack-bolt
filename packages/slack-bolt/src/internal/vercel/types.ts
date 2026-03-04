@@ -12,18 +12,6 @@ export type AddEnvironmentVariablesResult = {
   failed: { error: { code: string; message: string; key?: string } }[];
 };
 
-export type GetAuthUserResult = {
-  user: {
-    id: string;
-    email: string;
-    name: string | null;
-    username: string;
-    avatar: string | null;
-    defaultTeamId: string | null;
-    limited?: true;
-  };
-};
-
 export type EnvironmentVariable = {
   id: string;
   key: string;
