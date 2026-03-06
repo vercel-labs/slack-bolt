@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { validateAndBuildParams } from "../internal/schemas";
-import { log, logger, startMessage } from "../logger";
+import { enableFetchDebugLogging, log, startMessage } from "../logger";
 import { executeBuild } from "./build";
 import { ENV_KEYS, envKeyToFlag, resolveEnv } from "./env";
 
@@ -10,7 +10,8 @@ export function run(version: string): void {
     .description(
       "Build and configure Slack apps for Vercel preview deployments",
     )
-    .version(version);
+    .version(version)
+    .option("--debug", "Enable verbose debug logging for all HTTP requests");
 
   const cmd = program
     .command("build")
@@ -28,10 +29,19 @@ export function run(version: string): void {
   );
 
   cmd.action(async (options: Record<string, string | boolean | undefined>) => {
+    const debug =
+      program.opts().debug === true ||
+      process.env.VERCEL_SLACK_DEBUG === "1" ||
+      process.env.VERCEL_SLACK_DEBUG === "true";
+    if (debug) {
+      process.env.VERCEL_SLACK_DEBUG = "1";
+      enableFetchDebugLogging();
+    }
+
     const cleanup = options.cleanup === true;
     const env = resolveEnv(options as Record<string, string | undefined>);
 
-    logger.info(
+    console.log(
       startMessage(
         version,
         env.VERCEL_GIT_COMMIT_REF,
@@ -56,7 +66,7 @@ export function run(version: string): void {
   });
 
   program.parseAsync().catch((error: unknown) => {
-    logger.error(error instanceof Error ? error.message : String(error));
+    log.error(error instanceof Error ? error.message : String(error));
     console.log();
   });
 }
