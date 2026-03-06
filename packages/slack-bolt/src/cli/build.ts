@@ -7,7 +7,7 @@ import {
   createDeployment,
   getProject,
 } from "../internal/vercel";
-import { log, logger } from "../logger";
+import { log } from "../logger";
 import { type PreviewParams, preview } from "../preview";
 
 export async function executeBuild(
@@ -38,7 +38,7 @@ export async function executeBuild(
         "SLACK_SERVICE_TOKEN is invalid — app must be installed manually",
       );
       log.info("https://docs.slack.dev/authentication/tokens/#service");
-      logger.debug(error);
+      log.debug(error);
     }
   }
 
