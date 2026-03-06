@@ -44,7 +44,7 @@ export async function updateProtectionBypass({
   token: string;
   teamId?: string;
 }): Promise<string> {
-  const newSecret = crypto.randomBytes(32).toString("hex");
+  const newSecret = crypto.randomBytes(16).toString("hex");
   const note = "Created by @vercel/slack-bolt";
 
   const url = new URL(
