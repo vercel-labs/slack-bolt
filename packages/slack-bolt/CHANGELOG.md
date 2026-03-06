@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.2.4
+
+### Patch Changes
+
+- 75429bf: Add debug logs to fetch when --debug flag is passed
+
 ## 1.2.3
 
 ### Patch Changes
