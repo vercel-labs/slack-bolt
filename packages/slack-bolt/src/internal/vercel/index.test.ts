@@ -56,13 +56,13 @@ describe("updateProtectionBypass", () => {
     expect(headers.Authorization).toBe("Bearer tok_abc");
   });
 
-  it("should send a body with generate.secret (64-char hex) and the expected note", async () => {
+  it("should send a body with generate.secret (32-char hex) and the expected note", async () => {
     mockFetch.mockResolvedValueOnce(okResponse());
 
     await updateProtectionBypass(defaultArgs);
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.generate.secret).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.generate.secret).toMatch(/^[0-9a-f]{32}$/);
     expect(body.generate.note).toBe("Created by @vercel/slack-bolt");
   });
 
@@ -102,6 +102,16 @@ describe("updateProtectionBypass", () => {
     const s2 = await updateProtectionBypass(defaultArgs);
 
     expect(s1).not.toBe(s2);
+  });
+
+  it("should generate a secret that meets Vercel API requirements (exactly 32 characters, no special characters)", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse());
+
+    const secret = await updateProtectionBypass(defaultArgs);
+
+    expect(secret).toHaveLength(32);
+    expect(secret).toMatch(/^[0-9a-f]+$/);
+    expect(secret).not.toMatch(/[^0-9a-f]/);
   });
 
   it("should throw HTTPError with status and statusText on failure", async () => {
