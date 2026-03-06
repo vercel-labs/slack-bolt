@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { cleanupOrphanedApps } from "../cleanup";
 import { authTest } from "../internal/slack";
 import {
@@ -50,6 +52,13 @@ export async function executeBuild(
     throw new Error(
       "Vercel API token cannot access this project. Ensure VERCEL_API_TOKEN is valid and has access to this team:\nhttps://vercel.com/account/settings/tokens",
       { cause: error },
+    );
+  }
+
+  const manifestFullPath = path.join(process.cwd(), params.manifestPath);
+  if (!fs.existsSync(manifestFullPath)) {
+    throw new Error(
+      `No manifest found at ${params.manifestPath}. Create a manifest.json file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
     );
   }
 
