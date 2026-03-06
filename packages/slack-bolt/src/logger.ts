@@ -121,7 +121,8 @@ export function enableFetchDebugLogging(): void {
     const start = performance.now();
     log.debug(`-> ${method} ${url}`);
     log.debug(`   headers: ${formatHeaders(init?.headers)}`);
-    if (typeof init?.body === "string") log.debug(`   body: ${redactBody(init.body)}`);
+    if (typeof init?.body === "string")
+      log.debug(`   body: ${redactBody(init.body)}`);
 
     const response = await originalFetch(input, init);
 
