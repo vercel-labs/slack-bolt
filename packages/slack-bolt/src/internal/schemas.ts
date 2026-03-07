@@ -71,6 +71,7 @@ export function validateAndBuildParams(
     automationBypassSecret: systemResult.data.VERCEL_AUTOMATION_BYPASS_SECRET,
     slackAppId: slackResult.data.SLACK_APP_ID,
     slackConfigurationToken: slackResult.data.SLACK_CONFIGURATION_TOKEN,
+    slackConfigRefreshToken: slackResult.data.SLACK_CONFIG_REFRESH_TOKEN,
     slackServiceToken: slackResult.data.SLACK_SERVICE_TOKEN,
     manifestPath: slackResult.data.MANIFEST_PATH,
     vercelApiToken: vercelResult.data.VERCEL_API_TOKEN,
