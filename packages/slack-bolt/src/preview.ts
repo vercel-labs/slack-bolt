@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createNewManifest } from "./internal/manifest";
-import type { Manifest } from "./internal/manifest/types";
+import { parseManifest, stringifyManifest } from "./internal/manifest/parse";
 import { installApp, upsertSlackApp } from "./internal/slack";
 import type {
   SlackManifestCreateResponse,
@@ -77,7 +77,7 @@ export const preview = async (
     path.join(process.cwd(), manifestPath),
     "utf8",
   );
-  const manifest = JSON.parse(rawFileManifest) as Manifest;
+  const manifest = parseManifest(rawFileManifest, manifestPath);
 
   const newManifest = createNewManifest({
     originalManifest: manifest,
@@ -92,7 +92,7 @@ export const preview = async (
   // write new manifest so user-land imports of manifest.json see the updated version
   fs.writeFileSync(
     path.join(process.cwd(), manifestPath),
-    JSON.stringify(newManifest, null, 2),
+    stringifyManifest(newManifest, manifestPath),
     "utf8",
   );
   if (cli) log.success(`Manifest updated for ${branchUrl}`);

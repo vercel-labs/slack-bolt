@@ -101,7 +101,7 @@ export async function executeBuild(
   const manifestFullPath = path.join(process.cwd(), params.manifestPath);
   if (!fs.existsSync(manifestFullPath)) {
     throw new Error(
-      `No manifest found at ${params.manifestPath}. Create a manifest.json file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
+      `No manifest found at ${params.manifestPath}. Create a manifest.json (or manifest.yaml) file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
     );
   }
 
