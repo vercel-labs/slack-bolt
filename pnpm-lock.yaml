@@ -81,6 +81,9 @@ importers:
       '@slack/logger':
         specifier: ^4.0.0
         version: 4.0.0
+      '@slack/oauth':
+        specifier: ^3.0.4
+        version: 3.0.4
       '@vercel/functions':
         specifier: ^3.4.3
         version: 3.4.3

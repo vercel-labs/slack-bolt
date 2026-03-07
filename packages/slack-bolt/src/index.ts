@@ -9,6 +9,15 @@ import {
   verifySlackRequest,
 } from "@slack/bolt";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
+import {
+  type CallbackOptions,
+  type InstallationStore,
+  type InstallPathOptions,
+  InstallProvider,
+  type InstallProviderOptions,
+  type InstallURLOptions,
+  type StateStore,
+} from "@slack/oauth";
 import { waitUntil } from "@vercel/functions";
 import {
   ERROR_MESSAGES,
@@ -18,6 +27,16 @@ import {
   RequestParsingError,
   VercelReceiverError,
 } from "./errors";
+import { createResponseCapture, toIncomingMessage } from "./oauth-adapters";
+
+export type {
+  CallbackOptions,
+  Installation,
+  InstallationQuery,
+  InstallationStore,
+  InstallPathOptions,
+  InstallURLOptions,
+} from "@slack/oauth";
 
 // Types
 /**
@@ -28,12 +47,29 @@ import {
 export type VercelHandler = (req: Request) => Promise<Response>;
 
 /**
+ * Options for customizing the OAuth installer behavior.
+ * Mirrors the relevant subset of HTTPReceiver's InstallerOptions,
+ * excluding path-related options (serverless uses file-based routing).
+ */
+export interface VercelInstallerOptions {
+  stateStore?: StateStore;
+  stateVerification?: boolean;
+  legacyStateVerification?: boolean;
+  stateCookieName?: string;
+  stateCookieExpirationSeconds?: number;
+  authVersion?: "v1" | "v2";
+  metadata?: string;
+  directInstall?: boolean;
+  renderHtmlForInstallPath?: (url: string) => string;
+  userScopes?: string[];
+  callbackOptions?: CallbackOptions;
+  installPathOptions?: InstallPathOptions;
+  clientOptions?: InstallProviderOptions["clientOptions"];
+  authorizationUrl?: string;
+}
+
+/**
  * Configuration options for the VercelReceiver.
- * @property signingSecret - The signing secret for the Slack app.
- * @property signatureVerification - If true, verifies the Slack request signature.
- * @property logger - The logger to use for the VercelReceiver.
- * @property logLevel - The log level to use for the VercelReceiver.
- * @property customPropertiesExtractor - A function to extract custom properties from the request.
  */
 export interface VercelReceiverOptions {
   /**
@@ -67,6 +103,41 @@ export interface VercelReceiverOptions {
    * @default 3001
    */
   ackTimeoutMs?: number;
+  /**
+   * Your app's client ID, found under Basic Information on api.slack.com.
+   * Required for OAuth.
+   * @default process.env.SLACK_CLIENT_ID
+   */
+  clientId?: string;
+  /**
+   * Your app's client secret, found under Basic Information on api.slack.com.
+   * Required for OAuth.
+   * @default process.env.SLACK_CLIENT_SECRET
+   */
+  clientSecret?: string;
+  /**
+   * Secret used to generate and verify the state parameter for OAuth CSRF protection.
+   * Required unless a custom stateStore or stateVerification: false is provided.
+   * @default process.env.SLACK_STATE_SECRET
+   */
+  stateSecret?: string;
+  /**
+   * The bot scopes to request during the OAuth flow.
+   */
+  scopes?: string[];
+  /**
+   * The redirect URI registered with your Slack app for OAuth callbacks.
+   */
+  redirectUri?: string;
+  /**
+   * Storage backend for OAuth installations (tokens, team info, etc.).
+   * Required for OAuth in serverless -- the default in-memory store does not persist.
+   */
+  installationStore?: InstallationStore;
+  /**
+   * Advanced options for the OAuth installer.
+   */
+  installerOptions?: VercelInstallerOptions;
 }
 
 const LOG_PREFIX = "[@vercel/slack-bolt]";
@@ -104,6 +175,13 @@ export class VercelReceiver implements Receiver {
   private readonly ackTimeoutMs: number;
   private app?: App;
 
+  /** Exposed so Bolt's App can use installer.authorize for multi-workspace token lookup. */
+  public installer?: InstallProvider;
+  private installUrlOptions?: InstallURLOptions;
+  private installCallbackOptions?: CallbackOptions;
+  private installPathOptions?: InstallPathOptions;
+  private stateVerification?: boolean;
+
   /**
    * Gets the logger instance used by this receiver.
    * @returns The logger instance
@@ -130,6 +208,13 @@ export class VercelReceiver implements Receiver {
     logLevel = LogLevel.INFO,
     customPropertiesExtractor,
     ackTimeoutMs = ACK_TIMEOUT_MS,
+    clientId = process.env.SLACK_CLIENT_ID,
+    clientSecret = process.env.SLACK_CLIENT_SECRET,
+    stateSecret = process.env.SLACK_STATE_SECRET,
+    scopes,
+    redirectUri,
+    installationStore,
+    installerOptions = {},
   }: VercelReceiverOptions = {}) {
     if (!signingSecret) {
       throw new VercelReceiverError(ERROR_MESSAGES.SIGNING_SECRET_REQUIRED);
@@ -143,6 +228,51 @@ export class VercelReceiver implements Receiver {
     );
     this.customPropertiesExtractor = customPropertiesExtractor;
     this.ackTimeoutMs = ackTimeoutMs;
+
+    this.stateVerification = installerOptions.stateVerification;
+
+    if (
+      clientId !== undefined &&
+      clientSecret !== undefined &&
+      (installerOptions.stateVerification === false ||
+        stateSecret !== undefined ||
+        installerOptions.stateStore !== undefined)
+    ) {
+      if (!installationStore) {
+        throw new VercelReceiverError(
+          ERROR_MESSAGES.INSTALLATION_STORE_REQUIRED,
+        );
+      }
+
+      this.installer = new InstallProvider({
+        clientId,
+        clientSecret,
+        stateSecret,
+        installationStore,
+        logger,
+        logLevel,
+        directInstall: installerOptions.directInstall,
+        stateStore: installerOptions.stateStore,
+        stateVerification: installerOptions.stateVerification,
+        legacyStateVerification: installerOptions.legacyStateVerification,
+        stateCookieName: installerOptions.stateCookieName,
+        stateCookieExpirationSeconds:
+          installerOptions.stateCookieExpirationSeconds,
+        renderHtmlForInstallPath: installerOptions.renderHtmlForInstallPath,
+        authVersion: installerOptions.authVersion ?? "v2",
+        clientOptions: installerOptions.clientOptions,
+        authorizationUrl: installerOptions.authorizationUrl,
+      });
+
+      this.installUrlOptions = {
+        scopes: scopes ?? [],
+        userScopes: installerOptions.userScopes,
+        metadata: installerOptions.metadata,
+        redirectUri,
+      };
+      this.installCallbackOptions = installerOptions.callbackOptions ?? {};
+      this.installPathOptions = installerOptions.installPathOptions ?? {};
+    }
 
     this.logger.debug("VercelReceiver initialized");
   }
@@ -174,6 +304,66 @@ export class VercelReceiver implements Receiver {
    */
   public async stop(): Promise<void> {
     this.logger.debug("VercelReceiver stopped");
+  }
+
+  /**
+   * Handles requests to the OAuth install path.
+   * Renders an "Add to Slack" page or redirects directly to Slack's authorize URL.
+   *
+   * @param req - The incoming Web API Request
+   * @returns A Web API Response (redirect or HTML page)
+   * @throws {VercelReceiverError} When OAuth is not configured
+   */
+  public async handleInstallPath(req: Request): Promise<Response> {
+    if (!this.installer) {
+      throw new VercelReceiverError(ERROR_MESSAGES.OAUTH_NOT_CONFIGURED);
+    }
+
+    const nodeReq = toIncomingMessage(req);
+    const capture = createResponseCapture();
+
+    await this.installer.handleInstallPath(
+      nodeReq,
+      capture,
+      this.installPathOptions,
+      this.installUrlOptions,
+    );
+
+    return capture.toResponse();
+  }
+
+  /**
+   * Handles the OAuth redirect callback from Slack.
+   * Exchanges the authorization code for tokens and stores the installation.
+   *
+   * @param req - The incoming Web API Request (contains code and state query params)
+   * @returns A Web API Response (success/failure HTML page)
+   * @throws {VercelReceiverError} When OAuth is not configured
+   */
+  public async handleOAuthRedirect(req: Request): Promise<Response> {
+    if (!this.installer) {
+      throw new VercelReceiverError(ERROR_MESSAGES.OAUTH_NOT_CONFIGURED);
+    }
+
+    const nodeReq = toIncomingMessage(req);
+    const capture = createResponseCapture();
+
+    if (this.stateVerification === false) {
+      await this.installer.handleCallback(
+        nodeReq,
+        capture,
+        this.installCallbackOptions,
+        this.installUrlOptions,
+      );
+    } else {
+      await this.installer.handleCallback(
+        nodeReq,
+        capture,
+        this.installCallbackOptions,
+      );
+    }
+
+    return capture.toResponse();
   }
 
   /**
@@ -479,6 +669,60 @@ export function createHandler(
         }),
         { status: 500, headers: { "content-type": "application/json" } },
       );
+    }
+  };
+}
+
+/**
+ * Creates a handler for the OAuth install path (e.g. /slack/install).
+ * Returns a standard Web API handler that works with any framework on Vercel.
+ *
+ * @param receiver - The VercelReceiver instance with OAuth configured
+ * @returns A handler function compatible with Vercel's function signature
+ *
+ * @example
+ * ```typescript
+ * // Next.js: app/api/slack/install/route.ts
+ * export const GET = createInstallHandler(receiver);
+ *
+ * // Hono
+ * app.get('/slack/install', (c) => createInstallHandler(receiver)(c.req.raw));
+ * ```
+ */
+export function createInstallHandler(receiver: VercelReceiver): VercelHandler {
+  return async (req: Request) => {
+    try {
+      return await receiver.handleInstallPath(req);
+    } catch (error) {
+      return receiver.handleError(error);
+    }
+  };
+}
+
+/**
+ * Creates a handler for the OAuth redirect callback (e.g. /slack/oauth_redirect).
+ * Returns a standard Web API handler that works with any framework on Vercel.
+ *
+ * @param receiver - The VercelReceiver instance with OAuth configured
+ * @returns A handler function compatible with Vercel's function signature
+ *
+ * @example
+ * ```typescript
+ * // Next.js: app/api/slack/oauth_redirect/route.ts
+ * export const GET = createOAuthCallbackHandler(receiver);
+ *
+ * // Hono
+ * app.get('/slack/oauth_redirect', (c) => createOAuthCallbackHandler(receiver)(c.req.raw));
+ * ```
+ */
+export function createOAuthCallbackHandler(
+  receiver: VercelReceiver,
+): VercelHandler {
+  return async (req: Request) => {
+    try {
+      return await receiver.handleOAuthRedirect(req);
+    } catch (error) {
+      return receiver.handleError(error);
     }
   };
 }

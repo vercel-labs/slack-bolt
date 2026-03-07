@@ -11,6 +11,12 @@ export const ERROR_MESSAGES = {
   MISSING_REQUIRED_HEADER: (header: string) =>
     `Missing required header: ${header}`,
 
+  // OAuth errors
+  OAUTH_NOT_CONFIGURED:
+    "OAuth is not configured on this receiver. Provide clientId, clientSecret, and stateSecret (or a custom stateStore).",
+  INSTALLATION_STORE_REQUIRED:
+    "An installationStore is required for OAuth in serverless environments. The default in-memory store does not persist across requests.",
+
   // Generic fallback errors
   REQUEST_VERIFICATION_FAILED: "Request verification failed",
   INTERNAL_SERVER_ERROR: "Internal server error",
