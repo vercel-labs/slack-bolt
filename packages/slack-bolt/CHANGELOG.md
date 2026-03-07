@@ -1,5 +1,12 @@
 # @vercel/slack-bolt
 
+## 1.3.0
+
+### Minor Changes
+
+- cf718ab: Add support for .yml and .yaml files for Slack app manifest
+- 0130804: Add support for auto-refresh of Slack Configuration tokens
+
 ## 1.2.5
 
 ### Patch Changes

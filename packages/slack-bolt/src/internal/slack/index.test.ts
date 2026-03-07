@@ -9,6 +9,7 @@ import {
   createSlackApp,
   exportSlackApp,
   installApp,
+  rotateConfigToken,
   updateSlackApp,
   upsertSlackApp,
 } from "./index";
@@ -60,7 +61,7 @@ describe("createSlackApp", () => {
 
     await createSlackApp({ token: "tok", manifest: testManifest });
 
-    const [url, opts] = mockFetch.mock.lastCall;
+    const [url, opts] = mockFetch?.mock.lastCall ?? [];
     expect(url).toBe("https://slack.com/api/apps.manifest.create");
     expect(opts.method).toBe("POST");
     expect(opts.headers.Authorization).toBe("Bearer tok");
@@ -85,7 +86,7 @@ describe("createSlackApp", () => {
 
     await createSlackApp({ token: "tok", manifest: testManifest });
 
-    const body = JSON.parse(mockFetch.mock.lastCall[1].body);
+    const body = JSON.parse(mockFetch?.mock.lastCall?.[1]?.body ?? "");
     expect(body.manifest).toBe(JSON.stringify(testManifest));
   });
 
@@ -468,7 +469,7 @@ describe("installApp", () => {
       outgoingDomains: ["example.com"],
     });
 
-    const [url, opts] = mockFetch.mock.lastCall;
+    const [url, opts] = mockFetch?.mock.lastCall ?? [];
     expect(url).toBe("https://slack.com/api/apps.developerInstall");
     expect(opts.method).toBe("POST");
     expect(opts.headers.Authorization).toBe("Bearer svc_tok");
@@ -495,7 +496,7 @@ describe("installApp", () => {
 
     await installApp({ serviceToken: "tok", appId: "A1", botScopes: [] });
 
-    const body = JSON.parse(mockFetch.mock.lastCall[1].body);
+    const body = JSON.parse(mockFetch?.mock.lastCall?.[1]?.body ?? "");
     expect(body.outgoing_domains).toEqual([]);
   });
 
@@ -583,5 +584,82 @@ describe("installApp", () => {
     });
 
     expect(result.status).toBe("unknown_error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rotateConfigToken
+// ---------------------------------------------------------------------------
+
+describe("rotateConfigToken", () => {
+  it("sends a POST to tooling.tokens.rotate with refresh_token", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        token: "xoxe.xoxp-new-token",
+        refresh_token: "xoxe-new-refresh",
+        exp: 1633138860,
+      }),
+    );
+
+    await rotateConfigToken({ refreshToken: "xoxe-old-refresh" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://slack.com/api/tooling.tokens.rotate",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+    );
+
+    const body = mockFetch.mock.calls[0][1].body as URLSearchParams;
+    expect(body.get("refresh_token")).toBe("xoxe-old-refresh");
+  });
+
+  it("returns the new token, refresh token, and expiry", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        token: "xoxe.xoxp-new-token",
+        refresh_token: "xoxe-new-refresh",
+        exp: 1633138860,
+      }),
+    );
+
+    const result = await rotateConfigToken({ refreshToken: "xoxe-old" });
+
+    expect(result.token).toBe("xoxe.xoxp-new-token");
+    expect(result.refreshToken).toBe("xoxe-new-refresh");
+    expect(result.exp).toBe(1633138860);
+  });
+
+  it("throws HTTPError on non-OK HTTP response", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({}, 500, "Internal Server Error"),
+    );
+
+    await expect(
+      rotateConfigToken({ refreshToken: "xoxe-bad" }),
+    ).rejects.toThrow("Failed to rotate configuration token");
+  });
+
+  it("throws on invalid_refresh_token error", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "invalid_refresh_token" }),
+    );
+
+    await expect(
+      rotateConfigToken({ refreshToken: "xoxe-invalid" }),
+    ).rejects.toThrow("invalid_refresh_token");
+  });
+
+  it("throws on token_expired error", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "token_expired" }),
+    );
+
+    await expect(
+      rotateConfigToken({ refreshToken: "xoxe-expired" }),
+    ).rejects.toThrow("token_expired");
   });
 });

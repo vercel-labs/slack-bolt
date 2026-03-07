@@ -192,6 +192,50 @@ export async function deleteSlackApp({
   }
 }
 
+export type RotateTokenResult = {
+  token: string;
+  refreshToken: string;
+  exp: number;
+};
+
+export async function rotateConfigToken({
+  refreshToken,
+}: {
+  refreshToken: string;
+}): Promise<RotateTokenResult> {
+  const response = await fetch("https://slack.com/api/tooling.tokens.rotate", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ refresh_token: refreshToken }),
+  });
+
+  if (!response.ok) {
+    throw new HTTPError(
+      "Failed to rotate configuration token",
+      response.status,
+      response.statusText,
+    );
+  }
+
+  const data = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+    token?: string;
+    refresh_token?: string;
+    exp?: number;
+  };
+
+  if (!data.ok || !data.token || !data.refresh_token) {
+    throw new Error(data.error ?? "Unknown error rotating token");
+  }
+
+  return {
+    token: data.token,
+    refreshToken: data.refresh_token,
+    exp: data.exp ?? 0,
+  };
+}
+
 export async function authTest({ token }: { token: string }): Promise<void> {
   const response = await fetch("https://slack.com/api/auth.test", {
     method: "POST",

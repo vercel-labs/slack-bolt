@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { cleanupOrphanedApps } from "../cleanup";
-import { authTest } from "../internal/slack";
+import { authTest, rotateConfigToken } from "../internal/slack";
 import {
+  addEnvironmentVariables,
   cancelDeployment,
   createDeployment,
   getProject,
@@ -23,10 +24,47 @@ export async function executeBuild(
   try {
     await authTest({ token: params.slackConfigurationToken });
   } catch (error) {
-    throw new Error(
-      "Slack configuration token is invalid or expired. Generate a new configuration token and add it as SLACK_CONFIGURATION_TOKEN in your Vercel project:\nhttps://api.slack.com/apps",
-      { cause: error },
-    );
+    if (!params.slackConfigRefreshToken) {
+      throw new Error(
+        "Slack configuration token is invalid or expired. Provide SLACK_CONFIG_REFRESH_TOKEN for automatic rotation, or generate a new token:\nhttps://api.slack.com/apps",
+        { cause: error },
+      );
+    }
+
+    log.step("Refreshing SLACK_CONFIGURATION_TOKEN");
+    try {
+      const rotated = await rotateConfigToken({
+        refreshToken: params.slackConfigRefreshToken,
+      });
+      params.slackConfigurationToken = rotated.token;
+      params.slackConfigRefreshToken = rotated.refreshToken;
+
+      await addEnvironmentVariables({
+        projectId: params.projectId,
+        token: params.vercelApiToken,
+        teamId: params.teamId,
+        envs: [
+          {
+            key: "SLACK_CONFIGURATION_TOKEN",
+            value: rotated.token,
+            type: "encrypted",
+            target: ["production", "preview", "development"],
+          },
+          {
+            key: "SLACK_CONFIG_REFRESH_TOKEN",
+            value: rotated.refreshToken,
+            type: "encrypted",
+            target: ["production", "preview", "development"],
+          },
+        ],
+      });
+      log.success("Configuration token rotated and persisted");
+    } catch (rotateError) {
+      throw new Error(
+        "Failed to rotate configuration token — refresh token may be invalid. Generate new tokens:\nhttps://api.slack.com/apps",
+        { cause: rotateError },
+      );
+    }
   }
 
   if (params.slackServiceToken) {
@@ -63,7 +101,7 @@ export async function executeBuild(
   const manifestFullPath = path.join(process.cwd(), params.manifestPath);
   if (!fs.existsSync(manifestFullPath)) {
     throw new Error(
-      `No manifest found at ${params.manifestPath}. Create a manifest.json file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
+      `No manifest found at ${params.manifestPath}. Create a manifest.json (or manifest.yaml) file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
     );
   }
 
