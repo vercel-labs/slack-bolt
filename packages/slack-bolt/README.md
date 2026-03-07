@@ -22,7 +22,9 @@ bun add @vercel/slack-bolt
 
 ### `VercelReceiver`
 
-Responsible for handling and parsing any incoming requests from Slack and then forwarding them to your Bolt app for event processing.
+Responsible for handling and parsing any incoming requests from Slack and then forwarding them to your Bolt app for event processing. Supports both single-workspace (static token) and multi-workspace (OAuth) setups.
+
+#### Single-workspace setup
 
 ```typescript
 import { App } from "@slack/bolt";
@@ -32,17 +34,41 @@ const receiver = new VercelReceiver();
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
   receiver,
   deferInitialization: true,
 });
 
-app.message(/^(hi|hello|hey).*/, async ({ say }) => {
-  await say("Hello, world!");
+export { app, receiver };
+```
+
+#### Multi-workspace OAuth setup
+
+```typescript
+import { App } from "@slack/bolt";
+import { VercelReceiver } from "@vercel/slack-bolt";
+import type { InstallationStore } from "@vercel/slack-bolt";
+
+const installationStore: InstallationStore = {
+  storeInstallation: async (installation) => { /* save to DB */ },
+  fetchInstallation: async (query) => { /* load from DB */ },
+  deleteInstallation: async (query) => { /* remove from DB */ },
+};
+
+const receiver = new VercelReceiver({
+  scopes: ["chat:write", "app_mentions:read"],
+  installationStore,
+});
+
+const app = new App({
+  receiver,
+  authorize: receiver.installer?.authorize,
+  deferInitialization: true,
 });
 
 export { app, receiver };
 ```
+
+`clientId`, `clientSecret`, `stateSecret`, and `signingSecret` are automatically read from environment variables. The `installer` property is public so Bolt's `App` can use `installer.authorize` for multi-workspace token lookup.
 
 #### Parameters
 
@@ -54,20 +80,47 @@ export { app, receiver };
 | `logLevel`                  | `LogLevel`<sup>2</sup>            | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                      |
 | `customPropertiesExtractor` | `(req: Request) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>. |
 | `ackTimeoutMs`              | `number`                          | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.     |
+| `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID. Required for OAuth.                              |
+| `clientSecret`              | `string`                          | `process.env.SLACK_CLIENT_SECRET`  | No<sup>3</sup> | Your app's client secret. Required for OAuth.                          |
+| `stateSecret`               | `string`                          | `process.env.SLACK_STATE_SECRET`   | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                 |
+| `scopes`                    | `string[]`                        | `undefined`                        | No             | Bot scopes to request during the OAuth flow.                           |
+| `redirectUri`               | `string`                          | `undefined`                        | No             | Redirect URI registered with your Slack app for OAuth callbacks.       |
+| `installationStore`         | `InstallationStore`<sup>4</sup>   | `undefined`                        | No<sup>3</sup> | Storage backend for OAuth installations. Required for OAuth.           |
+| `installerOptions`          | `VercelInstallerOptions`          | `{}`                               | No             | Advanced OAuth installer options (see below).                          |
 
 <sup>1</sup> Optional if `process.env.SLACK_SIGNING_SECRET` is provided.
 
 <sup>2</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
 
+<sup>3</sup> Required for OAuth. When `clientId`, `clientSecret`, and `stateSecret` (or a custom `stateStore`) are all provided, OAuth is enabled automatically.
+
+<sup>4</sup> Re-exported from [`@slack/oauth`](https://www.npmjs.com/package/@slack/oauth). In serverless environments the default in-memory store does not persist across requests, so an `installationStore` is required.
+
+#### `VercelInstallerOptions`
+
+Advanced options passed via the `installerOptions` parameter:
+
+| Name                            | Type                                    | Default     | Description                                                     |
+| ------------------------------- | --------------------------------------- | ----------- | --------------------------------------------------------------- |
+| `directInstall`                 | `boolean`                               | `false`     | Skip the "Add to Slack" page and redirect directly.             |
+| `stateVerification`             | `boolean`                               | `true`      | Enable CSRF state verification. Set `false` to disable.         |
+| `stateStore`                    | `StateStore`                            | `undefined` | Custom state store (replaces `stateSecret`).                    |
+| `userScopes`                    | `string[]`                              | `undefined` | User scopes to request during the OAuth flow.                   |
+| `authVersion`                   | `"v1" \| "v2"`                          | `"v2"`      | OAuth flow version.                                             |
+| `callbackOptions`               | `CallbackOptions`                       | `{}`        | Custom success/failure callbacks for the OAuth redirect.         |
+| `metadata`                      | `string`                                | `undefined` | Metadata to include in the state parameter.                     |
+| `renderHtmlForInstallPath`      | `(url: string) => string`              | `undefined` | Custom HTML renderer for the install page.                      |
+| `stateCookieName`               | `string`                                | `undefined` | Custom name for the state cookie.                               |
+| `stateCookieExpirationSeconds`  | `number`                                | `undefined` | Expiration time for the state cookie.                           |
+
 ### `createHandler`
 
-A function that returns a Vercel-compatible request handler that will initialize and start your Bolt app to process the event.
+Returns a Vercel-compatible request handler that initializes and starts your Bolt app to process incoming Slack events.
 
 ```typescript
-// An example using Next.js route handlers
-
+// Next.js: app/api/slack/events/route.ts
 import { createHandler } from "@vercel/slack-bolt";
-import { app, receiver } from "./app";
+import { app, receiver } from "@/bolt/app";
 
 export const POST = createHandler(app, receiver);
 ```
@@ -76,10 +129,46 @@ export const POST = createHandler(app, receiver);
 
 | Name       | Type              | Required | Description                                                  |
 | ---------- | ----------------- | -------- | ------------------------------------------------------------ |
-| `app`      | `App`<sup>1</sup> | Yes      | Your Bolt app                                                |
+| `app`      | `App`<sup>1</sup> | Yes      | Your Bolt app.                                               |
 | `receiver` | `VercelReceiver`  | Yes      | The Vercel receiver instance used to process Slack requests. |
 
 <sup>1</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
+
+### `createInstallHandler`
+
+Returns a handler for the OAuth install path. Renders an "Add to Slack" page or redirects directly to Slack's authorize URL (when `directInstall: true`).
+
+```typescript
+// Next.js: app/api/slack/install/route.ts
+import { createInstallHandler } from "@vercel/slack-bolt";
+import { receiver } from "@/bolt/app";
+
+export const GET = createInstallHandler(receiver);
+```
+
+#### Parameters
+
+| Name       | Type             | Required | Description                                      |
+| ---------- | ---------------- | -------- | ------------------------------------------------ |
+| `receiver` | `VercelReceiver` | Yes      | The Vercel receiver instance with OAuth configured. |
+
+### `createOAuthCallbackHandler`
+
+Returns a handler for the OAuth redirect callback. Exchanges the authorization code for tokens and stores the installation via your `installationStore`.
+
+```typescript
+// Next.js: app/api/slack/oauth_redirect/route.ts
+import { createOAuthCallbackHandler } from "@vercel/slack-bolt";
+import { receiver } from "@/bolt/app";
+
+export const GET = createOAuthCallbackHandler(receiver);
+```
+
+#### Parameters
+
+| Name       | Type             | Required | Description                                      |
+| ---------- | ---------------- | -------- | ------------------------------------------------ |
+| `receiver` | `VercelReceiver` | Yes      | The Vercel receiver instance with OAuth configured. |
 
 ### `preview`
 
@@ -173,11 +262,16 @@ Place a [Slack app manifest](https://api.slack.com/reference/manifests) in your 
 
 Add the following to your Vercel project:
 
-| Variable                    | Required | Description                                                                                                                                            |
-| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SLACK_CONFIGURATION_TOKEN` | Yes      | App configuration token. Generate at https://api.slack.com/apps                                                                                        |
-| `VERCEL_API_TOKEN`          | Yes      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
-| `SLACK_SERVICE_TOKEN`       | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
+| Variable                    | Required           | Description                                                                                                                                            |
+| --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SLACK_SIGNING_SECRET`      | Yes                | Signing secret for request verification. Found under Basic Information on api.slack.com.                                                               |
+| `SLACK_CONFIGURATION_TOKEN` | Yes (preview)      | App configuration token for preview deployments. Generate at https://api.slack.com/apps                                                                |
+| `VERCEL_API_TOKEN`          | Yes (preview)      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
+| `SLACK_CLIENT_ID`           | Yes (OAuth)        | Client ID for OAuth. Found under Basic Information on api.slack.com.                                                                                   |
+| `SLACK_CLIENT_SECRET`       | Yes (OAuth)        | Client secret for OAuth. Found under Basic Information on api.slack.com.                                                                               |
+| `SLACK_STATE_SECRET`        | Yes (OAuth)        | Secret string for CSRF state parameter. Any random string.                                                                                             |
+| `SLACK_BOT_TOKEN`           | Yes (single-workspace) | Bot token for single-workspace apps. Not needed when using OAuth.                                                                                  |
+| `SLACK_SERVICE_TOKEN`       | No                 | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
 
 You must also enable **Automatically expose System Environment Variables** in your Vercel project settings.
 
