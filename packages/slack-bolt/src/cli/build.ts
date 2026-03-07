@@ -42,6 +42,12 @@ export async function executeBuild(
     }
   }
 
+  if (!params.branch) {
+    throw new Error(
+      "VERCEL_GIT_COMMIT_REF is not set — connect your Git repository in your Vercel project settings.\nhttps://vercel.com/docs/git",
+    );
+  }
+
   try {
     await getProject({
       projectId: params.projectId,
