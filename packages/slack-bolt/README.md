@@ -173,11 +173,12 @@ Place a [Slack app manifest](https://api.slack.com/reference/manifests) in your 
 
 Add the following to your Vercel project:
 
-| Variable                    | Required | Description                                                                                                                                            |
-| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SLACK_CONFIGURATION_TOKEN` | Yes      | App configuration token. Generate at https://api.slack.com/apps                                                                                        |
-| `VERCEL_API_TOKEN`          | Yes      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
-| `SLACK_SERVICE_TOKEN`       | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
+| Variable                      | Required | Description                                                                                                                                            |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SLACK_CONFIGURATION_TOKEN`   | Yes      | App configuration token. Generate at https://api.slack.com/apps. Expires after 12 hours.                                                               |
+| `SLACK_CONFIG_REFRESH_TOKEN`  | No       | Refresh token for automatic rotation of expired configuration tokens. Provided alongside the configuration token. Strongly recommended.                 |
+| `VERCEL_API_TOKEN`            | Yes      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
+| `SLACK_SERVICE_TOKEN`         | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
 
 You must also enable **Automatically expose System Environment Variables** in your Vercel project settings.
 
@@ -188,6 +189,8 @@ git push → Vercel preview build
   └─ vercel-slack build --cleanup
        ├─ Skips if production, development, or local
        ├─ Validates Slack and Vercel tokens
+       │    └─ If expired and SLACK_CONFIG_REFRESH_TOKEN is set → auto-rotates
+       │         and persists new tokens to Vercel env vars
        ├─ Cleans up orphaned preview apps (--cleanup)
        ├─ Reads manifest.json
        ├─ Creates or updates Slack app via apps.manifest API

@@ -15,6 +15,7 @@ import type { CreateProjectEnv } from "./internal/vercel/types";
 import { log } from "./logger";
 
 export type PreviewParams = {
+  slackConfigRefreshToken?: string;
   automationBypassSecret?: string;
   branch: string;
   branchUrl?: string;
