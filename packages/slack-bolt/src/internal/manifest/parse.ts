@@ -14,7 +14,10 @@ export function parseManifest(raw: string, filePath: string): Manifest {
   return JSON.parse(raw) as Manifest;
 }
 
-export function stringifyManifest(manifest: Manifest, filePath: string): string {
+export function stringifyManifest(
+  manifest: Manifest,
+  filePath: string,
+): string {
   if (isYaml(filePath)) {
     return stringifyYaml(manifest);
   }
