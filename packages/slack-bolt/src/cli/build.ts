@@ -49,6 +49,14 @@ export async function executeBuild(
     );
   }
 
+  if (!params.branch) {
+    log.warning(
+      "VERCEL_GIT_COMMIT_REF is not set — connect your Git repository in your Vercel project settings",
+    );
+    log.info("https://vercel.com/docs/git");
+    return;
+  }
+
   if (options?.cleanup) {
     log.step("Cleaning up orphaned preview apps");
     try {
