@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.2.5
+
+### Patch Changes
+
+- 995aae8: show warning when branch param is missing
+
 ## 1.2.4
 
 ### Patch Changes
