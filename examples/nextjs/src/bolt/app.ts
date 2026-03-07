@@ -14,7 +14,7 @@ import registerListeners from "./listeners";
 // });
 
 // Multi-workspace OAuth setup:
-import type { Installation, InstallationStore } from "@vercel/slack-bolt";
+import type { Installation, InstallationStore } from "@slack/bolt";
 
 const myStore: InstallationStore = {
   storeInstallation: async (_installation) => {
