@@ -12,7 +12,6 @@ import { type PreviewParams, preview } from "../preview";
 
 export async function executeBuild(
   params: PreviewParams,
-  version: string,
   options?: { cleanup?: boolean },
 ): Promise<void> {
   if (!params.slackConfigurationToken) {

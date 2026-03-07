@@ -70,8 +70,7 @@ function redactValue(value: string): string {
   return `****${value.slice(-4)}`;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function redactSensitiveFields(obj: any): any {
+function redactSensitiveFields(obj: unknown): unknown {
   if (Array.isArray(obj)) {
     return obj.map((item) => redactSensitiveFields(item));
   }

@@ -13,6 +13,7 @@
 		"prepare": "husky"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "2.2.2",
 		"@changesets/cli": "^2.29.8",
 		"husky": "^9.1.7",
 		"turbo": "latest"

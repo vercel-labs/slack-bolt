@@ -1,8 +1,14 @@
 import { type App, ReceiverMultipleAckError } from "@slack/bolt";
 import { LogLevel } from "@slack/logger";
+import type { InstallationStore } from "@slack/oauth";
 import { waitUntil } from "@vercel/functions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHandler, VercelReceiver } from "./index";
+import {
+  createHandler,
+  createInstallHandler,
+  createOAuthCallbackHandler,
+  VercelReceiver,
+} from "./index";
 
 vi.mock("@slack/logger", () => ({
   // biome-ignore lint/complexity/useArrowFunction: we're mocking the ConsoleLogger
@@ -1293,5 +1299,330 @@ describe("VercelReceiver", () => {
     expect(app.init).toHaveBeenCalledTimes(2);
 
     consoleSpy.mockRestore();
+  });
+});
+
+describe("OAuth Support", () => {
+  const mockInstallationStore: InstallationStore = {
+    storeInstallation: vi.fn(async () => {}),
+    fetchInstallation: vi.fn(async () => ({
+      team: { id: "T123", name: "Test" },
+      enterprise: undefined,
+      user: { id: "U123", token: undefined, scopes: undefined },
+      bot: {
+        id: "B123",
+        userId: "U456",
+        token: "xoxb-test",
+        scopes: ["chat:write"],
+      },
+      tokenType: "bot" as const,
+      isEnterpriseInstall: false,
+      appId: "A123",
+    })),
+    deleteInstallation: vi.fn(async () => {}),
+  };
+
+  const oauthOptions = {
+    signingSecret: "test-secret",
+    clientId: "test-client-id",
+    clientSecret: "test-client-secret",
+    stateSecret: "test-state-secret",
+    scopes: ["chat:write", "app_mentions:read"],
+    installationStore: mockInstallationStore,
+  };
+
+  describe("constructor with OAuth", () => {
+    it("should create installer when clientId, clientSecret, and stateSecret are provided", () => {
+      const receiver = new VercelReceiver(oauthOptions);
+
+      expect(receiver.installer).toBeDefined();
+      expect(receiver.installer?.authorize).toBeDefined();
+    });
+
+    it("should NOT create installer when only clientId is provided", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "test-client-id",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+
+    it("should NOT create installer when clientSecret is missing", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "test-client-id",
+        stateSecret: "test-state-secret",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+
+    it("should NOT create installer when stateSecret is missing (and no stateStore)", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "test-client-id",
+        clientSecret: "test-client-secret",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+
+    it("should create installer when stateVerification is false (no stateSecret needed)", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "test-client-id",
+        clientSecret: "test-client-secret",
+        installationStore: mockInstallationStore,
+        installerOptions: { stateVerification: false },
+      });
+
+      expect(receiver.installer).toBeDefined();
+    });
+
+    it("should create installer when custom stateStore is provided (no stateSecret needed)", () => {
+      const mockStateStore = {
+        generateStateParam: vi.fn(async () => "state-value"),
+        verifyStateParam: vi.fn(async () => ({
+          scopes: ["chat:write"],
+        })),
+      };
+
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "test-client-id",
+        clientSecret: "test-client-secret",
+        installationStore: mockInstallationStore,
+        installerOptions: { stateStore: mockStateStore },
+      });
+
+      expect(receiver.installer).toBeDefined();
+    });
+
+    it("should throw when OAuth is configured but installationStore is missing", () => {
+      expect(
+        () =>
+          new VercelReceiver({
+            signingSecret: "test-secret",
+            clientId: "test-client-id",
+            clientSecret: "test-client-secret",
+            stateSecret: "test-state-secret",
+          }),
+      ).toThrow(
+        "An installationStore is required for OAuth in serverless environments",
+      );
+    });
+
+    it("should NOT create installer when no OAuth options are provided (backward compat)", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+  });
+
+  describe("handleInstallPath", () => {
+    it("should throw when OAuth is not configured", async () => {
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      await expect(
+        receiver.handleInstallPath(
+          new Request("https://example.com/slack/install"),
+        ),
+      ).rejects.toThrow("OAuth is not configured");
+    });
+
+    it("should delegate to installer.handleInstallPath via adapters", async () => {
+      const receiver = new VercelReceiver(oauthOptions);
+
+      const mockHandleInstallPath = vi
+        .fn()
+        // biome-ignore lint/suspicious/noExplicitAny: testing internals
+        .mockImplementation(async (_req: any, res: any) => {
+          res.setHeader("Location", "https://slack.com/oauth/v2/authorize");
+          res.writeHead(302);
+          res.end("");
+        });
+      receiver.installer!.handleInstallPath = mockHandleInstallPath;
+
+      const response = await receiver.handleInstallPath(
+        new Request("https://example.com/slack/install"),
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe(
+        "https://slack.com/oauth/v2/authorize",
+      );
+      expect(mockHandleInstallPath).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("handleOAuthRedirect", () => {
+    it("should throw when OAuth is not configured", async () => {
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      await expect(
+        receiver.handleOAuthRedirect(
+          new Request(
+            "https://example.com/slack/oauth_redirect?code=abc&state=xyz",
+          ),
+        ),
+      ).rejects.toThrow("OAuth is not configured");
+    });
+
+    it("should delegate to installer.handleCallback", async () => {
+      const receiver = new VercelReceiver(oauthOptions);
+
+      const mockHandleCallback = vi
+        .fn()
+        // biome-ignore lint/suspicious/noExplicitAny: testing internals
+        .mockImplementation(async (_req: any, res: any) => {
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end("<html><body>Success!</body></html>");
+        });
+      receiver.installer!.handleCallback = mockHandleCallback;
+
+      const response = await receiver.handleOAuthRedirect(
+        new Request(
+          "https://example.com/slack/oauth_redirect?code=abc&state=xyz",
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain("Success!");
+      expect(mockHandleCallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("should pass installUrlOptions when stateVerification is false", async () => {
+      const receiver = new VercelReceiver({
+        ...oauthOptions,
+        installerOptions: { stateVerification: false },
+      });
+
+      const mockHandleCallback = vi
+        .fn()
+        // biome-ignore lint/suspicious/noExplicitAny: testing internals
+        .mockImplementation(async (_req: any, res: any) => {
+          res.writeHead(200);
+          res.end("ok");
+        });
+      receiver.installer!.handleCallback = mockHandleCallback;
+
+      await receiver.handleOAuthRedirect(
+        new Request(
+          "https://example.com/slack/oauth_redirect?code=abc&state=xyz",
+        ),
+      );
+
+      // When stateVerification is false, handleCallback receives 4 args (including installUrlOptions)
+      expect(mockHandleCallback).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({
+          scopes: ["chat:write", "app_mentions:read"],
+        }),
+      );
+    });
+
+    it("should NOT pass installUrlOptions when stateVerification is enabled (default)", async () => {
+      const receiver = new VercelReceiver(oauthOptions);
+
+      const mockHandleCallback = vi
+        .fn()
+        // biome-ignore lint/suspicious/noExplicitAny: testing internals
+        .mockImplementation(async (_req: any, res: any) => {
+          res.writeHead(200);
+          res.end("ok");
+        });
+      receiver.installer!.handleCallback = mockHandleCallback;
+
+      await receiver.handleOAuthRedirect(
+        new Request(
+          "https://example.com/slack/oauth_redirect?code=abc&state=xyz",
+        ),
+      );
+
+      // When stateVerification is enabled, handleCallback receives 3 args (no installUrlOptions)
+      expect(mockHandleCallback).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      const callArgs = mockHandleCallback.mock.calls[0];
+      expect(callArgs).toHaveLength(3);
+    });
+  });
+
+  describe("createInstallHandler", () => {
+    it("should return a handler that delegates to receiver.handleInstallPath", async () => {
+      const receiver = new VercelReceiver(oauthOptions);
+
+      vi.spyOn(receiver, "handleInstallPath").mockResolvedValue(
+        new Response("", {
+          status: 302,
+          headers: { Location: "https://slack.com" },
+        }),
+      );
+
+      const handler = createInstallHandler(receiver);
+      const response = await handler(
+        new Request("https://example.com/slack/install"),
+      );
+
+      expect(response.status).toBe(302);
+      expect(receiver.handleInstallPath).toHaveBeenCalledTimes(1);
+    });
+
+    it("should return an error response when OAuth is not configured", async () => {
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      const handler = createInstallHandler(receiver);
+      const response = await handler(
+        new Request("https://example.com/slack/install"),
+      );
+
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error).toContain("OAuth is not configured");
+    });
+  });
+
+  describe("createOAuthCallbackHandler", () => {
+    it("should return a handler that delegates to receiver.handleOAuthRedirect", async () => {
+      const receiver = new VercelReceiver(oauthOptions);
+
+      vi.spyOn(receiver, "handleOAuthRedirect").mockResolvedValue(
+        new Response("<html>Success</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      );
+
+      const handler = createOAuthCallbackHandler(receiver);
+      const response = await handler(
+        new Request(
+          "https://example.com/slack/oauth_redirect?code=abc&state=xyz",
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      expect(receiver.handleOAuthRedirect).toHaveBeenCalledTimes(1);
+    });
+
+    it("should return an error response when OAuth is not configured", async () => {
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      const handler = createOAuthCallbackHandler(receiver);
+      const response = await handler(
+        new Request("https://example.com/slack/oauth_redirect"),
+      );
+
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error).toContain("OAuth is not configured");
+    });
   });
 });

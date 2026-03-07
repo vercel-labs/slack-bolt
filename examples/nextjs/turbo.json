@@ -3,7 +3,7 @@
 	"extends": ["//"],
 	"tasks": {
 		"build": {
-			"env": ["VERCEL_*", "SLACK_*", "MANIFEST_PATH", "SLACK_SIGNING_SECRET"],
+			"env": ["VERCEL_*", "SLACK_*", "MANIFEST_PATH", "SLACK_SIGNING_SECRET", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_STATE_SECRET"],
 			"inputs": [
 				"$TURBO_DEFAULT$",
 				".env",

@@ -62,7 +62,7 @@ export function run(version: string): void {
     }
 
     const params = validateAndBuildParams(env);
-    await executeBuild(params, version, { cleanup });
+    await executeBuild(params, { cleanup });
   });
 
   program.parseAsync().catch((error: unknown) => {
