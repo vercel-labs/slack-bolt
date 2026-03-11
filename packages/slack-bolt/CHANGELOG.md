@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.3.1
+
+### Patch Changes
+
+- 73e5d03: Warn users about mismatched service and config tokens that lead to failed installations.
+
 ## 1.3.0
 
 ### Minor Changes
