@@ -236,6 +236,11 @@ export const preview = async (
             "https://docs.slack.dev/authentication/tokens/#service",
         );
         break;
+      case "invalid_app_id":
+        log.warning(
+          "Invalid app ID. This is a bug in the @vercel/slack-bolt package. Please open an issue at https://github.com/vercel/slack-bolt/issues",
+        );
+        break;
       case "slack_api_error":
         log.warning("Slack API error while installing the app");
         break;

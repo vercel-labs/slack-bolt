@@ -341,10 +341,18 @@ export async function installApp(params: {
         return {
           status: "app_approval_request_denied",
         };
-      case "invalid_app_id":
-        return {
-          status: "invalid_app_id",
-        };
+      case "invalid_app_id": {
+        if (serviceToken) {
+          const { hasAccess } = await verifyServiceTokenAccess({
+            serviceToken,
+            appId,
+          });
+          if (!hasAccess) {
+            return { status: "no_access" };
+          }
+        }
+        return { status: "invalid_app_id" };
+      }
       default:
         return {
           status: "unknown_error",
