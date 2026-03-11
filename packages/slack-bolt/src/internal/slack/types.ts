@@ -46,6 +46,7 @@ export type InstallResult = {
     | "app_approval_request_eligible"
     | "app_approval_request_pending"
     | "app_approval_request_denied"
+    | "invalid_app_id"
     | "slack_api_error"
     | "unknown_error";
   error?: string;

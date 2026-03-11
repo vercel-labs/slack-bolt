@@ -236,7 +236,16 @@ export async function rotateConfigToken({
   };
 }
 
-export async function authTest({ token }: { token: string }): Promise<void> {
+export type AuthTestResult = {
+  userId: string;
+  teamId: string;
+};
+
+export async function authTest({
+  token,
+}: {
+  token: string;
+}): Promise<AuthTestResult> {
   const response = await fetch("https://slack.com/api/auth.test", {
     method: "POST",
     headers: {
@@ -253,10 +262,32 @@ export async function authTest({ token }: { token: string }): Promise<void> {
     );
   }
 
-  const data = (await response.json()) as { ok: boolean; error?: string };
+  const data = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+    user_id?: string;
+    team_id?: string;
+  };
 
   if (!data.ok) {
     throw new Error(data.error ?? "Unknown error");
+  }
+
+  return {
+    userId: data.user_id ?? "",
+    teamId: data.team_id ?? "",
+  };
+}
+
+export async function verifyServiceTokenAccess(params: {
+  serviceToken: string;
+  appId: string;
+}): Promise<{ hasAccess: boolean }> {
+  try {
+    await exportSlackApp({ token: params.serviceToken, appId: params.appId });
+    return { hasAccess: true };
+  } catch {
+    return { hasAccess: false };
   }
 }
 
@@ -309,6 +340,10 @@ export async function installApp(params: {
       case "app_approval_request_denied":
         return {
           status: "app_approval_request_denied",
+        };
+      case "invalid_app_id":
+        return {
+          status: "invalid_app_id",
         };
       default:
         return {
