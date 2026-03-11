@@ -228,7 +228,7 @@ export const preview = async (
       case "app_approval_request_denied":
         log.warning("App approval request was denied");
         break;
-      case "invalid_app_id":
+      case "no_access":
         log.warning(
           `SLACK_SERVICE_TOKEN does not have access to app ${app.app_id}. ` +
             "This usually means the service token and configuration token were created by different users. " +

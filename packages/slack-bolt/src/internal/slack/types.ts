@@ -43,6 +43,7 @@ export type InstallResult = {
   status:
     | "installed"
     | "missing_service_token"
+    | "no_access"
     | "app_approval_request_eligible"
     | "app_approval_request_pending"
     | "app_approval_request_denied"
