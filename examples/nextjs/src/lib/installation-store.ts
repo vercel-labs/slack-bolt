@@ -44,7 +44,9 @@ function decrypt(encrypted: string, secret: string): string {
 function encryptTokens(installation: StoredInstallation): StoredInstallation {
   const secret = process.env.TOKEN_ENCRYPTION_SECRET;
   if (!secret) {
-    throw new Error('TOKEN_ENCRYPTION_SECRET is required for secure token storage');
+    throw new Error(
+      "TOKEN_ENCRYPTION_SECRET is required for secure token storage",
+    );
   }
 
   const copy = structuredClone(installation);
@@ -60,7 +62,9 @@ function encryptTokens(installation: StoredInstallation): StoredInstallation {
 function decryptTokens(installation: StoredInstallation): StoredInstallation {
   const secret = process.env.TOKEN_ENCRYPTION_SECRET;
   if (!secret) {
-    throw new Error('TOKEN_ENCRYPTION_SECRET is required for secure token storage');
+    throw new Error(
+      "TOKEN_ENCRYPTION_SECRET is required for secure token storage",
+    );
   }
 
   const copy = structuredClone(installation);
@@ -97,7 +101,9 @@ async function upsert(key: string, incoming: StoredInstallation) {
     const merged = existing ? { ...existing, ...incoming } : incoming;
     await redis.set(key, merged);
   } catch (error) {
-    throw new Error(`Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -133,15 +139,21 @@ export const installationStore: InstallationStore = {
 
       const data = await redis.get<StoredInstallation>(tk);
       if (!data) {
-        const teamIdentifier = query.teamId || `enterprise:${query.enterpriseId}`;
+        const teamIdentifier =
+          query.teamId || `enterprise:${query.enterpriseId}`;
         throw new Error(`No installation found for team ${teamIdentifier}`);
       }
       return decryptTokens(data);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('No installation found')) {
+      if (
+        error instanceof Error &&
+        error.message.includes("No installation found")
+      ) {
         throw error;
       }
-      throw new Error(`Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   },
 
@@ -160,7 +172,9 @@ export const installationStore: InstallationStore = {
       }
       await redis.del(tk);
     } catch (error) {
-      throw new Error(`Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   },
 };
