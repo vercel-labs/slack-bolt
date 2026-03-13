@@ -1,3 +1,9 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  scryptSync,
+} from "node:crypto";
 import type {
   Installation,
   InstallationQuery,
@@ -6,6 +12,69 @@ import type {
 import { redis } from "./redis";
 
 type StoredInstallation = Installation<"v1" | "v2", boolean>;
+
+const ALGORITHM = "aes-256-gcm";
+const IV_LENGTH = 12;
+const TAG_LENGTH = 16;
+
+function encrypt(text: string, secret: string): string {
+  const key = scryptSync(secret, "slack-token-encryption", 32);
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, key, iv, {
+    authTagLength: TAG_LENGTH,
+  });
+  const encrypted = Buffer.concat([
+    cipher.update(text, "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
+}
+
+function decrypt(encrypted: string, secret: string): string {
+  const key = scryptSync(secret, "slack-token-encryption", 32);
+  const [ivHex, tagHex, dataHex] = encrypted.split(":");
+  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, "hex"), {
+    authTagLength: TAG_LENGTH,
+  });
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return decipher.update(dataHex, "hex", "utf8") + decipher.final("utf8");
+}
+
+function encryptTokens(installation: StoredInstallation): StoredInstallation {
+  const secret = process.env.SLACK_STATE_SECRET;
+  if (!secret) return installation;
+
+  const copy = structuredClone(installation);
+  if (copy.bot?.token) copy.bot.token = encrypt(copy.bot.token, secret);
+  if (copy.bot?.refreshToken)
+    copy.bot.refreshToken = encrypt(copy.bot.refreshToken, secret);
+  if (copy.user.token) copy.user.token = encrypt(copy.user.token, secret);
+  if (copy.user.refreshToken)
+    copy.user.refreshToken = encrypt(copy.user.refreshToken, secret);
+  return copy;
+}
+
+function decryptTokens(installation: StoredInstallation): StoredInstallation {
+  const secret = process.env.SLACK_STATE_SECRET;
+  if (!secret) return installation;
+
+  if (installation.bot?.token)
+    installation.bot.token = decrypt(installation.bot.token, secret);
+  if (installation.bot?.refreshToken)
+    installation.bot.refreshToken = decrypt(
+      installation.bot.refreshToken,
+      secret,
+    );
+  if (installation.user.token)
+    installation.user.token = decrypt(installation.user.token, secret);
+  if (installation.user.refreshToken)
+    installation.user.refreshToken = decrypt(
+      installation.user.refreshToken,
+      secret,
+    );
+  return installation;
+}
 
 function teamKey(query: {
   teamId?: string;
@@ -39,14 +108,16 @@ export const installationStore: InstallationStore = {
       isEnterpriseInstall: installation.isEnterpriseInstall,
     });
 
-    // Team-level: upsert so bot credentials are always current
-    await upsert(tk, installation as unknown as Record<string, unknown>);
+    const encrypted = encryptTokens(
+      installation as unknown as StoredInstallation,
+    );
 
-    // User-level: upsert so each user's token/scopes are preserved independently
+    await upsert(tk, encrypted as unknown as Record<string, unknown>);
+
     if (installation.user?.id) {
       await upsert(
         userKey(tk, installation.user.id),
-        installation as unknown as Record<string, unknown>,
+        encrypted as unknown as Record<string, unknown>,
       );
     }
   },
@@ -56,14 +127,14 @@ export const installationStore: InstallationStore = {
 
     if (query.userId) {
       const data = await redis.get(userKey(tk, query.userId));
-      if (data) return JSON.parse(data) as StoredInstallation;
+      if (data) return decryptTokens(JSON.parse(data) as StoredInstallation);
     }
 
     const data = await redis.get(tk);
     if (!data) {
       throw new Error(`No installation found for ${tk}`);
     }
-    return JSON.parse(data) as StoredInstallation;
+    return decryptTokens(JSON.parse(data) as StoredInstallation);
   },
 
   deleteInstallation: async (query: InstallationQuery<boolean>) => {
@@ -74,7 +145,6 @@ export const installationStore: InstallationStore = {
       return;
     }
 
-    // Deleting a team-level installation: remove all user keys too
     const pattern = `${tk}:*`;
     const userKeys = await redis.keys(pattern);
     if (userKeys.length > 0) {
