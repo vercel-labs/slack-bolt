@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.4.0
+
+### Minor Changes
+
+- 074eae8: Add built in OAuth support for multi-tenant apps.
+
 ## 1.3.1
 
 ### Patch Changes
