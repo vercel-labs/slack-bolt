@@ -6,12 +6,14 @@ import {
   SlackManifestUpdateError,
 } from "./errors";
 import {
+  authTest,
   createSlackApp,
   exportSlackApp,
   installApp,
   rotateConfigToken,
   updateSlackApp,
   upsertSlackApp,
+  verifyServiceTokenAccess,
 } from "./index";
 
 const mockFetch = vi.fn();
@@ -661,5 +663,117 @@ describe("rotateConfigToken", () => {
     await expect(
       rotateConfigToken({ refreshToken: "xoxe-expired" }),
     ).rejects.toThrow("token_expired");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// authTest
+// ---------------------------------------------------------------------------
+
+describe("authTest", () => {
+  it("returns userId and teamId on success", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: true, user_id: "U123", team_id: "T456" }),
+    );
+
+    const result = await authTest({ token: "tok" });
+
+    expect(result).toEqual({ userId: "U123", teamId: "T456" });
+  });
+
+  it("sends a POST to auth.test with correct headers", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: true, user_id: "U1", team_id: "T1" }),
+    );
+
+    await authTest({ token: "my-token" });
+
+    const [url, opts] = mockFetch.mock.lastCall;
+    expect(url).toBe("https://slack.com/api/auth.test");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers.Authorization).toBe("Bearer my-token");
+  });
+
+  it("throws HTTPError on non-2xx response", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 401, "Unauthorized"));
+
+    try {
+      await authTest({ token: "bad" });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(HTTPError);
+      expect((err as HTTPError).status).toBe(401);
+    }
+  });
+
+  it("throws on API error (ok: false)", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "invalid_auth" }),
+    );
+
+    await expect(authTest({ token: "bad" })).rejects.toThrow("invalid_auth");
+  });
+
+  it("defaults userId and teamId to empty strings when missing", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    const result = await authTest({ token: "tok" });
+
+    expect(result).toEqual({ userId: "", teamId: "" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifyServiceTokenAccess
+// ---------------------------------------------------------------------------
+
+describe("verifyServiceTokenAccess", () => {
+  it("returns hasAccess: true when exportSlackApp succeeds", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true, manifest: {} }));
+
+    const result = await verifyServiceTokenAccess({
+      serviceToken: "svc-tok",
+      appId: "A123",
+    });
+
+    expect(result).toEqual({ hasAccess: true });
+    expect(mockFetch.mock.lastCall[0]).toBe(
+      "https://slack.com/api/apps.manifest.export",
+    );
+  });
+
+  it("returns hasAccess: false when exportSlackApp throws HTTPError", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, 403, "Forbidden"));
+
+    const result = await verifyServiceTokenAccess({
+      serviceToken: "svc-tok",
+      appId: "A123",
+    });
+
+    expect(result).toEqual({ hasAccess: false });
+  });
+
+  it("returns hasAccess: false when exportSlackApp throws SlackManifestExportError", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "app_not_found" }),
+    );
+
+    const result = await verifyServiceTokenAccess({
+      serviceToken: "svc-tok",
+      appId: "A123",
+    });
+
+    expect(result).toEqual({ hasAccess: false });
+  });
+
+  it("returns hasAccess: false on network error", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    const result = await verifyServiceTokenAccess({
+      serviceToken: "svc-tok",
+      appId: "A123",
+    });
+
+    expect(result).toEqual({ hasAccess: false });
   });
 });
