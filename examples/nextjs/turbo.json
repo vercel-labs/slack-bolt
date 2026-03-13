@@ -1,16 +1,22 @@
 {
-	"$schema": "https://turborepo.dev/schema.v2.json",
-	"extends": ["//"],
-	"tasks": {
-		"build": {
-			"env": ["VERCEL_*", "SLACK_*", "MANIFEST_PATH", "SLACK_SIGNING_SECRET"],
-			"inputs": [
-				"$TURBO_DEFAULT$",
-				".env",
-				".env.local",
-				".env.production",
-				".env.production.local"
-			]
-		}
-	}
+  "$schema": "https://turborepo.dev/schema.v2.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": [
+        "VERCEL_*",
+        "SLACK_*",
+        "MANIFEST_PATH",
+        "SLACK_SIGNING_SECRET",
+        "REDIS_URL"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.production.local"
+      ]
+    }
+  }
 }
