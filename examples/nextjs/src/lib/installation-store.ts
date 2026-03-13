@@ -43,7 +43,9 @@ function decrypt(encrypted: string, secret: string): string {
 
 function encryptTokens(installation: StoredInstallation): StoredInstallation {
   const secret = process.env.TOKEN_ENCRYPTION_SECRET;
-  if (!secret) return installation;
+  if (!secret) {
+    throw new Error('TOKEN_ENCRYPTION_SECRET is required for secure token storage');
+  }
 
   const copy = structuredClone(installation);
   if (copy.bot?.token) copy.bot.token = encrypt(copy.bot.token, secret);
@@ -57,7 +59,9 @@ function encryptTokens(installation: StoredInstallation): StoredInstallation {
 
 function decryptTokens(installation: StoredInstallation): StoredInstallation {
   const secret = process.env.TOKEN_ENCRYPTION_SECRET;
-  if (!secret) return installation;
+  if (!secret) {
+    throw new Error('TOKEN_ENCRYPTION_SECRET is required for secure token storage');
+  }
 
   const copy = structuredClone(installation);
   if (copy.bot?.token) copy.bot.token = decrypt(copy.bot.token, secret);
@@ -88,9 +92,13 @@ function userKey(base: string, userId: string): string {
 }
 
 async function upsert(key: string, incoming: StoredInstallation) {
-  const existing = await redis.get<StoredInstallation>(key);
-  const merged = existing ? { ...existing, ...incoming } : incoming;
-  await redis.set(key, merged);
+  try {
+    const existing = await redis.get<StoredInstallation>(key);
+    const merged = existing ? { ...existing, ...incoming } : incoming;
+    await redis.set(key, merged);
+  } catch (error) {
+    throw new Error(`Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export const installationStore: InstallationStore = {
@@ -113,34 +121,46 @@ export const installationStore: InstallationStore = {
   },
 
   fetchInstallation: async (query: InstallationQuery<boolean>) => {
-    const tk = teamKey(query);
+    try {
+      const tk = teamKey(query);
 
-    if (query.userId) {
-      const data = await redis.get<StoredInstallation>(
-        userKey(tk, query.userId),
-      );
-      if (data) return decryptTokens(data);
-    }
+      if (query.userId) {
+        const data = await redis.get<StoredInstallation>(
+          userKey(tk, query.userId),
+        );
+        if (data) return decryptTokens(data);
+      }
 
-    const data = await redis.get<StoredInstallation>(tk);
-    if (!data) {
-      throw new Error(`No installation found for ${tk}`);
+      const data = await redis.get<StoredInstallation>(tk);
+      if (!data) {
+        const teamIdentifier = query.teamId || `enterprise:${query.enterpriseId}`;
+        throw new Error(`No installation found for team ${teamIdentifier}`);
+      }
+      return decryptTokens(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('No installation found')) {
+        throw error;
+      }
+      throw new Error(`Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return decryptTokens(data);
   },
 
   deleteInstallation: async (query: InstallationQuery<boolean>) => {
-    const tk = teamKey(query);
+    try {
+      const tk = teamKey(query);
 
-    if (query.userId) {
-      await redis.del(userKey(tk, query.userId));
-      return;
-    }
+      if (query.userId) {
+        await redis.del(userKey(tk, query.userId));
+        return;
+      }
 
-    const userKeys = await redis.keys(`${tk}:*`);
-    if (userKeys.length > 0) {
-      await redis.del(...userKeys);
+      const userKeys = await redis.keys(`${tk}:*`);
+      if (userKeys.length > 0) {
+        await redis.del(...userKeys);
+      }
+      await redis.del(tk);
+    } catch (error) {
+      throw new Error(`Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`);
     }
-    await redis.del(tk);
   },
 };
