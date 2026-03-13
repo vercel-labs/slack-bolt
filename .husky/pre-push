@@ -1,3 +1,2 @@
-pnpm exec turbo run lint:fix
 pnpm exec turbo run lint
 pnpm exec turbo run test
