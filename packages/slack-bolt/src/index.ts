@@ -67,6 +67,26 @@ export interface VercelReceiverOptions {
    * @default 3001
    */
   ackTimeoutMs?: number;
+  /**
+   * The client ID for the Slack app.
+   * @default process.env.SLACK_CLIENT_ID
+   */
+  clientId?: string;
+  /**
+   * The client secret for the Slack app.
+   * @default process.env.SLACK_CLIENT_SECRET
+   */
+  clientSecret?: string;
+  /**
+   * The state secret for the Slack app.
+   * @default process.env.SLACK_STATE_SECRET
+   */
+  stateSecret?: string;
+  /**
+   * The scopes for the Slack app.
+   * @default []
+   */
+  scopes?: string[];
 }
 
 const LOG_PREFIX = "[@vercel/slack-bolt]";
@@ -102,6 +122,9 @@ export class VercelReceiver implements Receiver {
   private readonly logger: Logger;
   private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly ackTimeoutMs: number;
+  private readonly clientId?: string;
+  private readonly clientSecret?: string;
+  private readonly stateSecret?: string;
   private app?: App;
 
   /**
@@ -130,6 +153,9 @@ export class VercelReceiver implements Receiver {
     logLevel = LogLevel.INFO,
     customPropertiesExtractor,
     ackTimeoutMs = ACK_TIMEOUT_MS,
+    clientId = process.env.SLACK_CLIENT_ID,
+    clientSecret = process.env.SLACK_CLIENT_SECRET,
+    stateSecret = process.env.SLACK_STATE_SECRET,
   }: VercelReceiverOptions = {}) {
     if (!signingSecret) {
       throw new VercelReceiverError(ERROR_MESSAGES.SIGNING_SECRET_REQUIRED);
@@ -143,6 +169,9 @@ export class VercelReceiver implements Receiver {
     );
     this.customPropertiesExtractor = customPropertiesExtractor;
     this.ackTimeoutMs = ackTimeoutMs;
+    this.clientId = clientId;
+    this.clientSecret = clientSecret;
+    this.stateSecret = stateSecret;
 
     this.logger.debug("VercelReceiver initialized");
   }

@@ -30,17 +30,30 @@ vi.mock("@vercel/functions", () => ({
 
 describe("VercelReceiver", () => {
   describe("constructor", () => {
-    let originalEnv: string | undefined;
+    let originalSigningSecret: string | undefined;
+    let originalClientId: string | undefined;
+    let originalClientSecret: string | undefined;
+    let originalStateSecret: string | undefined;
 
     beforeEach(() => {
-      originalEnv = process.env.SLACK_SIGNING_SECRET;
+      originalSigningSecret = process.env.SLACK_SIGNING_SECRET;
+      originalClientId = process.env.SLACK_CLIENT_ID;
+      originalClientSecret = process.env.SLACK_CLIENT_SECRET;
+      originalStateSecret = process.env.SLACK_STATE_SECRET;
     });
 
     afterEach(() => {
-      if (originalEnv !== undefined) {
-        process.env.SLACK_SIGNING_SECRET = originalEnv;
-      } else {
-        delete process.env.SLACK_SIGNING_SECRET;
+      for (const [key, val] of Object.entries({
+        SLACK_SIGNING_SECRET: originalSigningSecret,
+        SLACK_CLIENT_ID: originalClientId,
+        SLACK_CLIENT_SECRET: originalClientSecret,
+        SLACK_STATE_SECRET: originalStateSecret,
+      })) {
+        if (val !== undefined) {
+          process.env[key] = val;
+        } else {
+          delete process.env[key];
+        }
       }
     });
 
@@ -108,6 +121,63 @@ describe("VercelReceiver", () => {
       expect(() => new VercelReceiver()).toThrow(
         "SLACK_SIGNING_SECRET is required for VercelReceiver",
       );
+    });
+
+    it("should read clientId from process.env.SLACK_CLIENT_ID when not provided", () => {
+      process.env.SLACK_CLIENT_ID = "env-client-id";
+
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      expect((receiver as any).clientId).toBe("env-client-id");
+    });
+
+    it("should use clientId from options over process.env", () => {
+      process.env.SLACK_CLIENT_ID = "env-client-id";
+
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "option-client-id",
+      });
+
+      expect((receiver as any).clientId).toBe("option-client-id");
+    });
+
+    it("should read clientSecret from process.env.SLACK_CLIENT_SECRET when not provided", () => {
+      process.env.SLACK_CLIENT_SECRET = "env-client-secret";
+
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      expect((receiver as any).clientSecret).toBe("env-client-secret");
+    });
+
+    it("should use clientSecret from options over process.env", () => {
+      process.env.SLACK_CLIENT_SECRET = "env-client-secret";
+
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientSecret: "option-client-secret",
+      });
+
+      expect((receiver as any).clientSecret).toBe("option-client-secret");
+    });
+
+    it("should read stateSecret from process.env.SLACK_STATE_SECRET when not provided", () => {
+      process.env.SLACK_STATE_SECRET = "env-state-secret";
+
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      expect((receiver as any).stateSecret).toBe("env-state-secret");
+    });
+
+    it("should use stateSecret from options over process.env", () => {
+      process.env.SLACK_STATE_SECRET = "env-state-secret";
+
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        stateSecret: "option-state-secret",
+      });
+
+      expect((receiver as any).stateSecret).toBe("option-state-secret");
     });
   });
 
