@@ -1,6 +1,7 @@
 import {
   type AckFn,
   type App,
+  type HTTPReceiverOptions,
   type Receiver,
   ReceiverAuthenticityError,
   type ReceiverEvent,
@@ -9,6 +10,14 @@ import {
   verifySlackRequest,
 } from "@slack/bolt";
 import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
+import {
+  type CallbackOptions,
+  type InstallPathOptions,
+  InstallProvider,
+  type InstallProviderOptions,
+  type InstallURLOptions,
+  type StateStore,
+} from "@slack/oauth";
 import { waitUntil } from "@vercel/functions";
 import {
   ERROR_MESSAGES,
@@ -18,6 +27,7 @@ import {
   RequestParsingError,
   VercelReceiverError,
 } from "./errors";
+import { createResponseCapture, toIncomingMessage } from "./oauth-adapters";
 
 // Types
 /**
@@ -34,6 +44,31 @@ export type VercelHandler = (req: Request) => Promise<Response>;
  * @property logger - The logger to use for the VercelReceiver.
  * @property logLevel - The log level to use for the VercelReceiver.
  * @property customPropertiesExtractor - A function to extract custom properties from the request.
+ */
+/**
+ * Options for customizing the OAuth installer behavior.
+ * Mirrors the relevant subset of HTTPReceiverInstallerOptions,
+ * excluding path-related options (serverless uses file-based routing).
+ */
+export interface VercelInstallerOptions {
+  directInstall?: boolean;
+  renderHtmlForInstallPath?: (url: string) => string;
+  stateStore?: StateStore;
+  stateVerification?: boolean;
+  legacyStateVerification?: boolean;
+  stateCookieName?: string;
+  stateCookieExpirationSeconds?: number;
+  authVersion?: "v1" | "v2";
+  clientOptions?: InstallProviderOptions["clientOptions"];
+  authorizationUrl?: string;
+  metadata?: string;
+  userScopes?: string[];
+  installPathOptions?: InstallPathOptions;
+  callbackOptions?: CallbackOptions;
+}
+
+/**
+ * Configuration options for the VercelReceiver.
  */
 export interface VercelReceiverOptions {
   /**
@@ -68,26 +103,98 @@ export interface VercelReceiverOptions {
    */
   ackTimeoutMs?: number;
   /**
-   * The client ID for the Slack app.
+   * Your app's client ID, found under Basic Information on api.slack.com.
+   * Required for OAuth.
    * @default process.env.SLACK_CLIENT_ID
    */
   clientId?: string;
   /**
-   * The client secret for the Slack app.
+   * Your app's client secret, found under Basic Information on api.slack.com.
+   * Required for OAuth.
    * @default process.env.SLACK_CLIENT_SECRET
    */
   clientSecret?: string;
   /**
-   * The state secret for the Slack app.
+   * Secret used to generate and verify the state parameter for OAuth CSRF protection.
+   * Required unless a custom stateStore or stateVerification: false is provided.
    * @default process.env.SLACK_STATE_SECRET
    */
   stateSecret?: string;
   /**
-   * The scopes for the Slack app.
-   * @default []
+   * The bot scopes to request during the OAuth flow.
    */
   scopes?: string[];
+  /**
+   * The redirect URI registered with your Slack app for OAuth callbacks.
+   */
+  redirectUri?: string;
+  /**
+   * Storage backend for OAuth installations (tokens, team info, etc.).
+   * Required for OAuth in serverless -- the default in-memory store does not persist.
+   */
+  installationStore?: InstallProviderOptions["installationStore"];
+  /**
+   * Advanced options for the OAuth installer.
+   */
+  installerOptions?: VercelInstallerOptions;
 }
+
+// ---------------------------------------------------------------------------
+// Compile-time shape assertions
+// Verify our types match Bolt's underlying shapes without coupling optionality.
+// If Bolt changes a type upstream, tsc breaks here -- not in user-land at runtime.
+// ---------------------------------------------------------------------------
+type AssertShape<Source, Target> =
+  NonNullable<Source> extends NonNullable<Target> ? true : never;
+
+type _S1 = AssertShape<
+  VercelReceiverOptions["clientId"],
+  HTTPReceiverOptions["clientId"]
+>;
+type _S2 = AssertShape<
+  VercelReceiverOptions["clientSecret"],
+  HTTPReceiverOptions["clientSecret"]
+>;
+type _S3 = AssertShape<
+  VercelReceiverOptions["stateSecret"],
+  HTTPReceiverOptions["stateSecret"]
+>;
+type _S4 = AssertShape<
+  VercelReceiverOptions["scopes"],
+  HTTPReceiverOptions["scopes"]
+>;
+type _S5 = AssertShape<
+  VercelReceiverOptions["redirectUri"],
+  HTTPReceiverOptions["redirectUri"]
+>;
+type _S6 = AssertShape<
+  VercelReceiverOptions["installationStore"],
+  HTTPReceiverOptions["installationStore"]
+>;
+type _S7 = AssertShape<
+  VercelInstallerOptions["stateVerification"],
+  InstallProviderOptions["stateVerification"]
+>;
+type _S8 = AssertShape<
+  VercelInstallerOptions["callbackOptions"],
+  CallbackOptions
+>;
+type _S9 = AssertShape<
+  VercelInstallerOptions["stateStore"],
+  InstallProviderOptions["stateStore"]
+>;
+type _S10 = AssertShape<
+  VercelInstallerOptions["authVersion"],
+  InstallProviderOptions["authVersion"]
+>;
+type _S11 = AssertShape<
+  VercelInstallerOptions["userScopes"],
+  InstallURLOptions["userScopes"]
+>;
+type _S12 = AssertShape<
+  VercelInstallerOptions["metadata"],
+  InstallURLOptions["metadata"]
+>;
 
 const LOG_PREFIX = "[@vercel/slack-bolt]";
 const ACK_TIMEOUT_MS = 3001;
@@ -122,10 +229,13 @@ export class VercelReceiver implements Receiver {
   private readonly logger: Logger;
   private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
   private readonly ackTimeoutMs: number;
-  private readonly clientId?: string;
-  private readonly clientSecret?: string;
-  private readonly stateSecret?: string;
   private app?: App;
+
+  public installer?: InstallProvider;
+  private installUrlOptions?: InstallURLOptions;
+  private installCallbackOptions?: CallbackOptions;
+  private installPathOptions?: InstallPathOptions;
+  private stateVerification?: boolean;
 
   /**
    * Gets the logger instance used by this receiver.
@@ -156,6 +266,10 @@ export class VercelReceiver implements Receiver {
     clientId = process.env.SLACK_CLIENT_ID,
     clientSecret = process.env.SLACK_CLIENT_SECRET,
     stateSecret = process.env.SLACK_STATE_SECRET,
+    scopes,
+    redirectUri,
+    installationStore,
+    installerOptions = {},
   }: VercelReceiverOptions = {}) {
     if (!signingSecret) {
       throw new VercelReceiverError(ERROR_MESSAGES.SIGNING_SECRET_REQUIRED);
@@ -169,9 +283,45 @@ export class VercelReceiver implements Receiver {
     );
     this.customPropertiesExtractor = customPropertiesExtractor;
     this.ackTimeoutMs = ackTimeoutMs;
-    this.clientId = clientId;
-    this.clientSecret = clientSecret;
-    this.stateSecret = stateSecret;
+
+    this.stateVerification = installerOptions.stateVerification;
+
+    if (
+      clientId !== undefined &&
+      clientSecret !== undefined &&
+      (installerOptions.stateVerification === false ||
+        stateSecret !== undefined ||
+        installerOptions.stateStore !== undefined)
+    ) {
+      this.installer = new InstallProvider({
+        clientId,
+        clientSecret,
+        stateSecret,
+        installationStore,
+        logger,
+        logLevel,
+        directInstall: installerOptions.directInstall,
+        stateStore: installerOptions.stateStore,
+        stateVerification: installerOptions.stateVerification,
+        legacyStateVerification: installerOptions.legacyStateVerification,
+        stateCookieName: installerOptions.stateCookieName,
+        stateCookieExpirationSeconds:
+          installerOptions.stateCookieExpirationSeconds,
+        renderHtmlForInstallPath: installerOptions.renderHtmlForInstallPath,
+        authVersion: installerOptions.authVersion ?? "v2",
+        clientOptions: installerOptions.clientOptions,
+        authorizationUrl: installerOptions.authorizationUrl,
+      });
+
+      this.installUrlOptions = {
+        scopes: scopes ?? [],
+        userScopes: installerOptions.userScopes,
+        metadata: installerOptions.metadata,
+        redirectUri,
+      };
+      this.installCallbackOptions = installerOptions.callbackOptions ?? {};
+      this.installPathOptions = installerOptions.installPathOptions ?? {};
+    }
 
     this.logger.debug("VercelReceiver initialized");
   }
@@ -204,6 +354,58 @@ export class VercelReceiver implements Receiver {
   public async stop(): Promise<void> {
     this.logger.debug("VercelReceiver stopped");
   }
+
+  /**
+   * Handles requests to the OAuth install path.
+   * Renders an "Add to Slack" page or redirects directly to Slack's authorize URL.
+   */
+  public handleInstall = async (req: Request): Promise<Response> => {
+    if (!this.installer) {
+      throw new VercelReceiverError(ERROR_MESSAGES.OAUTH_NOT_CONFIGURED);
+    }
+
+    const nodeReq = toIncomingMessage(req);
+    const capture = createResponseCapture();
+
+    await this.installer.handleInstallPath(
+      nodeReq,
+      capture,
+      this.installPathOptions,
+      this.installUrlOptions,
+    );
+
+    return capture.toResponse();
+  };
+
+  /**
+   * Handles the OAuth redirect callback from Slack.
+   * Exchanges the authorization code for tokens and stores the installation.
+   */
+  public handleCallback = async (req: Request): Promise<Response> => {
+    if (!this.installer) {
+      throw new VercelReceiverError(ERROR_MESSAGES.OAUTH_NOT_CONFIGURED);
+    }
+
+    const nodeReq = toIncomingMessage(req);
+    const capture = createResponseCapture();
+
+    if (this.stateVerification === false) {
+      await this.installer.handleCallback(
+        nodeReq,
+        capture,
+        this.installCallbackOptions,
+        this.installUrlOptions,
+      );
+    } else {
+      await this.installer.handleCallback(
+        nodeReq,
+        capture,
+        this.installCallbackOptions,
+      );
+    }
+
+    return capture.toResponse();
+  };
 
   /**
    * Creates a handler function that processes incoming Slack requests.
