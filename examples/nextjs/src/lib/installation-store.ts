@@ -59,21 +59,16 @@ function decryptTokens(installation: StoredInstallation): StoredInstallation {
   const secret = process.env.SLACK_STATE_SECRET;
   if (!secret) return installation;
 
-  if (installation.bot?.token)
-    installation.bot.token = decrypt(installation.bot.token, secret);
-  if (installation.bot?.refreshToken)
-    installation.bot.refreshToken = decrypt(
-      installation.bot.refreshToken,
-      secret,
-    );
-  if (installation.user.token)
-    installation.user.token = decrypt(installation.user.token, secret);
-  if (installation.user.refreshToken)
-    installation.user.refreshToken = decrypt(
-      installation.user.refreshToken,
-      secret,
-    );
-  return installation;
+  const copy = structuredClone(installation);
+  if (copy.bot?.token)
+    copy.bot.token = decrypt(copy.bot.token, secret);
+  if (copy.bot?.refreshToken)
+    copy.bot.refreshToken = decrypt(copy.bot.refreshToken, secret);
+  if (copy.user.token)
+    copy.user.token = decrypt(copy.user.token, secret);
+  if (copy.user.refreshToken)
+    copy.user.refreshToken = decrypt(copy.user.refreshToken, secret);
+  return copy;
 }
 
 function teamKey(query: {
@@ -94,10 +89,10 @@ function userKey(base: string, userId: string): string {
   return `${base}:${userId}`;
 }
 
-async function upsert(key: string, incoming: Record<string, unknown>) {
-  const existing = await redis.get(key);
-  const merged = existing ? { ...JSON.parse(existing), ...incoming } : incoming;
-  await redis.set(key, JSON.stringify(merged));
+async function upsert(key: string, incoming: StoredInstallation) {
+  const existing = await redis.get<StoredInstallation>(key);
+  const merged = existing ? { ...existing, ...incoming } : incoming;
+  await redis.set(key, merged);
 }
 
 export const installationStore: InstallationStore = {
@@ -112,13 +107,10 @@ export const installationStore: InstallationStore = {
       installation as unknown as StoredInstallation,
     );
 
-    await upsert(tk, encrypted as unknown as Record<string, unknown>);
+    await upsert(tk, encrypted);
 
     if (installation.user?.id) {
-      await upsert(
-        userKey(tk, installation.user.id),
-        encrypted as unknown as Record<string, unknown>,
-      );
+      await upsert(userKey(tk, installation.user.id), encrypted);
     }
   },
 
@@ -126,15 +118,15 @@ export const installationStore: InstallationStore = {
     const tk = teamKey(query);
 
     if (query.userId) {
-      const data = await redis.get(userKey(tk, query.userId));
-      if (data) return decryptTokens(JSON.parse(data) as StoredInstallation);
+      const data = await redis.get<StoredInstallation>(userKey(tk, query.userId));
+      if (data) return decryptTokens(data);
     }
 
-    const data = await redis.get(tk);
+    const data = await redis.get<StoredInstallation>(tk);
     if (!data) {
       throw new Error(`No installation found for ${tk}`);
     }
-    return decryptTokens(JSON.parse(data) as StoredInstallation);
+    return decryptTokens(data);
   },
 
   deleteInstallation: async (query: InstallationQuery<boolean>) => {
@@ -145,8 +137,7 @@ export const installationStore: InstallationStore = {
       return;
     }
 
-    const pattern = `${tk}:*`;
-    const userKeys = await redis.keys(pattern);
+    const userKeys = await redis.keys(`${tk}:*`);
     if (userKeys.length > 0) {
       await redis.del(...userKeys);
     }
