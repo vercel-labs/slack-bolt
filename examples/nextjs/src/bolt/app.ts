@@ -1,12 +1,15 @@
 import { App } from "@slack/bolt";
 import { VercelReceiver } from "@vercel/slack-bolt";
+import manifest from "../../manifest.json";
+import { installationStore } from "../lib/installation-store";
 import registerListeners from "./listeners";
 
-const receiver = new VercelReceiver();
+const receiver = new VercelReceiver({
+  scopes: manifest.oauth_config.scopes.bot,
+  installationStore,
+});
 
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
   receiver,
   deferInitialization: true,
 });
