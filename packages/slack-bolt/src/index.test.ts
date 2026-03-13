@@ -30,17 +30,30 @@ vi.mock("@vercel/functions", () => ({
 
 describe("VercelReceiver", () => {
   describe("constructor", () => {
-    let originalEnv: string | undefined;
+    let originalSigningSecret: string | undefined;
+    let originalClientId: string | undefined;
+    let originalClientSecret: string | undefined;
+    let originalStateSecret: string | undefined;
 
     beforeEach(() => {
-      originalEnv = process.env.SLACK_SIGNING_SECRET;
+      originalSigningSecret = process.env.SLACK_SIGNING_SECRET;
+      originalClientId = process.env.SLACK_CLIENT_ID;
+      originalClientSecret = process.env.SLACK_CLIENT_SECRET;
+      originalStateSecret = process.env.SLACK_STATE_SECRET;
     });
 
     afterEach(() => {
-      if (originalEnv !== undefined) {
-        process.env.SLACK_SIGNING_SECRET = originalEnv;
-      } else {
-        delete process.env.SLACK_SIGNING_SECRET;
+      for (const [key, val] of Object.entries({
+        SLACK_SIGNING_SECRET: originalSigningSecret,
+        SLACK_CLIENT_ID: originalClientId,
+        SLACK_CLIENT_SECRET: originalClientSecret,
+        SLACK_STATE_SECRET: originalStateSecret,
+      })) {
+        if (val !== undefined) {
+          process.env[key] = val;
+        } else {
+          delete process.env[key];
+        }
       }
     });
 
@@ -108,6 +121,103 @@ describe("VercelReceiver", () => {
       expect(() => new VercelReceiver()).toThrow(
         "SLACK_SIGNING_SECRET is required for VercelReceiver",
       );
+    });
+
+    it("should create installer when clientId, clientSecret, and stateSecret are all provided", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+        stateSecret: "ssec",
+        scopes: ["chat:write"],
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+      });
+
+      expect(receiver.installer).toBeDefined();
+    });
+
+    it("should create installer using process.env defaults for OAuth credentials", () => {
+      process.env.SLACK_CLIENT_ID = "env-cid";
+      process.env.SLACK_CLIENT_SECRET = "env-csec";
+      process.env.SLACK_STATE_SECRET = "env-ssec";
+
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        scopes: ["chat:write"],
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+      });
+
+      expect(receiver.installer).toBeDefined();
+    });
+
+    it("should not create installer when clientId is missing", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientSecret: "csec",
+        stateSecret: "ssec",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+
+    it("should not create installer when clientSecret is missing", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        stateSecret: "ssec",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+
+    it("should not create installer when stateSecret is missing and no stateStore or stateVerification override", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+      });
+
+      expect(receiver.installer).toBeUndefined();
+    });
+
+    it("should create installer when stateVerification is false even without stateSecret", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+        scopes: ["chat:write"],
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+        installerOptions: { stateVerification: false },
+      });
+
+      expect(receiver.installer).toBeDefined();
+    });
+
+    it("handleInstall should throw when OAuth is not configured", async () => {
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      await expect(
+        receiver.handleInstall(new Request("https://example.com/install")),
+      ).rejects.toThrow("OAuth is not configured");
+    });
+
+    it("handleCallback should throw when OAuth is not configured", async () => {
+      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+
+      await expect(
+        receiver.handleCallback(
+          new Request("https://example.com/oauth_redirect?code=abc"),
+        ),
+      ).rejects.toThrow("OAuth is not configured");
     });
   });
 

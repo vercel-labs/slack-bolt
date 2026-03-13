@@ -28,7 +28,7 @@
       {
         "command": "/sample-command",
         "description": "Runs a sample command",
-        "should_escape": false, 
+        "should_escape": false,
         "url": "https://<your-domain>/api/slack/events"
       }
     ]
@@ -36,7 +36,8 @@
   "oauth_config": {
     "scopes": {
       "bot": ["channels:history", "chat:write", "commands"]
-    }
+    },
+    "redirect_urls": ["https://<your-domain>/api/slack/oauth-redirect"]
   },
   "settings": {
     "event_subscriptions": {

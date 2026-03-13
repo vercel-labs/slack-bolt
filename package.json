@@ -1,22 +1,26 @@
 {
-	"name": "slack-bolt",
-	"private": true,
-	"scripts": {
-		"build": "turbo run build",
-		"dev": "turbo run dev",
-		"lint": "turbo run lint",
-		"lint:fix": "turbo run lint:fix",
-		"test": "turbo run test",
-		"changeset": "changeset",
-		"version-packages": "changeset version",
-		"release": "turbo run build --filter=@vercel/slack-bolt && changeset publish",
-		"prepare": "husky"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "2.2.2",
-		"@changesets/cli": "^2.29.8",
-		"husky": "^9.1.7",
-		"turbo": "latest"
-	},
-	"packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748"
+  "name": "slack-bolt",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "test": "turbo run test",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "turbo run build --filter=@vercel/slack-bolt && changeset publish",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,css,md}": "biome check --write --no-errors-on-unmatched"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.2",
+    "@changesets/cli": "^2.29.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.3",
+    "turbo": "latest"
+  },
+  "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748"
 }

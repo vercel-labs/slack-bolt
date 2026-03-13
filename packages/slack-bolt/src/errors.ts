@@ -4,6 +4,8 @@ export const ERROR_MESSAGES = {
   SIGNING_SECRET_REQUIRED:
     "SLACK_SIGNING_SECRET is required for VercelReceiver",
   APP_NOT_INITIALIZED: "App not initialized",
+  OAUTH_NOT_CONFIGURED:
+    "OAuth is not configured. Provide clientId, clientSecret, and stateSecret to enable OAuth.",
   REQUEST_TIMEOUT: "Request timeout",
   EVENT_NOT_ACKNOWLEDGED: "Event not acknowledged within timeout period",
 
