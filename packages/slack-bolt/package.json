@@ -45,8 +45,8 @@
 		"url": "https://github.com/vercel-labs/slack-bolt/issues"
 	},
 	"scripts": {
-		"build": "tsup",
-		"dev": "tsup --watch",
+		"build": "tsdown",
+		"dev": "tsdown --watch",
 		"test": "vitest run",
 		"test:watch": "vitest watch",
 		"lint": "biome check .",
@@ -61,22 +61,22 @@
 	"author": "Vercel",
 	"license": "MIT",
 	"dependencies": {
-		"@slack/logger": "^4.0.0",
+		"@slack/logger": "^4.0.1",
 		"@slack/oauth": "3.0.5",
 		"@vercel/functions": "^3.4.3",
 		"commander": "^14.0.3",
-		"yaml": "^2.8.2",
+		"yaml": "^2.8.3",
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@arethetypeswrong/cli": "^0.18.2",
 		"@biomejs/biome": "2.2.2",
 		"@types/node": "^20.19.35",
-		"@vitest/coverage-v8": "4.0.18",
-		"tsup": "^8.5.1",
+		"@vitest/coverage-v8": "4.1.2",
+		"tsdown": "^0.21.7",
 		"tsx": "^4.21.0",
 		"typescript": "^5.9.3",
-		"vitest": "^4.0.18"
+		"vitest": "^4.1.2"
 	},
 	"peerDependencies": {
 		"@slack/bolt": "^4.4.0"

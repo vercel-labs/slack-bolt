@@ -13,6 +13,7 @@
     },
     "lint": {},
     "lint:fix": {},
-    "test": {}
+    "test": {},
+    "attw": {}
   }
 }

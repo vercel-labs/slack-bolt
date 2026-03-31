@@ -7,14 +7,15 @@
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "test": "turbo run test",
+    "attw": "turbo run attw",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "turbo run build --filter=@vercel/slack-bolt && changeset publish",
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.2",
-    "@changesets/cli": "^2.29.8",
+    "@biomejs/biome": "2.4.10",
+    "@changesets/cli": "^2.30.0",
     "husky": "^9.1.7",
     "turbo": "latest"
   },
