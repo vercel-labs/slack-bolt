@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.4.1
+
+### Patch Changes
+
+- 6166cc8: Migrate to ts-down and bump all dependencies
+
 ## 1.4.0
 
 ### Minor Changes
