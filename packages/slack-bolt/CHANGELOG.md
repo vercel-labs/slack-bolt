@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.4.2
+
+### Patch Changes
+
+- e1802af: Add badges to README
+
 ## 1.4.1
 
 ### Patch Changes
