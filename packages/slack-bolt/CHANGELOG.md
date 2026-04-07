@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.4.3
+
+### Patch Changes
+
+- 569a2d1: Bump dependencies and override vite due to vitest range including vulnerable version.
+
 ## 1.4.2
 
 ### Patch Changes
