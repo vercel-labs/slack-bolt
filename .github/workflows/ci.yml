@@ -18,7 +18,7 @@ env:
 
 jobs:
   ci:
-    name: CI (Node.js ${{ matrix.node-version }})
+    name: Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
