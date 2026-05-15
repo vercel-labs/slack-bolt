@@ -17,8 +17,8 @@ env:
   TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
 
 jobs:
-  setup:
-    name: Setup
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -50,46 +50,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-  lint:
-    name: Lint
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          run_install: false
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Restore pnpm cache
-        uses: actions/cache@v5
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Lint
         run: pnpm exec turbo run lint
 
   typecheck:
     name: Typecheck
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -110,7 +75,7 @@ jobs:
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
-      - name: Restore pnpm cache
+      - name: Setup pnpm cache
         uses: actions/cache@v5
         with:
           path: ${{ env.STORE_PATH }}
@@ -126,7 +91,6 @@ jobs:
 
   test:
     name: Test (Node.js ${{ matrix.node-version }})
-    needs: setup
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -151,7 +115,7 @@ jobs:
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
-      - name: Restore pnpm cache
+      - name: Setup pnpm cache
         uses: actions/cache@v5
         with:
           path: ${{ env.STORE_PATH }}
@@ -167,7 +131,6 @@ jobs:
 
   build:
     name: Build
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -188,7 +151,7 @@ jobs:
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
-      - name: Restore pnpm cache
+      - name: Setup pnpm cache
         uses: actions/cache@v5
         with:
           path: ${{ env.STORE_PATH }}
