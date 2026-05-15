@@ -11,7 +11,7 @@
 	},
 	"dependencies": {
 		"@slack/bolt": "^4.7.2",
-		"@upstash/redis": "^1.37.0",
+		"@upstash/redis": "^1.38.0",
 		"@vercel/slack-bolt": "workspace:*",
 		"next": "16.2.4",
 		"react": "19.2.5",
