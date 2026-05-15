@@ -10,10 +10,15 @@ env:
   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
   TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   canary:
     name: Publish Canary
     runs-on: ubuntu-latest
+    environment: canary
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -21,7 +26,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -40,12 +46,8 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-          pnpm version "${CURRENT_VERSION}-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
+          npm version "${CURRENT_VERSION}-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
 
       - name: Publish canary
         working-directory: packages/slack-bolt
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          pnpm publish --tag canary --access public --no-git-checks
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_VERCEL_TOKEN_ELEVATED }}
+        run: npm publish --tag canary --access public
