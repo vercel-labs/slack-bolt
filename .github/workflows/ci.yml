@@ -68,3 +68,6 @@ jobs:
 
       - name: Build
         run: pnpm exec turbo run build
+
+      - name: Check exported types
+        run: pnpm exec turbo run attw
