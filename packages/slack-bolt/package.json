@@ -63,7 +63,7 @@
   "dependencies": {
     "@slack/logger": "^4.0.1",
     "@slack/oauth": "3.0.5",
-    "@vercel/functions": "^3.4.3",
+    "@vercel/functions": "^3.5.1",
     "commander": "^14.0.3",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
