@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "baseBranches": ["master"],
+  "schedule": ["before 9am on thursday"],
+  "timezone": "America/New_York",
+  "reviewers": ["malewis5"],
+  "labels": ["dependencies"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on thursday"]
+  },
+  "packageRules": [
+    {
+      "description": "Package production deps — separate PR with changeset",
+      "matchFileNames": ["packages/slack-bolt/package.json"],
+      "matchDepTypes": ["dependencies", "peerDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "package production deps",
+      "addChangesets": true,
+      "additionalBranchPrefix": "deps/",
+      "labels": ["dependencies", "release"]
+    },
+    {
+      "description": "All devDeps and example deps — one grouped PR",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev and example deps",
+      "automerge": true,
+      "additionalBranchPrefix": "deps/"
+    },
+    {
+      "description": "Example app runtime deps — grouped with devDeps",
+      "matchFileNames": ["examples/nextjs/package.json"],
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev and example deps",
+      "automerge": true,
+      "additionalBranchPrefix": "deps/"
+    },
+    {
+      "description": "GitHub Actions — one grouped PR",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "major"],
+      "groupName": "github actions",
+      "automerge": true,
+      "additionalBranchPrefix": "deps/"
+    },
+    {
+      "description": "Major bumps — separate PRs for review",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "labels": ["dependencies", "major"]
+    }
+  ]
+}
