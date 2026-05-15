@@ -17,14 +17,13 @@ env:
   TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
 
 jobs:
-  test:
-    name: Test (Node.js ${{ matrix.node-version }})
+  ci:
+    name: Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [20, 22]
       fail-fast: false
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -55,11 +54,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run linter
-        run: pnpm exec turbo run lint --filter=@vercel/slack-bolt
+      - name: Setup example env
+        run: cp examples/nextjs/.env.example examples/nextjs/.env.local
 
-      - name: Run tests
-        run: pnpm exec turbo run test --filter=@vercel/slack-bolt
+      - name: Lint
+        run: pnpm exec turbo run lint
 
-      - name: Build package
-        run: pnpm exec turbo run build --filter=@vercel/slack-bolt
+      - name: Typecheck
+        run: pnpm exec turbo run typecheck
+
+      - name: Test
+        run: pnpm exec turbo run test
+
+      - name: Build
+        run: pnpm exec turbo run build
