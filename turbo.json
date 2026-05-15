@@ -17,6 +17,8 @@
     "lint": {},
     "lint:fix": {},
     "test": {},
-    "attw": {}
+    "attw": {
+      "dependsOn": ["build"]
+    }
   }
 }
