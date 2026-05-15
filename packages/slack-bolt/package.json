@@ -47,6 +47,7 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "lint": "biome check .",
