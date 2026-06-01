@@ -11,7 +11,7 @@
 		"lint:fix": "biome format --write"
 	},
 	"dependencies": {
-		"@slack/bolt": "^4.7.2",
+		"@slack/bolt": "^4.7.3",
 		"@upstash/redis": "^1.38.0",
 		"@vercel/slack-bolt": "workspace:*",
 		"next": "16.2.6",
@@ -28,7 +28,7 @@
 		"@types/react-dom": "^19.2.3",
 		"dotenv": "^17.4.2",
 		"tailwindcss": "^4.3.0",
-		"tsx": "^4.22.3",
+		"tsx": "^4.22.4",
 		"typescript": "^6.0.3"
 	}
 }
