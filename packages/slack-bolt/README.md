@@ -51,21 +51,22 @@ export { app, receiver };
 
 #### Parameters
 
-| Name                        | Type                              | Default Value                        | Required       | Description                                                            |
-| --------------------------- | --------------------------------- | ------------------------------------ | -------------- | ---------------------------------------------------------------------- |
-| `signingSecret`             | `string`                          | `process.env.SLACK_SIGNING_SECRET`   | No<sup>1</sup> | Signing secret for your Slack app used to verify requests.             |
-| `signatureVerification`     | `boolean`                         | `true`                               | No             | Enable or disable request signature verification.                      |
-| `logger`                    | `Logger`<sup>2</sup>              | `new ConsoleLogger()`                | No             | Logger used for diagnostics.                                           |
-| `logLevel`                  | `LogLevel`<sup>2</sup>            | `LogLevel.INFO`                      | No             | Minimum log level for the logger.                                      |
-| `customPropertiesExtractor` | `(req: Request) => StringIndexed` | `undefined`                          | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>. |
-| `ackTimeoutMs`              | `number`                          | `3001`                               | No             | Milliseconds to wait for `ack()` before returning a timeout error.     |
-| `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`        | No<sup>3</sup> | Your app's client ID (required for OAuth).                             |
-| `clientSecret`              | `string`                          | `process.env.SLACK_CLIENT_SECRET`    | No<sup>3</sup> | Your app's client secret (required for OAuth).                         |
-| `stateSecret`               | `string`                          | `process.env.SLACK_STATE_SECRET`     | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                 |
-| `scopes`                    | `string[]`                        | `undefined`                          | No             | Bot scopes to request during the OAuth flow.                           |
-| `redirectUri`               | `string`                          | `undefined`                          | No             | Redirect URI registered with your Slack app.                           |
-| `installationStore`         | `InstallationStore`<sup>2</sup>   | `undefined`                          | No<sup>4</sup> | Persistent storage backend for OAuth installations.                    |
-| `installerOptions`          | `VercelInstallerOptions`          | `{}`                                 | No             | Advanced OAuth options (user scopes, direct install, state store, etc). |
+| Name                        | Type                              | Default Value                      | Required       | Description                                                             |
+| --------------------------- | --------------------------------- | ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| `signingSecret`             | `string`                          | `process.env.SLACK_SIGNING_SECRET` | No<sup>1</sup> | Signing secret for your Slack app used to verify requests.              |
+| `signatureVerification`     | `boolean`                         | `true`                             | No             | Enable or disable request signature verification.                       |
+| `logger`                    | `Logger`<sup>2</sup>              | `new ConsoleLogger()`              | No             | Logger used for diagnostics.                                            |
+| `logLevel`                  | `LogLevel`<sup>2</sup>            | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                       |
+| `customPropertiesExtractor` | `(req: Request) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>.  |
+| `beforeProcess`             | `BeforeProcessFn`                 | `undefined`                        | No             | Intercept requests before Bolt processing.                              |
+| `ackTimeoutMs`              | `number`                          | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.      |
+| `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID (required for OAuth).                              |
+| `clientSecret`              | `string`                          | `process.env.SLACK_CLIENT_SECRET`  | No<sup>3</sup> | Your app's client secret (required for OAuth).                          |
+| `stateSecret`               | `string`                          | `process.env.SLACK_STATE_SECRET`   | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                  |
+| `scopes`                    | `string[] \| ScopesResolver`      | `undefined`                        | No             | Bot scopes for OAuth. Can be a function for dynamic scopes.             |
+| `redirectUri`               | `string`                          | `undefined`                        | No             | Redirect URI registered with your Slack app.                            |
+| `installationStore`         | `InstallationStore`<sup>2</sup>   | `undefined`                        | No<sup>4</sup> | Persistent storage backend for OAuth installations.                     |
+| `installerOptions`          | `VercelInstallerOptions`          | `{}`                               | No             | Advanced OAuth options (user scopes, direct install, state store, etc). |
 
 <sup>1</sup> Optional if `process.env.SLACK_SIGNING_SECRET` is provided.
 
@@ -105,12 +106,12 @@ export const POST = createHandler(app, receiver);
 
 Set these in your Vercel project (or `.env.local` for local development):
 
-| Variable              | Description                                              |
-| --------------------- | -------------------------------------------------------- |
-| `SLACK_CLIENT_ID`     | App client ID, found under **Basic Information** on [api.slack.com](https://api.slack.com/apps). |
-| `SLACK_CLIENT_SECRET` | App client secret, found in the same section.            |
-| `SLACK_STATE_SECRET`  | A random string used to sign the OAuth state parameter.  |
-| `SLACK_SIGNING_SECRET`| Signing secret for verifying incoming Slack requests.    |
+| Variable               | Description                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| `SLACK_CLIENT_ID`      | App client ID, found under **Basic Information** on [api.slack.com](https://api.slack.com/apps). |
+| `SLACK_CLIENT_SECRET`  | App client secret, found in the same section.                                                    |
+| `SLACK_STATE_SECRET`   | A random string used to sign the OAuth state parameter.                                          |
+| `SLACK_SIGNING_SECRET` | Signing secret for verifying incoming Slack requests.                                            |
 
 All four are read from `process.env` automatically.
 
@@ -179,31 +180,31 @@ const result = await preview({
 
 #### Parameters (`PreviewParams`)
 
-| Name                      | Type     | Required | Description                                                        |
-| ------------------------- | -------- | -------- | ------------------------------------------------------------------ |
-| `branch`                  | `string` | Yes      | Git branch name for the preview deployment.                        |
-| `projectId`               | `string` | Yes      | Vercel project ID.                                                 |
-| `deploymentUrl`           | `string` | Yes      | URL of the current deployment.                                     |
-| `manifestPath`            | `string` | Yes      | Path to the Slack app `manifest.json` file.                        |
-| `slackConfigurationToken` | `string` | Yes      | Slack app configuration token.                                     |
-| `vercelApiToken`          | `string` | Yes      | Vercel API token with write access.                                |
-| `branchUrl`               | `string` | No       | Branch-specific URL. Defaults to `deploymentUrl`.                  |
-| `slackAppId`              | `string` | No       | Existing Slack app ID to update instead of creating a new one.     |
-| `slackServiceToken`       | `string` | No       | Service token for auto-installing the app.                         |
-| `teamId`                  | `string` | No       | Vercel team ID.                                                    |
-| `deploymentId`            | `string` | No       | Current deployment ID (used for cancel-and-redeploy).              |
-| `automationBypassSecret`  | `string` | No       | Existing bypass secret. Generated automatically if not provided.   |
-| `commitSha`               | `string` | No       | Git commit SHA (displayed in the Slack app description).           |
-| `commitMessage`           | `string` | No       | Git commit message (displayed in the Slack app description).       |
-| `commitAuthor`            | `string` | No       | Git commit author (displayed in the Slack app description).        |
+| Name                      | Type     | Required | Description                                                      |
+| ------------------------- | -------- | -------- | ---------------------------------------------------------------- |
+| `branch`                  | `string` | Yes      | Git branch name for the preview deployment.                      |
+| `projectId`               | `string` | Yes      | Vercel project ID.                                               |
+| `deploymentUrl`           | `string` | Yes      | URL of the current deployment.                                   |
+| `manifestPath`            | `string` | Yes      | Path to the Slack app `manifest.json` file.                      |
+| `slackConfigurationToken` | `string` | Yes      | Slack app configuration token.                                   |
+| `vercelApiToken`          | `string` | Yes      | Vercel API token with write access.                              |
+| `branchUrl`               | `string` | No       | Branch-specific URL. Defaults to `deploymentUrl`.                |
+| `slackAppId`              | `string` | No       | Existing Slack app ID to update instead of creating a new one.   |
+| `slackServiceToken`       | `string` | No       | Service token for auto-installing the app.                       |
+| `teamId`                  | `string` | No       | Vercel team ID.                                                  |
+| `deploymentId`            | `string` | No       | Current deployment ID (used for cancel-and-redeploy).            |
+| `automationBypassSecret`  | `string` | No       | Existing bypass secret. Generated automatically if not provided. |
+| `commitSha`               | `string` | No       | Git commit SHA (displayed in the Slack app description).         |
+| `commitMessage`           | `string` | No       | Git commit message (displayed in the Slack app description).     |
+| `commitAuthor`            | `string` | No       | Git commit author (displayed in the Slack app description).      |
 
 #### Return value (`PreviewResult`)
 
-| Name            | Type      | Description                                                   |
-| --------------- | --------- | ------------------------------------------------------------- |
-| `isNew`         | `boolean` | `true` if a new Slack app was created, `false` if updated.    |
+| Name            | Type      | Description                                                       |
+| --------------- | --------- | ----------------------------------------------------------------- |
+| `isNew`         | `boolean` | `true` if a new Slack app was created, `false` if updated.        |
 | `installStatus` | `string`  | Installation outcome (e.g. `installed`, `missing_service_token`). |
-| `app`           | `object`  | Slack API response containing `app_id` and credentials.       |
+| `app`           | `object`  | Slack API response containing `app_id` and credentials.           |
 
 ## Preview Deployments
 
@@ -252,12 +253,12 @@ Place a [Slack app manifest](https://api.slack.com/reference/manifests) in your 
 
 Add the following to your Vercel project:
 
-| Variable                      | Required | Description                                                                                                                                            |
-| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SLACK_CONFIGURATION_TOKEN`   | Yes      | App configuration token. Generate at https://api.slack.com/apps. Expires after 12 hours.                                                               |
-| `SLACK_CONFIG_REFRESH_TOKEN`  | No       | Refresh token for automatic rotation of expired configuration tokens. Provided alongside the configuration token. Strongly recommended.                 |
-| `VERCEL_API_TOKEN`            | Yes      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
-| `SLACK_SERVICE_TOKEN`         | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
+| Variable                     | Required | Description                                                                                                                                            |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SLACK_CONFIGURATION_TOKEN`  | Yes      | App configuration token. Generate at https://api.slack.com/apps. Expires after 12 hours.                                                               |
+| `SLACK_CONFIG_REFRESH_TOKEN` | No       | Refresh token for automatic rotation of expired configuration tokens. Provided alongside the configuration token. Strongly recommended.                |
+| `VERCEL_API_TOKEN`           | Yes      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
+| `SLACK_SERVICE_TOKEN`        | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
 
 You must also enable **Automatically expose System Environment Variables** in your Vercel project settings.
 
@@ -298,6 +299,55 @@ Options:
 ```
 
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
+
+## Advanced
+
+### Request Interception
+
+The `beforeProcess` hook lets you intercept requests after signature verification but before Bolt processes them. Return a `Response` to short-circuit, or `undefined` to continue normally.
+
+```typescript
+const receiver = new VercelReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  beforeProcess: async (req, body) => {
+    if (body.team_id === "T_ENTERPRISE") {
+      return fetch("https://enterprise-handler.example.com/slack", {
+        method: "POST",
+        body: await req.text(),
+        headers: req.headers,
+      });
+    }
+    // Return undefined to continue normal Bolt processing
+  },
+});
+```
+
+> **Note:** `beforeProcess` is not called for `url_verification` challenges.
+
+### Dynamic Scopes
+
+The `scopes` option accepts either a static array or a resolver function. This enables requesting different OAuth scopes based on the install request context (e.g., different scopes for enterprise vs. standard workspaces).
+
+```typescript
+const receiver = new VercelReceiver({
+  clientId: process.env.SLACK_CLIENT_ID,
+  clientSecret: process.env.SLACK_CLIENT_SECRET,
+  stateSecret: process.env.SLACK_STATE_SECRET,
+  installationStore: myInstallationStore,
+  scopes: async (req) => {
+    const url = new URL(req.url);
+    const isEnterprise = url.searchParams.get("enterprise") === "true";
+
+    const baseScopes = ["chat:write", "commands"];
+    if (isEnterprise) {
+      return [...baseScopes, "users:read", "channels:read"];
+    }
+    return baseScopes;
+  },
+});
+```
+
+The resolver receives the install request, allowing you to inspect query parameters, headers, or any other request data to determine which scopes to request.
 
 ## Examples
 
