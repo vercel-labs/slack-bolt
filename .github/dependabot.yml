@@ -9,10 +9,7 @@ updates:
     groups:
       root-dev-dependencies:
         dependency-type: "development"
-        update-types:
-          - "minor"
-          - "patch"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
 
@@ -23,17 +20,10 @@ updates:
       interval: "weekly"
       day: "monday"
     groups:
-      package-dev-dependencies:
-        dependency-type: "development"
-        update-types:
-          - "minor"
-          - "patch"
-      package-production-dependencies:
-        dependency-type: "production"
-        update-types:
-          - "minor"
-          - "patch"
-    open-pull-requests-limit: 10
+      all-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
 
@@ -45,10 +35,9 @@ updates:
       day: "monday"
     groups:
       example-dependencies:
-        update-types:
-          - "minor"
-          - "patch"
-    open-pull-requests-limit: 5
+        patterns:
+          - "*"
+    open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
 
@@ -58,6 +47,10 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    groups:
+      all-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
