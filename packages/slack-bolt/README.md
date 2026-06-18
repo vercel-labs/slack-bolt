@@ -51,30 +51,30 @@ export { app, receiver };
 
 #### Parameters
 
-| Name                        | Type                              | Default Value                      | Required    | Description                                                             |
-| --------------------------- | --------------------------------- | ---------------------------------- | ----------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `signingSecret`             | `string`                          | `process.env.SLACK_SIGNING_SECRET` | No1         | Signing secret for your Slack app used to verify requests.              |
-| `signatureVerification`     | `boolean`                         | `true`                             | No          | Enable or disable request signature verification.                       |
-| `logger`                    | `Logger`2                         | `new ConsoleLogger()`              | No          | Logger used for diagnostics.                                            |
-| `logLevel`                  | `LogLevel`2                       | `LogLevel.INFO`                    | No          | Minimum log level for the logger.                                       |
-| `customPropertiesExtractor` | `(req: Request) => StringIndexed` | `undefined`                        | No          | Return value is merged into Bolt event `customProperties`2.             |
-| `beforeProcess`             | `BeforeProcessFn`                 | `undefined`                        | No          | Intercept requests before Bolt processing.                              |
-| `ackTimeoutMs`              | `number`                          | `3001`                             | No          | Milliseconds to wait for `ack()` before returning a timeout error.      |
-| `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`      | No3         | Your app's client ID (required for OAuth).                              |
-| `clientSecret`              | `string`                          | `process.env.SLACK_CLIENT_SECRET`  | No3         | Your app's client secret (required for OAuth).                          |
-| `stateSecret`               | `string`                          | `process.env.SLACK_STATE_SECRET`   | No3         | Secret for OAuth CSRF state parameter.                                  |
-| `scopes`                    | `string[]`                        | `ScopesResolver`                   | `undefined` | No                                                                      | Bot scopes to request during OAuth. Can be a function for dynamic scopes. |
-| `redirectUri`               | `string`                          | `undefined`                        | No          | Redirect URI registered with your Slack app.                            |
-| `installationStore`         | `InstallationStore`2              | `undefined`                        | No4         | Persistent storage backend for OAuth installations.                     |
-| `installerOptions`          | `VercelInstallerOptions`          | `{}`                               | No          | Advanced OAuth options (user scopes, direct install, state store, etc). |
+| Name                        | Type                              | Default Value                      | Required       | Description                                                             |
+| --------------------------- | --------------------------------- | ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| `signingSecret`             | `string`                          | `process.env.SLACK_SIGNING_SECRET` | No<sup>1</sup> | Signing secret for your Slack app used to verify requests.              |
+| `signatureVerification`     | `boolean`                         | `true`                             | No             | Enable or disable request signature verification.                       |
+| `logger`                    | `Logger`<sup>2</sup>              | `new ConsoleLogger()`              | No             | Logger used for diagnostics.                                            |
+| `logLevel`                  | `LogLevel`<sup>2</sup>            | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                       |
+| `customPropertiesExtractor` | `(req: Request) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>.  |
+| `beforeProcess`             | `BeforeProcessFn`                 | `undefined`                        | No             | Intercept requests before Bolt processing.                              |
+| `ackTimeoutMs`              | `number`                          | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.      |
+| `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID (required for OAuth).                              |
+| `clientSecret`              | `string`                          | `process.env.SLACK_CLIENT_SECRET`  | No<sup>3</sup> | Your app's client secret (required for OAuth).                          |
+| `stateSecret`               | `string`                          | `process.env.SLACK_STATE_SECRET`   | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                  |
+| `scopes`                    | `string[] \| ScopesResolver`      | `undefined`                        | No             | Bot scopes for OAuth. Can be a function for dynamic scopes.             |
+| `redirectUri`               | `string`                          | `undefined`                        | No             | Redirect URI registered with your Slack app.                            |
+| `installationStore`         | `InstallationStore`<sup>2</sup>   | `undefined`                        | No<sup>4</sup> | Persistent storage backend for OAuth installations.                     |
+| `installerOptions`          | `VercelInstallerOptions`          | `{}`                               | No             | Advanced OAuth options (user scopes, direct install, state store, etc). |
 
-1 Optional if `process.env.SLACK_SIGNING_SECRET` is provided.
+<sup>1</sup> Optional if `process.env.SLACK_SIGNING_SECRET` is provided.
 
-2 Provided by the `[@slack/bolt](https://www.npmjs.com/package/@slack/bolt)` library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
+<sup>2</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
 
-3 Required for OAuth. Read from `process.env` automatically if not provided.
+<sup>3</sup> Required for OAuth. Read from `process.env` automatically if not provided.
 
-4 Required for OAuth in serverless environments -- the default in-memory store does not persist across cold starts.
+<sup>4</sup> Required for OAuth in serverless environments -- the default in-memory store does not persist across cold starts.
 
 ### `createHandler`
 
@@ -91,12 +91,12 @@ export const POST = createHandler(app, receiver);
 
 #### Parameters
 
-| Name       | Type             | Required | Description                                                  |
-| ---------- | ---------------- | -------- | ------------------------------------------------------------ |
-| `app`      | `App`1           | Yes      | Your Bolt app                                                |
-| `receiver` | `VercelReceiver` | Yes      | The Vercel receiver instance used to process Slack requests. |
+| Name       | Type              | Required | Description                                                  |
+| ---------- | ----------------- | -------- | ------------------------------------------------------------ |
+| `app`      | `App`<sup>1</sup> | Yes      | Your Bolt app                                                |
+| `receiver` | `VercelReceiver`  | Yes      | The Vercel receiver instance used to process Slack requests. |
 
-1 Provided by the `[@slack/bolt](https://www.npmjs.com/package/@slack/bolt)` library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
+<sup>1</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
 
 ## OAuth (Multi-Tenant Apps)
 
@@ -253,12 +253,12 @@ Place a [Slack app manifest](https://api.slack.com/reference/manifests) in your 
 
 Add the following to your Vercel project:
 
-| Variable                     | Required | Description                                                                                                                                                                                                     |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SLACK_CONFIGURATION_TOKEN`  | Yes      | App configuration token. Generate at [https://api.slack.com/apps](https://api.slack.com/apps). Expires after 12 hours.                                                                                          |
-| `SLACK_CONFIG_REFRESH_TOKEN` | No       | Refresh token for automatic rotation of expired configuration tokens. Provided alongside the configuration token. Strongly recommended.                                                                         |
-| `VERCEL_API_TOKEN`           | Yes      | Vercel API token with write access. Create at [https://vercel.com/account/settings/tokens](https://vercel.com/account/settings/tokens)                                                                          |
-| `SLACK_SERVICE_TOKEN`        | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See [https://docs.slack.dev/authentication/tokens/#service](https://docs.slack.dev/authentication/tokens/#service) |
+| Variable                     | Required | Description                                                                                                                                            |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SLACK_CONFIGURATION_TOKEN`  | Yes      | App configuration token. Generate at https://api.slack.com/apps. Expires after 12 hours.                                                               |
+| `SLACK_CONFIG_REFRESH_TOKEN` | No       | Refresh token for automatic rotation of expired configuration tokens. Provided alongside the configuration token. Strongly recommended.                |
+| `VERCEL_API_TOKEN`           | Yes      | Vercel API token with write access. Create at https://vercel.com/account/settings/tokens                                                               |
+| `SLACK_SERVICE_TOKEN`        | No       | Service token for auto-installing the app. Without this, the app must be installed manually. See https://docs.slack.dev/authentication/tokens/#service |
 
 You must also enable **Automatically expose System Environment Variables** in your Vercel project settings.
 
@@ -304,19 +304,12 @@ All Vercel and Slack environment variables are read automatically. You can overr
 
 ### Request Interception
 
-The `beforeProcess` hook lets you intercept requests after signature verification but before Bolt processes them. Return a `Response` to short-circuit processing, or `undefined` to continue normally.
-
-This is useful for:
-
-- Routing certain workspaces to different backends
-- Custom logging or metrics
-- Early rejection based on request content
+The `beforeProcess` hook lets you intercept requests after signature verification but before Bolt processes them. Return a `Response` to short-circuit, or `undefined` to continue normally.
 
 ```typescript
 const receiver = new VercelReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
   beforeProcess: async (req, body) => {
-    // Forward enterprise workspaces to a dedicated service
     if (body.team_id === "T_ENTERPRISE") {
       return fetch("https://enterprise-handler.example.com/slack", {
         method: "POST",
@@ -329,7 +322,7 @@ const receiver = new VercelReceiver({
 });
 ```
 
-> **Note:** `beforeProcess` is not called for `url_verification` challenge requests, which are handled automatically.
+> **Note:** `beforeProcess` is not called for `url_verification` challenges.
 
 ### Dynamic Scopes
 
