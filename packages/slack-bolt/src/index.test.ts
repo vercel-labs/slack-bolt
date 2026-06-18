@@ -219,6 +219,50 @@ describe("VercelReceiver", () => {
         ),
       ).rejects.toThrow("OAuth is not configured");
     });
+
+    it("should accept scopes as a static array", () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+        stateSecret: "ssec",
+        scopes: ["chat:write", "channels:read"],
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+      });
+
+      expect(receiver.installer).toBeDefined();
+      expect(receiver).toHaveProperty("installUrlOptions");
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      expect((receiver as any).installUrlOptions?.scopes).toEqual([
+        "chat:write",
+        "channels:read",
+      ]);
+    });
+
+    it("should accept scopes as a resolver function", () => {
+      const scopesResolver = vi.fn().mockResolvedValue(["chat:write"]);
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+        stateSecret: "ssec",
+        scopes: scopesResolver,
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+      });
+
+      expect(receiver.installer).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      expect((receiver as any).scopesResolver).toBe(scopesResolver);
+      // When using a resolver, installUrlOptions.scopes starts empty
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      expect((receiver as any).installUrlOptions?.scopes).toEqual([]);
+    });
   });
 
   describe("getLogger", () => {
@@ -1279,6 +1323,126 @@ describe("VercelReceiver", () => {
 
         // Late ack should throw an error indicating it was too late
         expect(ackError).toBeInstanceOf(ReceiverMultipleAckError);
+      });
+    });
+
+    describe("beforeProcess", () => {
+      it("should call beforeProcess with request and parsed body", async () => {
+        const beforeProcess = vi.fn();
+        const receiver = new VercelReceiver({
+          signingSecret: "test-secret",
+          signatureVerification: false,
+          beforeProcess,
+        });
+
+        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        vi.spyOn(receiver as any, "handleSlackEvent").mockResolvedValue(
+          new Response("", { status: 200 }),
+        );
+
+        const handler = receiver.toHandler();
+        const payload = { type: "event_callback", team_id: "T123" };
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify(payload),
+          headers: { "content-type": "application/json" },
+        });
+
+        await handler(request);
+
+        expect(beforeProcess).toHaveBeenCalledTimes(1);
+        expect(beforeProcess).toHaveBeenCalledWith(
+          expect.any(Request),
+          payload,
+        );
+      });
+
+      it("should short-circuit when beforeProcess returns a Response", async () => {
+        const customResponse = new Response("intercepted", { status: 202 });
+        const beforeProcess = vi.fn().mockResolvedValue(customResponse);
+        const receiver = new VercelReceiver({
+          signingSecret: "test-secret",
+          signatureVerification: false,
+          beforeProcess,
+        });
+
+        const handleSlackEventSpy = vi.spyOn(
+          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          receiver as any,
+          "handleSlackEvent",
+        );
+
+        const handler = receiver.toHandler();
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify({ type: "event_callback" }),
+          headers: { "content-type": "application/json" },
+        });
+
+        const response = await handler(request);
+
+        expect(response.status).toBe(202);
+        expect(await response.text()).toBe("intercepted");
+        expect(handleSlackEventSpy).not.toHaveBeenCalled();
+      });
+
+      it("should continue to handleSlackEvent when beforeProcess returns void", async () => {
+        const beforeProcess = vi.fn().mockResolvedValue(undefined);
+        const receiver = new VercelReceiver({
+          signingSecret: "test-secret",
+          signatureVerification: false,
+          beforeProcess,
+        });
+
+        const handleSlackEventSpy = vi
+          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          .spyOn(receiver as any, "handleSlackEvent")
+          .mockResolvedValue(new Response("", { status: 200 }));
+
+        const handler = receiver.toHandler();
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify({ type: "event_callback" }),
+          headers: { "content-type": "application/json" },
+        });
+
+        await handler(request);
+
+        expect(beforeProcess).toHaveBeenCalled();
+        expect(handleSlackEventSpy).toHaveBeenCalled();
+      });
+
+      it("should provide a request with readable body to beforeProcess", async () => {
+        let capturedBody: string | undefined;
+        const beforeProcess = vi
+          .fn()
+          .mockImplementation(async (req: Request) => {
+            capturedBody = await req.text();
+            return undefined;
+          });
+
+        const receiver = new VercelReceiver({
+          signingSecret: "test-secret",
+          signatureVerification: false,
+          beforeProcess,
+        });
+
+        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        vi.spyOn(receiver as any, "handleSlackEvent").mockResolvedValue(
+          new Response("", { status: 200 }),
+        );
+
+        const handler = receiver.toHandler();
+        const payload = { type: "event_callback", team_id: "T123" };
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify(payload),
+          headers: { "content-type": "application/json" },
+        });
+
+        await handler(request);
+
+        expect(capturedBody).toBe(JSON.stringify(payload));
       });
     });
   });
