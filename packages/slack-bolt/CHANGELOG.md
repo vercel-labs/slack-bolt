@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.5.1
+
+### Patch Changes
+
+- cf16f99: Adding parsed body to customPropertiesExtractor params
+
 ## 1.5.0
 
 ### Minor Changes
