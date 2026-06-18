@@ -57,7 +57,7 @@ export { app, receiver };
 | `signatureVerification`     | `boolean`                         | `true`                             | No             | Enable or disable request signature verification.                       |
 | `logger`                    | `Logger`<sup>2</sup>              | `new ConsoleLogger()`              | No             | Logger used for diagnostics.                                            |
 | `logLevel`                  | `LogLevel`<sup>2</sup>            | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                       |
-| `customPropertiesExtractor` | `(req: Request) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>.  |
+| `customPropertiesExtractor` | `(req: Request, body: StringIndexed) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>.  |
 | `beforeProcess`             | `BeforeProcessFn`                 | `undefined`                        | No             | Intercept requests before Bolt processing.                              |
 | `ackTimeoutMs`              | `number`                          | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.      |
 | `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID (required for OAuth).                              |
