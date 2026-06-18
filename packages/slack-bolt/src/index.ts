@@ -39,10 +39,33 @@ export type VercelHandler = (req: Request) => Promise<Response>;
 
 /**
  * A function that can intercept requests before they are processed by Bolt.
- * Return a Response to short-circuit processing, or void/undefined to continue.
- * @param req - The original request
+ * Return a Response to short-circuit processing, or undefined to continue.
+ *
+ * Called after signature verification and body parsing, but before Bolt event handling.
+ * Note: This hook is NOT called for `url_verification` challenge requests, which are
+ * handled automatically before `beforeProcess` is invoked.
+ *
+ * @param req - A new Request with the raw body (the original request body was consumed during parsing)
  * @param body - The parsed request body
- * @returns A Response to short-circuit, or void to continue normal processing
+ * @returns A Response to short-circuit processing, or undefined to continue to Bolt
+ *
+ * @example
+ * ```typescript
+ * const receiver = new VercelReceiver({
+ *   signingSecret: process.env.SLACK_SIGNING_SECRET,
+ *   beforeProcess: async (req, body) => {
+ *     // Forward certain workspaces to a different service
+ *     if (body.team_id === 'T_ENTERPRISE') {
+ *       return fetch('https://enterprise-handler.example.com/slack', {
+ *         method: 'POST',
+ *         body: await req.text(),
+ *         headers: req.headers,
+ *       });
+ *     }
+ *     // Return undefined to continue normal Bolt processing
+ *   },
+ * });
+ * ```
  */
 export type BeforeProcessFn = (
   req: Request,
@@ -120,8 +143,10 @@ export interface VercelReceiverOptions {
   /**
    * A function that can intercept requests before they are processed by Bolt.
    * Return a Response to short-circuit processing (e.g., to forward to an external service),
-   * or void/undefined to continue normal Bolt processing.
-   * Called after signature verification but before event handling.
+   * or undefined to continue normal Bolt processing.
+   *
+   * Called after signature verification and body parsing, but before Bolt event handling.
+   * Note: Not called for `url_verification` challenge requests.
    * @default undefined
    */
   beforeProcess?: BeforeProcessFn;
