@@ -136,10 +136,14 @@ export interface VercelReceiverOptions {
   logLevel?: LogLevel;
   /**
    * A function to extract custom properties from incoming events.
+   * Called after body parsing, so the parsed body is available.
    * @default undefined
    * @returns An object with custom properties.
    */
-  customPropertiesExtractor?: (req: Request) => StringIndexed;
+  customPropertiesExtractor?: (
+    req: Request,
+    body: StringIndexed,
+  ) => StringIndexed;
   /**
    * A function that can intercept requests before they are processed by Bolt.
    * Return a Response to short-circuit processing (e.g., to forward to an external service),
@@ -282,7 +286,10 @@ export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
   private readonly logger: Logger;
-  private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
+  private readonly customPropertiesExtractor?: (
+    req: Request,
+    body: StringIndexed,
+  ) => StringIndexed;
   private readonly beforeProcess?: BeforeProcessFn;
   private readonly ackTimeoutMs: number;
   private app?: App;
@@ -702,7 +709,7 @@ export class VercelReceiver implements Receiver {
     request: Request;
   }): ReceiverEvent {
     const customProperties = this.customPropertiesExtractor
-      ? this.customPropertiesExtractor(request)
+      ? this.customPropertiesExtractor(request, body)
       : {};
 
     const retryNum = headers.get(SLACK_RETRY_NUM_HEADER) || "0";
