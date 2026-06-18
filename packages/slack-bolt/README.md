@@ -1,7 +1,7 @@
 # @vercel/slack-bolt
 
-[npm version](https://www.npmjs.com/package/@vercel/slack-bolt)
-[npm downloads](https://www.npmjs.com/package/@vercel/slack-bolt)
+[![npm version](https://img.shields.io/npm/v/%40vercel%2Fslack-bolt)](https://www.npmjs.com/package/@vercel/slack-bolt)
+[![npm downloads](https://img.shields.io/npm/dm/%40vercel%2Fslack-bolt?label=downloads)](https://www.npmjs.com/package/@vercel/slack-bolt)
 
 A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [Fluid Compute](https://vercel.com/docs/fluid-compute).
 
