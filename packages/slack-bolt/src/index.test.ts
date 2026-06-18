@@ -263,6 +263,75 @@ describe("VercelReceiver", () => {
       // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
       expect((receiver as any).installUrlOptions?.scopes).toEqual([]);
     });
+
+    it("should call scopes resolver with request during handleInstall", async () => {
+      const scopesResolver = vi
+        .fn()
+        .mockResolvedValue(["chat:write", "users:read"]);
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+        stateSecret: "ssec",
+        scopes: scopesResolver,
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+      });
+
+      // Mock the installer's handleInstallPath to capture the options passed
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      let capturedInstallUrlOptions: any;
+      vi.spyOn(receiver.installer!, "handleInstallPath").mockImplementation(
+        async (_req, res, _pathOpts, urlOpts) => {
+          capturedInstallUrlOptions = urlOpts;
+          res.writeHead(302, { Location: "https://slack.com/oauth" });
+          res.end();
+        },
+      );
+
+      const request = new Request("https://example.com/install?team=T123");
+      await receiver.handleInstall(request);
+
+      expect(scopesResolver).toHaveBeenCalledTimes(1);
+      expect(scopesResolver).toHaveBeenCalledWith(expect.any(Request));
+      expect(capturedInstallUrlOptions?.scopes).toEqual([
+        "chat:write",
+        "users:read",
+      ]);
+    });
+
+    it("should use static scopes array without calling resolver", async () => {
+      const receiver = new VercelReceiver({
+        signingSecret: "test-secret",
+        clientId: "cid",
+        clientSecret: "csec",
+        stateSecret: "ssec",
+        scopes: ["chat:write"],
+        installationStore: {
+          storeInstallation: async () => {},
+          fetchInstallation: async () => ({}) as never,
+        },
+      });
+
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      let capturedInstallUrlOptions: any;
+      vi.spyOn(receiver.installer!, "handleInstallPath").mockImplementation(
+        async (_req, res, _pathOpts, urlOpts) => {
+          capturedInstallUrlOptions = urlOpts;
+          res.writeHead(302, { Location: "https://slack.com/oauth" });
+          res.end();
+        },
+      );
+
+      const request = new Request("https://example.com/install");
+      await receiver.handleInstall(request);
+
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      expect((receiver as any).scopesResolver).toBeUndefined();
+      expect(capturedInstallUrlOptions?.scopes).toEqual(["chat:write"]);
+    });
   });
 
   describe("getLogger", () => {
