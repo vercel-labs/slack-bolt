@@ -9,6 +9,12 @@ updates:
     groups:
       root-dev-dependencies:
         dependency-type: "development"
+    # Major bumps are reviewed/applied manually so breaking changes never land
+    # in an automated dependency PR.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
@@ -23,6 +29,10 @@ updates:
       all-dependencies:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
@@ -37,6 +47,10 @@ updates:
       example-dependencies:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     open-pull-requests-limit: 1
     reviewers:
       - "malewis5"
