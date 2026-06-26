@@ -16,21 +16,22 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.GH_TOKEN_PULL_REQUESTS }}
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v6
         name: Install pnpm
@@ -43,12 +44,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Create Release PR or Publish Packages
-        uses: changesets/action@63a615b9cd06ba9a3e6d13796c7fbcb080a60a0b # v1.8.0
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           publish: pnpm release
           version: pnpm version-packages
           commit: "chore: update package versions"
           title: "chore: update package versions"
+          commitMode: github-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_VERCEL_TOKEN_ELEVATED }}

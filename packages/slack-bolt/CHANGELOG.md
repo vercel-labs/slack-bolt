@@ -1,5 +1,21 @@
 # @vercel/slack-bolt
 
+## 1.5.1
+
+### Patch Changes
+
+- cf16f99: Adding parsed body to customPropertiesExtractor params
+
+## 1.5.0
+
+### Minor Changes
+
+- 3d56462: Adding before process function + dynamic scope resolution
+
+### Patch Changes
+
+- fd4a7c3: bump deps
+
 ## 1.4.3
 
 ### Patch Changes

@@ -38,6 +38,49 @@ import { createResponseCapture, toIncomingMessage } from "./oauth-adapters";
 export type VercelHandler = (req: Request) => Promise<Response>;
 
 /**
+ * A function that can intercept requests before they are processed by Bolt.
+ * Return a Response to short-circuit processing, or undefined to continue.
+ *
+ * Called after signature verification and body parsing, but before Bolt event handling.
+ * Note: This hook is NOT called for `url_verification` challenge requests, which are
+ * handled automatically before `beforeProcess` is invoked.
+ *
+ * @param req - A new Request with the raw body (the original request body was consumed during parsing)
+ * @param body - The parsed request body
+ * @returns A Response to short-circuit processing, or undefined to continue to Bolt
+ *
+ * @example
+ * ```typescript
+ * const receiver = new VercelReceiver({
+ *   signingSecret: process.env.SLACK_SIGNING_SECRET,
+ *   beforeProcess: async (req, body) => {
+ *     // Forward certain workspaces to a different service
+ *     if (body.team_id === 'T_ENTERPRISE') {
+ *       return fetch('https://enterprise-handler.example.com/slack', {
+ *         method: 'POST',
+ *         body: await req.text(),
+ *         headers: req.headers,
+ *       });
+ *     }
+ *     // Return undefined to continue normal Bolt processing
+ *   },
+ * });
+ * ```
+ */
+export type BeforeProcessFn = (
+  req: Request,
+  body: StringIndexed,
+) => Promise<Response | undefined> | Response | undefined;
+
+/**
+ * A function that resolves scopes dynamically based on the request.
+ * Useful for requesting different scopes based on team or user context.
+ * @param req - The original request
+ * @returns The scopes to request
+ */
+export type ScopesResolver = (req: Request) => Promise<string[]> | string[];
+
+/**
  * Configuration options for the VercelReceiver.
  * @property signingSecret - The signing secret for the Slack app.
  * @property signatureVerification - If true, verifies the Slack request signature.
@@ -93,10 +136,24 @@ export interface VercelReceiverOptions {
   logLevel?: LogLevel;
   /**
    * A function to extract custom properties from incoming events.
+   * Called after body parsing, so the parsed body is available.
    * @default undefined
    * @returns An object with custom properties.
    */
-  customPropertiesExtractor?: (req: Request) => StringIndexed;
+  customPropertiesExtractor?: (
+    req: Request,
+    body: StringIndexed,
+  ) => StringIndexed;
+  /**
+   * A function that can intercept requests before they are processed by Bolt.
+   * Return a Response to short-circuit processing (e.g., to forward to an external service),
+   * or undefined to continue normal Bolt processing.
+   *
+   * Called after signature verification and body parsing, but before Bolt event handling.
+   * Note: Not called for `url_verification` challenge requests.
+   * @default undefined
+   */
+  beforeProcess?: BeforeProcessFn;
   /**
    * The timeout in milliseconds for event acknowledgment.
    * @default 3001
@@ -122,8 +179,10 @@ export interface VercelReceiverOptions {
   stateSecret?: string;
   /**
    * The bot scopes to request during the OAuth flow.
+   * Can be a static array or a function that resolves scopes dynamically
+   * based on the request (e.g., to request different scopes for different teams).
    */
-  scopes?: string[];
+  scopes?: string[] | ScopesResolver;
   /**
    * The redirect URI registered with your Slack app for OAuth callbacks.
    */
@@ -227,12 +286,17 @@ export class VercelReceiver implements Receiver {
   private readonly signingSecret: string;
   private readonly signatureVerification: boolean;
   private readonly logger: Logger;
-  private readonly customPropertiesExtractor?: (req: Request) => StringIndexed;
+  private readonly customPropertiesExtractor?: (
+    req: Request,
+    body: StringIndexed,
+  ) => StringIndexed;
+  private readonly beforeProcess?: BeforeProcessFn;
   private readonly ackTimeoutMs: number;
   private app?: App;
 
   public installer?: InstallProvider;
   private installUrlOptions?: InstallURLOptions;
+  private scopesResolver?: ScopesResolver;
   private installCallbackOptions?: CallbackOptions;
   private installPathOptions?: InstallPathOptions;
   private stateVerification?: boolean;
@@ -262,6 +326,7 @@ export class VercelReceiver implements Receiver {
     logger,
     logLevel = LogLevel.INFO,
     customPropertiesExtractor,
+    beforeProcess,
     ackTimeoutMs = ACK_TIMEOUT_MS,
     clientId = process.env.SLACK_CLIENT_ID,
     clientSecret = process.env.SLACK_CLIENT_SECRET,
@@ -282,6 +347,7 @@ export class VercelReceiver implements Receiver {
       logLevel,
     );
     this.customPropertiesExtractor = customPropertiesExtractor;
+    this.beforeProcess = beforeProcess;
     this.ackTimeoutMs = ackTimeoutMs;
 
     this.stateVerification = installerOptions.stateVerification;
@@ -313,12 +379,23 @@ export class VercelReceiver implements Receiver {
         authorizationUrl: installerOptions.authorizationUrl,
       });
 
-      this.installUrlOptions = {
-        scopes: scopes ?? [],
-        userScopes: installerOptions.userScopes,
-        metadata: installerOptions.metadata,
-        redirectUri,
-      };
+      // If scopes is a function, store it separately for dynamic resolution
+      if (typeof scopes === "function") {
+        this.scopesResolver = scopes;
+        this.installUrlOptions = {
+          scopes: [], // Will be resolved dynamically in handleInstall
+          userScopes: installerOptions.userScopes,
+          metadata: installerOptions.metadata,
+          redirectUri,
+        };
+      } else {
+        this.installUrlOptions = {
+          scopes: scopes ?? [],
+          userScopes: installerOptions.userScopes,
+          metadata: installerOptions.metadata,
+          redirectUri,
+        };
+      }
       this.installCallbackOptions = installerOptions.callbackOptions ?? {};
       this.installPathOptions = installerOptions.installPathOptions ?? {};
     }
@@ -367,11 +444,21 @@ export class VercelReceiver implements Receiver {
     const nodeReq = toIncomingMessage(req);
     const capture = createResponseCapture();
 
+    // Resolve scopes dynamically if a resolver function was provided
+    let installUrlOptions = this.installUrlOptions;
+    if (this.scopesResolver && installUrlOptions) {
+      const resolvedScopes = await this.scopesResolver(req);
+      installUrlOptions = {
+        ...installUrlOptions,
+        scopes: resolvedScopes,
+      };
+    }
+
     await this.installer.handleInstallPath(
       nodeReq,
       capture,
       this.installPathOptions,
-      this.installUrlOptions,
+      installUrlOptions,
     );
 
     return capture.toResponse();
@@ -428,6 +515,21 @@ export class VercelReceiver implements Receiver {
         if (body.type === "url_verification") {
           this.logger.debug("Handling URL verification challenge");
           return Response.json({ challenge: body.challenge });
+        }
+
+        // Allow beforeProcess to intercept and short-circuit processing.
+        // We pass a new Request with the raw body since req.text() was already consumed.
+        if (this.beforeProcess) {
+          const reqWithBody = new Request(req.url, {
+            method: req.method,
+            headers: req.headers,
+            body: rawBody,
+          });
+          const interceptResponse = await this.beforeProcess(reqWithBody, body);
+          if (interceptResponse) {
+            this.logger.debug("Request intercepted by beforeProcess");
+            return interceptResponse;
+          }
         }
 
         return await this.handleSlackEvent(req, body);
@@ -607,7 +709,7 @@ export class VercelReceiver implements Receiver {
     request: Request;
   }): ReceiverEvent {
     const customProperties = this.customPropertiesExtractor
-      ? this.customPropertiesExtractor(request)
+      ? this.customPropertiesExtractor(request, body)
       : {};
 
     const retryNum = headers.get(SLACK_RETRY_NUM_HEADER) || "0";
