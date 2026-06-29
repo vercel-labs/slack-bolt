@@ -71,9 +71,9 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
-    "@biomejs/biome": "2.4.16",
+    "@biomejs/biome": "2.5.1",
     "@types/node": "^25.9.1",
-    "@vitest/coverage-v8": "4.1.7",
+    "@vitest/coverage-v8": "4.1.9",
     "tsdown": "^0.22.1",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
