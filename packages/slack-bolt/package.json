@@ -64,19 +64,20 @@
   "dependencies": {
     "@slack/logger": "^4.0.1",
     "@slack/oauth": "3.0.5",
-    "@vercel/functions": "^3.7.3",
+    "@vercel/functions": "^3.7.4",
     "commander": "^14.0.3",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.4",
-    "@biomejs/biome": "2.5.1",
-    "@types/node": "^25.9.1",
+    "@biomejs/biome": "2.5.2",
+    "@types/node": "^25.9.4",
     "@vitest/coverage-v8": "4.1.9",
     "tsdown": "^0.22.3",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
+    "vite": "^7.3.6",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
