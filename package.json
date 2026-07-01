@@ -14,15 +14,12 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.1",
+    "@biomejs/biome": "2.5.2",
     "@changesets/cli": "^2.31.0",
     "husky": "^9.1.7",
     "turbo": "latest"
   },
   "pnpm": {
-    "overrides": {
-      "vite": "7.3.2"
-    },
     "onlyBuiltDependencies": [
       "esbuild"
     ]
