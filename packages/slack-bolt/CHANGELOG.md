@@ -1,5 +1,15 @@
 # @vercel/slack-bolt
 
+## 1.6.0
+
+### Minor Changes
+
+- 9cd5951: Raise minimum supported Node.js version to >=22.0.0 (Node 20 is EOL). CI now tests against Node 22, 24, and 26.
+
+### Patch Changes
+
+- 9616b3d: Bump `@vercel/functions`, `@types/node`, and dev tooling (`@biomejs/biome`, `vitest`, `tsdown`, `tsx`). Add `vite` ^7.3.6 as a direct devDependency to resolve security advisories, replacing the previous root-level pnpm override.
+
 ## 1.5.1
 
 ### Patch Changes
