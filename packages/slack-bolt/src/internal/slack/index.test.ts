@@ -549,19 +549,22 @@ describe("installApp", () => {
     "app_approval_request_eligible",
     "app_approval_request_pending",
     "app_approval_request_denied",
-  ] as const)("maps Slack error '%s' to the corresponding status", async (errorCode) => {
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({ ok: false, error: errorCode }),
-    );
+  ] as const)(
+    "maps Slack error '%s' to the corresponding status",
+    async (errorCode) => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: errorCode }),
+      );
 
-    const result = await installApp({
-      serviceToken: "tok",
-      appId: "A1",
-      botScopes: [],
-    });
+      const result = await installApp({
+        serviceToken: "tok",
+        appId: "A1",
+        botScopes: [],
+      });
 
-    expect(result.status).toBe(errorCode);
-  });
+      expect(result.status).toBe(errorCode);
+    },
+  );
 
   it("propagates network errors from fetch", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
