@@ -1,5 +1,12 @@
 # @vercel/slack-bolt
 
+## 1.6.1
+
+### Patch Changes
+
+- 3adddf0: Bump Next.js
+- 9da1677: bump deps
+
 ## 1.6.0
 
 ### Minor Changes
