@@ -143,7 +143,22 @@ export const installationStore: InstallationStore = {
           query.teamId || `enterprise:${query.enterpriseId}`;
         throw new Error(`No installation found for team ${teamIdentifier}`);
       }
-      return decryptTokens(data);
+      const installation = decryptTokens(data);
+      if (query.userId) {
+        // The team-level installation stores the installer's user token. When a
+        // different user (without their own stored installation) triggers this
+        // fallback, returning that token would leak the installer's credentials
+        // and cause cross-user authorization confusion. Strip user token fields
+        // so the fallback only provides bot-level data.
+        installation.user = {
+          ...installation.user,
+          token: undefined,
+          refreshToken: undefined,
+          expiresAt: undefined,
+          scopes: undefined,
+        };
+      }
+      return installation;
     } catch (error) {
       if (
         error instanceof Error &&
