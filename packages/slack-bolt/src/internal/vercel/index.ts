@@ -4,6 +4,7 @@ import type {
   AddEnvironmentVariablesResult,
   CreateProjectEnv,
   EnvironmentVariable,
+  ListBranchesResponse,
 } from "./types";
 
 export async function getProject({
@@ -174,6 +175,13 @@ export async function createDeployment({
   return { id: data.id, url: data.url };
 }
 
+/**
+ * Safety bound on pagination. Callers use the returned set to decide which
+ * Slack apps to DELETE, so a partial set must never be returned silently:
+ * if this bound is hit, we throw instead.
+ */
+const MAX_BRANCH_PAGES = 100;
+
 export async function getActiveBranches({
   projectId,
   token,
@@ -183,23 +191,56 @@ export async function getActiveBranches({
   token: string;
   teamId?: string;
 }): Promise<Set<string>> {
-  const params = new URLSearchParams({ active: "1", limit: "100" });
-  if (teamId) params.set("teamId", teamId);
+  const branches = new Set<string>();
+  const seenCursors = new Set<string>();
+  let until: string | undefined;
 
-  const response = await fetch(
-    `https://api.vercel.com/v5/projects/${encodeURIComponent(projectId)}/branches?${params}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
+  for (let page = 0; page < MAX_BRANCH_PAGES; page++) {
+    const params = new URLSearchParams({ active: "1", limit: "100" });
+    if (teamId) params.set("teamId", teamId);
+    if (until) params.set("until", until);
 
-  if (!response.ok) {
-    throw await HTTPError.fromResponse(
-      "Failed to fetch active branches",
-      response,
+    const response = await fetch(
+      `https://api.vercel.com/v5/projects/${encodeURIComponent(projectId)}/branches?${params}`,
+      { headers: { Authorization: `Bearer ${token}` } },
     );
+
+    if (!response.ok) {
+      throw await HTTPError.fromResponse(
+        "Failed to fetch active branches",
+        response,
+      );
+    }
+
+    const data: ListBranchesResponse = await response.json();
+    const pageBranches = data.branches ?? [];
+    for (const b of pageBranches) {
+      branches.add(b.branch);
+    }
+
+    // The v5 branches endpoint returns a top-level `until` cursor when more
+    // pages exist; it is absent on the last page.
+    const next =
+      data.until !== undefined && data.until !== null
+        ? String(data.until)
+        : undefined;
+
+    if (!next || pageBranches.length === 0) {
+      return branches;
+    }
+
+    if (seenCursors.has(next)) {
+      throw new Error(
+        "Failed to fetch active branches: pagination cursor repeated, aborting to avoid returning a partial branch list",
+      );
+    }
+    seenCursors.add(next);
+    until = next;
   }
 
-  const data: { branches?: { branch: string }[] } = await response.json();
-  return new Set(data.branches?.map((b) => b.branch) ?? []);
+  throw new Error(
+    `Failed to fetch active branches: exceeded ${MAX_BRANCH_PAGES} pages, aborting to avoid returning a partial branch list`,
+  );
 }
 
 export async function getEnvironmentVariables({
