@@ -8,8 +8,11 @@
         "SLACK_*",
         "MANIFEST_PATH",
         "SLACK_SIGNING_SECRET",
-        "UPSTASH_REDIS_REST_URL",
-        "UPSTASH_REDIS_REST_TOKEN"
+        "REDIS_URL",
+        "KV_REST_API_URL",
+        "KV_REST_API_READ_ONLY_TOKEN",
+        "KV_URL",
+        "KV_REST_API_TOKEN"
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
