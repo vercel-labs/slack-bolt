@@ -128,7 +128,7 @@ describe("updateProtectionBypass", () => {
     );
   });
 
-  it("should include response body in error message when present", async () => {
+  it("should include only the Vercel error code in the error message, never error.message", async () => {
     mockFetch.mockResolvedValueOnce(
       errorResponse(403, "Forbidden", {
         error: { code: "forbidden", message: "Not allowed" },
@@ -139,11 +139,52 @@ describe("updateProtectionBypass", () => {
 
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.message).toBe(
-      'Failed to update protection bypass: 403 Forbidden - {"error":{"code":"forbidden","message":"Not allowed"}}',
+      "Failed to update protection bypass: 403 Forbidden (code: forbidden)",
     );
-    expect(err.body).toBe(
-      '{"error":{"code":"forbidden","message":"Not allowed"}}',
+    expect(err.body).toBeUndefined();
+  });
+
+  it("should not leak a secret echoed in the error body into the error message or object", async () => {
+    const sentinel = "deadbeefdeadbeefdeadbeefdeadbeef";
+    mockFetch.mockResolvedValueOnce(
+      errorResponse(400, "Bad Request", {
+        error: {
+          code: "bad_request",
+          message: `Invalid secret: ${sentinel}`,
+        },
+      }),
     );
+
+    const err = await updateProtectionBypass(defaultArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.status).toBe(400);
+    expect(err.statusText).toBe("Bad Request");
+    expect(err.message).toBe(
+      "Failed to update protection bypass: 400 Bad Request (code: bad_request)",
+    );
+    expect(err.message).not.toContain(sentinel);
+    expect(err.body).toBeUndefined();
+    expect(JSON.stringify(err)).not.toContain(sentinel);
+  });
+
+  it("should not include a non-JSON error body in the error message", async () => {
+    const sentinel = "deadbeefdeadbeefdeadbeefdeadbeef";
+    mockFetch.mockResolvedValueOnce(
+      new Response(`plain text error mentioning ${sentinel}`, {
+        status: 500,
+        statusText: "Internal Server Error",
+      }),
+    );
+
+    const err = await updateProtectionBypass(defaultArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.message).toBe(
+      "Failed to update protection bypass: 500 Internal Server Error",
+    );
+    expect(err.message).not.toContain(sentinel);
+    expect(err.body).toBeUndefined();
   });
 
   it("should propagate network errors from fetch", async () => {
@@ -550,6 +591,40 @@ describe("addEnvironmentVariables", () => {
     expect(err.message).toBe(
       "Failed to create environment variables: 500 Internal Server Error",
     );
+  });
+
+  it("should not leak env var values echoed in the error body into the error message or object", async () => {
+    const sentinel = "super-secret-env-value-sentinel";
+    mockFetch.mockResolvedValueOnce(
+      errorResponse(400, "Bad Request", {
+        error: {
+          code: "invalid_env",
+          message: `Invalid value: ${sentinel}`,
+        },
+      }),
+    );
+
+    const err = await addEnvironmentVariables({
+      ...defaultArgs,
+      envs: [
+        {
+          key: "SECRET",
+          value: sentinel,
+          type: "encrypted" as const,
+          target: ["production" as const],
+        },
+      ],
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HTTPError);
+    expect(err.status).toBe(400);
+    expect(err.statusText).toBe("Bad Request");
+    expect(err.message).toBe(
+      "Failed to create environment variables: 400 Bad Request (code: invalid_env)",
+    );
+    expect(err.message).not.toContain(sentinel);
+    expect(err.body).toBeUndefined();
+    expect(JSON.stringify(err)).not.toContain(sentinel);
   });
 
   it("should propagate network errors from fetch", async () => {
