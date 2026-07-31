@@ -67,7 +67,9 @@ export async function updateProtectionBypass({
   });
 
   if (!response.ok) {
-    throw await HTTPError.fromResponse(
+    // Redacted: the request body contains the generated secret, which the
+    // error response could echo back.
+    throw await HTTPError.fromResponseRedacted(
       "Failed to update protection bypass",
       response,
     );
@@ -105,7 +107,9 @@ export async function addEnvironmentVariables({
   });
 
   if (!response.ok) {
-    throw await HTTPError.fromResponse(
+    // Redacted: the request body contains env var values (potentially
+    // secrets), which the error response could echo back.
+    throw await HTTPError.fromResponseRedacted(
       "Failed to create environment variables",
       response,
     );
@@ -252,7 +256,9 @@ export async function getEnvironmentVariable({
   });
 
   if (!response.ok) {
-    throw await HTTPError.fromResponse(
+    // Redacted: this endpoint returns a decrypted secret value, which the
+    // error response could include.
+    throw await HTTPError.fromResponseRedacted(
       "Failed to fetch environment variable",
       response,
     );
