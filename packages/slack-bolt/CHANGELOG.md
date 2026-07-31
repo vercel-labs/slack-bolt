@@ -1,5 +1,12 @@
 # @vercel/slack-bolt
 
+## 1.6.2
+
+### Patch Changes
+
+- 66a5bd3: Paginate through all active branches during orphan cleanup so live branches beyond the first 100 are never misclassified as orphaned and their Slack apps deleted
+- 13712a8: Prevent secret leakage by redacting raw Vercel API error response bodies from error messages on secret-sensitive endpoints (protection bypass and environment variable operations); only the Vercel error code is included.
+
 ## 1.6.1
 
 ### Patch Changes
