@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.6.3
+
+### Patch Changes
+
+- e1beec6: Update package dependencies.
+
 ## 1.6.2
 
 ### Patch Changes
