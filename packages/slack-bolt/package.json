@@ -64,7 +64,7 @@
   "dependencies": {
     "@slack/logger": "^4.0.1",
     "@slack/oauth": "3.0.5",
-    "@vercel/functions": "^3.9.3",
+    "@vercel/functions": "^3.9.5",
     "commander": "^14.0.3",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
@@ -73,12 +73,12 @@
     "@arethetypeswrong/cli": "^0.18.5",
     "@biomejs/biome": "2.5.8",
     "@types/node": "^25.9.5",
-    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/coverage-v8": "4.1.11",
     "tsdown": "^0.22.14",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vite": "^7.3.6",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "peerDependencies": {
     "@slack/bolt": "^4.4.0"
