@@ -7,7 +7,7 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 
 ## Getting Started
 
-Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app.
+Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template).
 
 ## Installation
 
@@ -51,22 +51,22 @@ export { app, receiver };
 
 #### Parameters
 
-| Name                        | Type                              | Default Value                      | Required       | Description                                                             |
-| --------------------------- | --------------------------------- | ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
-| `signingSecret`             | `string`                          | `process.env.SLACK_SIGNING_SECRET` | No<sup>1</sup> | Signing secret for your Slack app used to verify requests.              |
-| `signatureVerification`     | `boolean`                         | `true`                             | No             | Enable or disable request signature verification.                       |
-| `logger`                    | `Logger`<sup>2</sup>              | `new ConsoleLogger()`              | No             | Logger used for diagnostics.                                            |
-| `logLevel`                  | `LogLevel`<sup>2</sup>            | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                       |
+| Name                        | Type                                                   | Default Value                      | Required       | Description                                                             |
+| --------------------------- | ------------------------------------------------------ | ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| `signingSecret`             | `string`                                               | `process.env.SLACK_SIGNING_SECRET` | No<sup>1</sup> | Signing secret for your Slack app used to verify requests.              |
+| `signatureVerification`     | `boolean`                                              | `true`                             | No             | Enable or disable request signature verification.                       |
+| `logger`                    | `Logger`<sup>2</sup>                                   | `new ConsoleLogger()`              | No             | Logger used for diagnostics.                                            |
+| `logLevel`                  | `LogLevel`<sup>2</sup>                                 | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                       |
 | `customPropertiesExtractor` | `(req: Request, body: StringIndexed) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>.  |
-| `beforeProcess`             | `BeforeProcessFn`                 | `undefined`                        | No             | Intercept requests before Bolt processing.                              |
-| `ackTimeoutMs`              | `number`                          | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.      |
-| `clientId`                  | `string`                          | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID (required for OAuth).                              |
-| `clientSecret`              | `string`                          | `process.env.SLACK_CLIENT_SECRET`  | No<sup>3</sup> | Your app's client secret (required for OAuth).                          |
-| `stateSecret`               | `string`                          | `process.env.SLACK_STATE_SECRET`   | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                  |
-| `scopes`                    | `string[] \| ScopesResolver`      | `undefined`                        | No             | Bot scopes for OAuth. Can be a function for dynamic scopes.             |
-| `redirectUri`               | `string`                          | `undefined`                        | No             | Redirect URI registered with your Slack app.                            |
-| `installationStore`         | `InstallationStore`<sup>2</sup>   | `undefined`                        | No<sup>4</sup> | Persistent storage backend for OAuth installations.                     |
-| `installerOptions`          | `VercelInstallerOptions`          | `{}`                               | No             | Advanced OAuth options (user scopes, direct install, state store, etc). |
+| `beforeProcess`             | `BeforeProcessFn`                                      | `undefined`                        | No             | Intercept requests before Bolt processing.                              |
+| `ackTimeoutMs`              | `number`                                               | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.      |
+| `clientId`                  | `string`                                               | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID (required for OAuth).                              |
+| `clientSecret`              | `string`                                               | `process.env.SLACK_CLIENT_SECRET`  | No<sup>3</sup> | Your app's client secret (required for OAuth).                          |
+| `stateSecret`               | `string`                                               | `process.env.SLACK_STATE_SECRET`   | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                  |
+| `scopes`                    | `string[] \| ScopesResolver`                           | `undefined`                        | No             | Bot scopes for OAuth. Can be a function for dynamic scopes.             |
+| `redirectUri`               | `string`                                               | `undefined`                        | No             | Redirect URI registered with your Slack app.                            |
+| `installationStore`         | `InstallationStore`<sup>2</sup>                        | `undefined`                        | No<sup>4</sup> | Persistent storage backend for OAuth installations.                     |
+| `installerOptions`          | `VercelInstallerOptions`                               | `{}`                               | No             | Advanced OAuth options (user scopes, direct install, state store, etc). |
 
 <sup>1</sup> Optional if `process.env.SLACK_SIGNING_SECRET` is provided.
 
