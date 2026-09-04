@@ -19,16 +19,15 @@
 		"react-dom": "19.2.8"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.12",
+		"@biomejs/biome": "catalog:",
 		"@ngrok/ngrok": "^1.7.0",
 		"@slack/cli-hooks": "^2.0.0",
 		"@tailwindcss/postcss": "^4.3.3",
-		"@types/node": "^26.4.1",
+		"@types/node": "catalog:",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.7",
 		"dotenv": "^17.4.2",
 		"tailwindcss": "^4.3.3",
-		"tsx": "^4.23.13",
-		"typescript": "^7.0.2"
+		"typescript": "catalog:"
 	}
 }
