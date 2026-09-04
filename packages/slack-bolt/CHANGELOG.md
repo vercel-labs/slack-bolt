@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.6.5
+
+### Patch Changes
+
+- ad44445: Bump `zod` to ^4.5.4.
+
 ## 1.6.4
 
 ### Patch Changes
