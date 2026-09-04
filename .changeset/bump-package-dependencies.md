@@ -2,4 +2,4 @@
 "@vercel/slack-bolt": patch
 ---
 
-Update package dependencies.
+Bump `zod` to ^4.5.4.

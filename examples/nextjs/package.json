@@ -20,13 +20,11 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
-		"@ngrok/ngrok": "^1.7.0",
 		"@slack/cli-hooks": "^2.0.0",
 		"@tailwindcss/postcss": "^4.3.3",
 		"@types/node": "catalog:",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.7",
-		"dotenv": "^17.4.2",
 		"tailwindcss": "^4.3.3",
 		"typescript": "catalog:"
 	}

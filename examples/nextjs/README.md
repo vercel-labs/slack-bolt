@@ -26,13 +26,11 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
 
 ### Prepare for Local Development
 
-1. Add your `NGROK_AUTH_TOKEN` to your `.env` file
-    - You can get a free token [here](https://dashboard.ngrok.com/login?state=X1FFBj9sgtS9-oFK_2-h15Xcg0zHPjp_b9edWYrpGBVvIluUPEAarKRIjpp8ZeCHNTljTyreeslpG6n8anuSCFUkgIxwLypEGOa4Ci_cmnXYLhOfYogHWB6TzWBYUmhFLPW0XeGn789mFV_muomVd7QizkgwuYW8Vz2wW315YIK5UPywQaIGFKV8)
-2. In the terminal run `slack app link`
-3. If prompted `update the manifest source to remote` select `yes`
-4. Copy your App ID from the app you just created
-5. Select `Local` when prompted
-6. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`
+1. In the terminal run `slack app link`
+2. If prompted `update the manifest source to remote` select `yes`
+3. Copy your App ID from the app you just created
+4. Select `Local` when prompted
+5. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`
 ```json
 {
   "manifest": {
@@ -41,9 +39,9 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
   "project_id": "<project-id-added-by-slack-cli>"
 }
 ```
-7. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to 
+6. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to 
 - Select `yes` if asked "Update app settings with changes to the local manifest?"
-8. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`
+7. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`
 
 ## Deploy to Vercel
 
@@ -77,9 +75,6 @@ Every incoming request is routed to a "listener". Inside this directory, we grou
 ### Route Handler: [`src/app/api/slack/events/route.ts`](./src/app/api/slack/events/route.ts)
 
 This file defines your Next.js Route Handler that receives Slack events. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
-
-## Custom Scripts
-- `pnpm dev:tunnel`: A helper script to automatically start your Slack app with ngrok tunneling
 
 ## Notes
 - If you see a warning about `express` being externalized: `@slack/bolt` ships an Express receiver. Turbopack may analyze its static import even if you don't use it. Keeping `express` as a dependency or aliasing it to a stub resolves this during development.
