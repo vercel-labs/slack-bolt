@@ -18,11 +18,12 @@ env:
 
 jobs:
   ci:
-    name: Node.js ${{ matrix.node-version }}
+    name: Node.js ${{ matrix.node-version }} / Bolt ${{ matrix.slack-bolt }}.x
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [22, 24, 26]
+        slack-bolt: ['4', '5']
       fail-fast: false
     steps:
       - name: Checkout
@@ -53,6 +54,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Pin @slack/bolt ${{ matrix.slack-bolt }}.x
+        run: |
+          pnpm --filter @vercel/slack-bolt add -D "@slack/bolt@^${{ matrix.slack-bolt }}"
+          pnpm --filter slack-bolt-with-next add "@slack/bolt@^${{ matrix.slack-bolt }}"
 
       - name: Setup example env
         run: cp examples/nextjs/.env.example examples/nextjs/.env.local
