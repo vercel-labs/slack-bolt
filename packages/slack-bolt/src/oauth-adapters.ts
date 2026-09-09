@@ -8,6 +8,12 @@
  *
  * Targets @slack/oauth\@3.0.5 InstallProvider internals.
  * Do not upgrade without running the integration tests.
+ *
+ * Bolt 5 consumers also have @slack/oauth\@4 in their tree (Bolt's own copy).
+ * That is fine: Bolt only reads `receiver.installer.authorize` as a plain
+ * function, and the Installation/InstallationStore types are structurally
+ * identical across 3.x and 4.x. The 3.0.5 pin is deliberate until Bolt 4
+ * support is dropped, so Bolt 4 consumers keep a single copy.
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";

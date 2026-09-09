@@ -21,6 +21,15 @@ pnpm add @vercel/slack-bolt
 bun add @vercel/slack-bolt
 ```
 
+### Compatibility
+
+| Dependency    | Supported versions  |
+| ------------- | ------------------- |
+| `@slack/bolt` | `^4.4.0` or `^5.0.0` |
+| Node.js       | `>=22`              |
+
+`@slack/bolt` is a peer dependency, so declare it in your own `package.json` alongside this package. Do not install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer, and skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
+
 ## API Reference
 
 ### `VercelReceiver`
@@ -160,6 +169,15 @@ export const GET = receiver.handleCallback;
 An `installationStore` is required in serverless environments. The default in-memory store does not survive cold starts, so each new function invocation would lose all installation data.
 
 Your store must implement `storeInstallation`, `fetchInstallation`, and optionally `deleteInstallation`. Any persistent backend works (Redis, PostgreSQL, DynamoDB, etc). See the [Bolt InstallationStore docs](https://slack.dev/bolt-js/concepts/authenticating-oauth#the-installation-store) for the full interface, and the [Next.js example](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/nextjs) for a working Redis implementation.
+
+### Notes for Bolt 5
+
+The receiver's OAuth installer uses `@slack/oauth` 3.x internally, while Bolt 5 depends on `@slack/oauth` 4.x. Both are installed in a Bolt 5 app. This is safe: the `Installation`, `InstallationStore` and `Logger` types you write against are structurally identical in both versions, so an `installationStore` typed via `@slack/bolt` works unchanged. Two details differ:
+
+- `installerOptions.clientOptions` follows `@slack/web-api` 7's `WebClientOptions` (`agent`, `tls`), not 8's (`fetch`). A custom `fetch` you pass to the Bolt `App` is not used for the OAuth token exchange.
+- Errors passed to `installerOptions.callbackOptions.failure` are `@slack/oauth` 3.x instances. Check `error.code` rather than `instanceof` against classes imported from `@slack/oauth`, which would resolve to the 4.x copy.
+
+The installer will move to `@slack/oauth` 4.x in the next major release, when Bolt 4 support is dropped.
 
 ### `preview`
 
