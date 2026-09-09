@@ -11,7 +11,7 @@
 		"lint:fix": "biome format --write"
 	},
 	"dependencies": {
-		"@slack/bolt": "^4.7.3",
+		"@slack/bolt": "^5.1.0",
 		"@upstash/redis": "^1.38.3",
 		"@vercel/slack-bolt": "workspace:*",
 		"next": "16.3.4",

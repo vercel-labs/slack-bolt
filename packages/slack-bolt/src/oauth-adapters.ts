@@ -6,8 +6,8 @@
  * Do not reuse for other Node libraries without verifying which methods
  * they call.
  *
- * Targets @slack/oauth\@3.0.5 InstallProvider internals.
- * Do not upgrade without running the integration tests.
+ * Targets @slack/oauth 4.x InstallProvider internals.
+ * Do not upgrade to a new major without running the integration tests.
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";

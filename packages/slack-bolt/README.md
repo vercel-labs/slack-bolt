@@ -12,14 +12,21 @@ Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro)
 ## Installation
 
 ```bash
-npm install @vercel/slack-bolt
+npm install @vercel/slack-bolt @slack/bolt
 # or
-yarn add @vercel/slack-bolt
+yarn add @vercel/slack-bolt @slack/bolt
 # or
-pnpm add @vercel/slack-bolt
+pnpm add @vercel/slack-bolt @slack/bolt
 # or
-bun add @vercel/slack-bolt
+bun add @vercel/slack-bolt @slack/bolt
 ```
+
+`@slack/bolt` is a peer dependency. Pick the `@vercel/slack-bolt` major that matches your Bolt version:
+
+| `@vercel/slack-bolt` | `@slack/bolt` |
+| -------------------- | ------------- |
+| 2.x                  | 5.x           |
+| 1.x                  | 4.x           |
 
 ## API Reference
 

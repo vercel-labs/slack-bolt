@@ -1,3 +1,4 @@
+import { type Logger, LogLevel } from "@slack/logger";
 import { InstallProvider } from "@slack/oauth";
 import { describe, expect, it } from "vitest";
 import { createResponseCapture, toIncomingMessage } from "./oauth-adapters";
@@ -241,5 +242,117 @@ describe("InstallProvider integration", () => {
     expect(location).toContain("https://slack.com/oauth/v2/authorize");
     expect(location).toContain("client_id=test-client-id");
     expect(location).toContain("scope=chat%3Awrite");
+  });
+
+  it("handleCallback completes the OAuth flow via adapters", async () => {
+    const fetch = async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("oauth.v2.access")) {
+        return Response.json({
+          ok: true,
+          app_id: "A1",
+          authed_user: { id: "U1" },
+          scope: "chat:write",
+          token_type: "bot",
+          access_token: "xoxb-1",
+          bot_user_id: "UB",
+          team: { id: "T1", name: "t" },
+          enterprise: null,
+          is_enterprise_install: false,
+        });
+      }
+      if (u.includes("auth.test")) {
+        return Response.json({
+          ok: true,
+          bot_id: "B1",
+          url: "https://t.slack.com/",
+          user_id: "UB",
+          team_id: "T1",
+        });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    };
+    const silentLogger: Logger = {
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      setLevel() {},
+      getLevel: () => LogLevel.ERROR,
+      setName() {},
+    };
+    const stored: unknown[] = [];
+    const installer = new InstallProvider({
+      clientId: "test-client-id",
+      clientSecret: "test-client-secret",
+      stateSecret: "test-state-secret",
+      directInstall: true,
+      logger: silentLogger,
+      clientOptions: { fetch },
+      installationStore: {
+        storeInstallation: async (installation) => {
+          stored.push(installation);
+        },
+        fetchInstallation: async () => {
+          throw new Error("not implemented");
+        },
+      },
+    });
+    const installOptions = {
+      scopes: ["chat:write"],
+      redirectUri: "https://example.com/slack/oauth_redirect",
+    };
+
+    const install = createResponseCapture();
+    await installer.handleInstallPath(
+      toIncomingMessage(
+        new Request("https://example.com/slack/install", {
+          headers: { Host: "example.com" },
+        }),
+      ),
+      install,
+      {},
+      installOptions,
+    );
+    const installResponse = install.toResponse();
+    expect(installResponse.status).toBe(302);
+    const state = new URL(
+      installResponse.headers.get("location")!,
+    ).searchParams.get("state")!;
+    expect(state).toBeTruthy();
+    const cookie = installResponse.headers.get("set-cookie")!.split(";")[0];
+    expect(cookie).toMatch(/^slack-app-oauth-state=/);
+
+    const callback = createResponseCapture();
+    await installer.handleCallback(
+      toIncomingMessage(
+        new Request(
+          `https://example.com/slack/oauth_redirect?code=abc&state=${encodeURIComponent(state)}`,
+          { headers: { Host: "example.com", Cookie: cookie } },
+        ),
+      ),
+      callback,
+      {},
+    );
+    const callbackResponse = callback.toResponse();
+    expect(callbackResponse.status).toBe(200);
+    expect(callbackResponse.headers.get("content-type")).toContain("text/html");
+    expect(callbackResponse.headers.get("set-cookie")).toContain(
+      "slack-app-oauth-state=deleted",
+    );
+    expect(stored).toHaveLength(1);
+
+    const mismatch = createResponseCapture();
+    await installer.handleCallback(
+      toIncomingMessage(
+        new Request(
+          "https://example.com/slack/oauth_redirect?code=abc&state=wrong",
+          { headers: { Host: "example.com", Cookie: cookie } },
+        ),
+      ),
+      mismatch,
+      {},
+    );
+    expect(mismatch.toResponse().status).toBe(400);
   });
 });
