@@ -10,9 +10,12 @@ env:
   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
   TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
 
+# Publishes via npm trusted publishing (OIDC), the same mechanism as release.yml.
+# npm binds a trusted publisher to a workflow filename + environment, so this
+# workflow needs its own entry on npmjs.com: workflow `canary.yml`, environment `canary`.
 permissions:
-  id-token: write
   contents: read
+  id-token: write
 
 jobs:
   canary:
@@ -37,16 +40,31 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: pnpm exec turbo run build --filter=@vercel/slack-bolt
+      # Apply pending changesets so the canary carries the version the next
+      # release will have (e.g. 1.7.0-canary.*) rather than the last published
+      # one. With `commit: true` in .changeset/config.json this creates a local
+      # commit, so git needs an identity. Nothing is pushed.
+      - name: Apply pending changesets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          pnpm exec changeset version
 
+      # Use github.sha, not `git rev-parse HEAD`: the step above may have
+      # created a local commit, and the canary should name the pushed commit.
       - name: Set canary version
         working-directory: packages/slack-bolt
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          npm version "${CURRENT_VERSION}-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
+          NEXT_VERSION=$(node -p "require('./package.json').version")
+          npm version "${NEXT_VERSION}-canary.${TIMESTAMP}.${SHORT_SHA}" --no-git-tag-version
+          echo "Publishing @vercel/slack-bolt@$(node -p "require('./package.json').version")" >> "$GITHUB_STEP_SUMMARY"
+
+      # Build after versioning: tsdown inlines package.json's version into
+      # dist/cli.js for `vercel-slack --version`.
+      - name: Build
+        run: pnpm exec turbo run build --filter=@vercel/slack-bolt
 
       - name: Publish canary
         working-directory: packages/slack-bolt
