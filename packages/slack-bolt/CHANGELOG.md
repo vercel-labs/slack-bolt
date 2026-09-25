@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.7.1
+
+### Patch Changes
+
+- 662ae31: Update compatible runtime and development dependencies and refresh the locked `qs` dependency to resolve two moderate security advisories. Retain support for Bolt 4 and Bolt 5.
+
 ## 1.7.0
 
 ### Minor Changes
