@@ -12,19 +12,19 @@
 	},
 	"dependencies": {
 		"@slack/bolt": "^5.1.0",
-		"@upstash/redis": "^1.38.3",
+		"@upstash/redis": "^1.39.0",
 		"@vercel/slack-bolt": "workspace:*",
-		"next": "16.3.4",
-		"react": "19.2.8",
-		"react-dom": "19.2.8"
+		"next": "16.3.6",
+		"react": "19.3.0",
+		"react-dom": "19.3.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"@slack/cli-hooks": "^2.0.0",
 		"@tailwindcss/postcss": "^4.3.3",
 		"@types/node": "catalog:",
-		"@types/react": "^19.2.18",
-		"@types/react-dom": "^19.2.7",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
 		"tailwindcss": "^4.3.3",
 		"typescript": "catalog:"
 	}
