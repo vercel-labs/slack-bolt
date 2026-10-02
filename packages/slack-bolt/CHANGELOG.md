@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.7.2
+
+### Patch Changes
+
+- 01f7b0f: Refresh the package's Vite and Vitest development dependencies.
+
 ## 1.7.1
 
 ### Patch Changes
