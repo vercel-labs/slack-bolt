@@ -7,8 +7,8 @@
 		"build": "vercel-slack build --cleanup && next build",
 		"start": "next start",
 		"typecheck": "tsc --noEmit",
-		"lint": "biome check",
-		"lint:fix": "biome format --write"
+		"lint": "oxlint src && oxfmt --check src",
+		"lint:fix": "oxlint --fix src && oxfmt src"
 	},
 	"dependencies": {
 		"@slack/bolt": "^5.1.0",
@@ -19,12 +19,13 @@
 		"react-dom": "19.3.1"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "catalog:",
 		"@slack/cli-hooks": "^2.0.0",
 		"@tailwindcss/postcss": "^4.3.3",
 		"@types/node": "catalog:",
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",
+		"oxfmt": "catalog:",
+		"oxlint": "catalog:",
 		"tailwindcss": "^4.3.3",
 		"typescript": "catalog:"
 	}

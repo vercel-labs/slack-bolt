@@ -3,11 +3,12 @@
   "extends": ["//"],
   "tasks": {
     "build": {
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"],
       "env": [
         "VERCEL_*",
-        "SLACK_*",
-        "MANIFEST_PATH",
         "SLACK_SIGNING_SECRET",
+        "SLACK_BOT_TOKEN",
+        "MANIFEST_PATH",
         "REDIS_URL",
         "KV_REST_API_URL",
         "KV_REST_API_READ_ONLY_TOKEN",

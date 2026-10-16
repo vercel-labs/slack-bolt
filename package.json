@@ -6,6 +6,7 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
+    "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "attw": "turbo run attw",
     "changeset": "changeset",
@@ -14,9 +15,10 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "catalog:",
     "@changesets/cli": "^2.31.1",
     "husky": "^9.1.7",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
     "turbo": "2.11.8"
   },
   "packageManager": "pnpm@11.10.0+sha512.0b7f8b98060031904c017e3a41eb187a16d40eeb829b95c4f8cb03681761fc4ab53dd219115b9b447f4dce1a05a214764461e7d3703392a9f32f9511ce8c86c8"

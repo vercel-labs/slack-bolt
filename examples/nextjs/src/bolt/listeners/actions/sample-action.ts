@@ -13,9 +13,9 @@ const sampleActionCallback = async ({
   try {
     await ack();
     await client.views.update({
-      // biome-ignore lint/style/noNonNullAssertion: view may be undefined, depending on the source of this action(did it come from an action within a conversation message or a modal?). take care!
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- view may be undefined, depending on the source of this action(did it come from an action within a conversation message or a modal?). take care!
       view_id: body.view!.id,
-      // biome-ignore lint/style/noNonNullAssertion: view may be undefined, depending on the source of this action(did it come from an action within a conversation message or a modal?). take care!
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- view may be undefined, depending on the source of this action(did it come from an action within a conversation message or a modal?). take care!
       hash: body.view!.hash,
       view: {
         type: "modal",

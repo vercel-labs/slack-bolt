@@ -1,21 +1,31 @@
 {
   "$schema": "https://turborepo.dev/schema.v2.json",
   "ui": "tui",
+  "globalEnv": ["CI_NODE_VERSION"],
   "globalPassThroughEnv": ["SLACK_*", "VERCEL_*"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },
     "typecheck": {
       "dependsOn": ["^build"]
     },
-    "lint": {},
-    "lint:fix": {},
+    "lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.oxlintrc.json",
+        "$TURBO_ROOT$/.oxfmtrc.json"
+      ]
+    },
+    "lint:fix": {
+      "cache": false
+    },
     "test": {},
     "attw": {
       "dependsOn": ["build"]

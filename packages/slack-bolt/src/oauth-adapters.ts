@@ -90,7 +90,7 @@ export function createResponseCapture(): ResponseCapture {
   // writeHead has four overloads: (code), (code, message), (code, headers),
   // and (code, message, headers). We sniff for the first non-array object arg
   // to find the headers object in all cases.
-  // biome-ignore lint/suspicious/noExplicitAny: writeHead has many overloads
+  // oxlint-disable-next-line typescript/no-explicit-any -- writeHead has many overloads
   res.writeHead = (code: number, ...args: any[]) => {
     statusCode = code;
     const headersArg = args.find(
@@ -106,7 +106,7 @@ export function createResponseCapture(): ResponseCapture {
   };
 
   const originalEnd = res.end.bind(res);
-  // biome-ignore lint/suspicious/noExplicitAny: end has many overloads
+  // oxlint-disable-next-line typescript/no-explicit-any -- end has many overloads
   res.end = (chunk?: any, ...args: any[]) => {
     if (chunk !== undefined && chunk !== null) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
