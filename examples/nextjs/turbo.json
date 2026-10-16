@@ -22,6 +22,9 @@
         ".env.production",
         ".env.production.local"
       ]
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "build"]
     }
   }
 }
