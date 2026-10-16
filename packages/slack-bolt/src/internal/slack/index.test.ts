@@ -156,7 +156,7 @@ describe("updateSlackApp", () => {
 
     await updateSlackApp(args);
 
-    const [url, opts] = mockFetch.mock.lastCall;
+    const [url, opts] = mockFetch.mock.lastCall!;
     expect(url).toBe("https://slack.com/api/apps.manifest.update");
     expect(opts.method).toBe("POST");
     expect(opts.headers.Authorization).toBe("Bearer tok");
@@ -228,7 +228,7 @@ describe("exportSlackApp", () => {
 
     await exportSlackApp(args);
 
-    const [url, opts] = mockFetch.mock.lastCall;
+    const [url, opts] = mockFetch.mock.lastCall!;
     expect(url).toBe("https://slack.com/api/apps.manifest.export");
     expect(opts.method).toBe("POST");
     expect(opts.headers.Authorization).toBe("Bearer tok");
@@ -688,7 +688,7 @@ describe("authTest", () => {
 
     await authTest({ token: "my-token" });
 
-    const [url, opts] = mockFetch.mock.lastCall;
+    const [url, opts] = mockFetch.mock.lastCall!;
     expect(url).toBe("https://slack.com/api/auth.test");
     expect(opts.method).toBe("POST");
     expect(opts.headers.Authorization).toBe("Bearer my-token");
@@ -737,7 +737,7 @@ describe("verifyServiceTokenAccess", () => {
     });
 
     expect(result).toEqual({ hasAccess: true });
-    expect(mockFetch.mock.lastCall[0]).toBe(
+    expect(mockFetch.mock.lastCall![0]).toBe(
       "https://slack.com/api/apps.manifest.export",
     );
   });

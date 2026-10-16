@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHandler, VercelReceiver } from "./index";
 
 vi.mock("@slack/logger", () => ({
-  // biome-ignore lint/complexity/useArrowFunction: we're mocking the ConsoleLogger
+  // A regular function, not an arrow, so the mock can be called with `new`.
   ConsoleLogger: vi.fn(function () {
     return {
       debug: vi.fn(),
@@ -235,7 +235,7 @@ describe("VercelReceiver", () => {
 
       expect(receiver.installer).toBeDefined();
       expect(receiver).toHaveProperty("installUrlOptions");
-      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
       expect((receiver as any).installUrlOptions?.scopes).toEqual([
         "chat:write",
         "channels:read",
@@ -257,10 +257,10 @@ describe("VercelReceiver", () => {
       });
 
       expect(receiver.installer).toBeDefined();
-      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
       expect((receiver as any).scopesResolver).toBe(scopesResolver);
       // When using a resolver, installUrlOptions.scopes starts empty
-      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
       expect((receiver as any).installUrlOptions?.scopes).toEqual([]);
     });
 
@@ -281,7 +281,7 @@ describe("VercelReceiver", () => {
       });
 
       // Mock the installer's handleInstallPath to capture the options passed
-      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
       let capturedInstallUrlOptions: any;
       vi.spyOn(receiver.installer!, "handleInstallPath").mockImplementation(
         async (_req, res, _pathOpts, urlOpts) => {
@@ -315,7 +315,7 @@ describe("VercelReceiver", () => {
         },
       });
 
-      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
       let capturedInstallUrlOptions: any;
       vi.spyOn(receiver.installer!, "handleInstallPath").mockImplementation(
         async (_req, res, _pathOpts, urlOpts) => {
@@ -328,7 +328,7 @@ describe("VercelReceiver", () => {
       const request = new Request("https://example.com/install");
       await receiver.handleInstall(request);
 
-      // biome-ignore lint/suspicious/noExplicitAny: accessing private property for test
+      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
       expect((receiver as any).scopesResolver).toBeUndefined();
       expect(capturedInstallUrlOptions?.scopes).toEqual(["chat:write"]);
     });
@@ -537,7 +537,7 @@ describe("VercelReceiver", () => {
     describe("Signature Verification", () => {
       it("should call verifyRequest when it defaults to true", async () => {
         const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the verifyRequest method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the verifyRequest method
         const verifyRequestSpy = vi.spyOn(receiver as any, "verifyRequest");
 
         const handler = receiver.toHandler();
@@ -565,7 +565,7 @@ describe("VercelReceiver", () => {
           signingSecret: "test-secret",
           signatureVerification: true,
         });
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the verifyRequest method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the verifyRequest method
         const verifyRequestSpy = vi.spyOn(receiver as any, "verifyRequest");
 
         const handler = receiver.toHandler();
@@ -593,7 +593,7 @@ describe("VercelReceiver", () => {
           signingSecret: "test-secret",
           signatureVerification: false,
         });
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the verifyRequest method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the verifyRequest method
         const verifyRequestSpy = vi.spyOn(receiver as any, "verifyRequest");
 
         const handler = receiver.toHandler();
@@ -616,7 +616,7 @@ describe("VercelReceiver", () => {
         signingSecret: "test-secret",
         signatureVerification: false,
       });
-      // biome-ignore lint/suspicious/noExplicitAny: we're mocking the parseRequestBody method
+      // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the parseRequestBody method
       const parseRequestBodySpy = vi.spyOn(receiver as any, "parseRequestBody");
 
       const handler = receiver.toHandler();
@@ -672,7 +672,7 @@ describe("VercelReceiver", () => {
         });
 
         const handleSlackEventSpy = vi.spyOn(
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           receiver as any,
           "handleSlackEvent",
         );
@@ -824,15 +824,15 @@ describe("VercelReceiver", () => {
         const receiver = new VercelReceiver({
           signingSecret: "test-secret",
           signatureVerification: false,
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the logger
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the logger
           logger: mockLogger as any,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         let capturedBody: any;
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           async (_req: unknown, body: any) => {
             capturedBody = body;
             return new Response("", { status: 200 });
@@ -872,7 +872,7 @@ describe("VercelReceiver", () => {
         const receiver = new VercelReceiver({
           signingSecret: "test-secret",
           signatureVerification: false,
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the logger
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the logger
           logger: mockLogger as any,
         });
 
@@ -901,11 +901,11 @@ describe("VercelReceiver", () => {
           signatureVerification: false,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         let capturedBody: any;
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           async (_req: unknown, body: any) => {
             capturedBody = body;
             return new Response("", { status: 200 });
@@ -956,11 +956,11 @@ describe("VercelReceiver", () => {
           signatureVerification: false,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         let capturedBody: any;
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           async (_req: unknown, body: any) => {
             capturedBody = body;
             return new Response("", { status: 200 });
@@ -990,11 +990,11 @@ describe("VercelReceiver", () => {
           signatureVerification: false,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         let capturedBody: any;
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           async (_req: unknown, body: any) => {
             capturedBody = body;
             return new Response("", { status: 200 });
@@ -1163,7 +1163,7 @@ describe("VercelReceiver", () => {
           signatureVerification: false,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the processEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
         let capturedEvent: any;
         const mockApp = {
           processEvent: vi.fn(async (event) => {
@@ -1246,7 +1246,7 @@ describe("VercelReceiver", () => {
         const receiver = new VercelReceiver({
           signingSecret: "test-secret",
           signatureVerification: false,
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the logger
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the logger
           logger: mockLogger as any,
         });
 
@@ -1255,7 +1255,7 @@ describe("VercelReceiver", () => {
           bgDone = resolve;
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the waitUntil function
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the waitUntil function
         (waitUntil as any).mockImplementation(async (p: any) => {
           try {
             await p;
@@ -1296,7 +1296,7 @@ describe("VercelReceiver", () => {
           }),
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the processEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
         let capturedEvent: any;
         const mockApp = {
           processEvent: vi.fn(async (event) => {
@@ -1404,7 +1404,7 @@ describe("VercelReceiver", () => {
           beforeProcess,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         vi.spyOn(receiver as any, "handleSlackEvent").mockResolvedValue(
           new Response("", { status: 200 }),
         );
@@ -1436,7 +1436,7 @@ describe("VercelReceiver", () => {
         });
 
         const handleSlackEventSpy = vi.spyOn(
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           receiver as any,
           "handleSlackEvent",
         );
@@ -1464,7 +1464,7 @@ describe("VercelReceiver", () => {
         });
 
         const handleSlackEventSpy = vi
-          // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
           .spyOn(receiver as any, "handleSlackEvent")
           .mockResolvedValue(new Response("", { status: 200 }));
 
@@ -1496,7 +1496,7 @@ describe("VercelReceiver", () => {
           beforeProcess,
         });
 
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the handleSlackEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
         vi.spyOn(receiver as any, "handleSlackEvent").mockResolvedValue(
           new Response("", { status: 200 }),
         );
@@ -1522,11 +1522,11 @@ describe("VercelReceiver", () => {
         signatureVerification: false,
       });
 
-      // biome-ignore lint/suspicious/noExplicitAny: we're mocking the processEvent method
+      // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
       let capturedEvent: any;
       const app = {
         init: vi.fn(async () => {}),
-        // biome-ignore lint/suspicious/noExplicitAny: we're mocking the processEvent method
+        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
         processEvent: vi.fn(async (event: any) => {
           capturedEvent = event;
           await event.ack({ ok: true });

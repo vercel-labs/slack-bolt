@@ -23,8 +23,13 @@ jobs:
     strategy:
       matrix:
         node-version: [22, 24, 26]
-        slack-bolt: ['4', '5']
+        slack-bolt: ["4", "5"]
       fail-fast: false
+    env:
+      # Turborepo doesn't hash the Node.js version, so without this the matrix
+      # jobs share Remote Cache entries and one Node version's results stand in
+      # for the others. Listed in `globalEnv` in turbo.json.
+      CI_NODE_VERSION: ${{ matrix.node-version }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
