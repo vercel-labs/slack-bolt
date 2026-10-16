@@ -23,7 +23,7 @@ jobs:
     strategy:
       matrix:
         node-version: [22, 24, 26]
-        slack-bolt: ['4', '5']
+        slack-bolt: ["4", "5"]
       fail-fast: false
     env:
       # Turborepo doesn't hash the Node.js version, so without this the matrix

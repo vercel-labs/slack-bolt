@@ -1,14 +1,22 @@
+# Dependencies
 node_modules
+
+# Build output and caches
 dist
 .next
 .turbo
-tsconfig.tsbuildinfo
-vercel-bolt-*.tgz
-.DS_Store
-vercel-slack-bolt-*.tgz
 coverage
-.agents
-.vercel
-*.env.local
-.env*.local
+tsconfig.tsbuildinfo
+
+# Packed tarballs
+vercel-slack-bolt-*.tgz
+vercel-bolt-*.tgz
+
+# Environment
 .env*
+!.env.example
+.vercel
+
+# Tooling
+.agents
+.DS_Store

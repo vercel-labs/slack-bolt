@@ -17,6 +17,7 @@
       "dependsOn": ["^build"]
     },
     "lint": {
+      "dependsOn": ["//#lint:root"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/.oxlintrc.json",
@@ -24,6 +25,22 @@
       ]
     },
     "lint:fix": {
+      "dependsOn": ["//#lint:fix:root"],
+      "cache": false
+    },
+    "//#lint:root": {
+      "inputs": [
+        "*.json",
+        "pnpm-workspace.yaml",
+        ".github/**/*.yml",
+        ".changeset/*.json",
+        ".vscode/*.json",
+        "packages/*/*.{json,mjs}",
+        "packages/*/bin/*.js",
+        "examples/*/*.{json,ts,mjs}"
+      ]
+    },
+    "//#lint:fix:root": {
       "cache": false
     },
     "test": {},

@@ -1,32 +1,32 @@
 {
-	"name": "slack-bolt-with-next",
-	"version": "0.1.0",
-	"private": true,
-	"scripts": {
-		"dev": "next dev",
-		"build": "vercel-slack build --cleanup && next build",
-		"start": "next start",
-		"typecheck": "tsc --noEmit",
-		"lint": "oxlint src && oxfmt --check src",
-		"lint:fix": "oxlint --fix src && oxfmt src"
-	},
-	"dependencies": {
-		"@slack/bolt": "^5.1.0",
-		"@upstash/redis": "^1.39.0",
-		"@vercel/slack-bolt": "workspace:*",
-		"next": "16.4.1",
-		"react": "19.3.1",
-		"react-dom": "19.3.1"
-	},
-	"devDependencies": {
-		"@slack/cli-hooks": "^2.0.0",
-		"@tailwindcss/postcss": "^4.3.3",
-		"@types/node": "catalog:",
-		"@types/react": "^19.3.0",
-		"@types/react-dom": "^19.3.0",
-		"oxfmt": "catalog:",
-		"oxlint": "catalog:",
-		"tailwindcss": "^4.3.3",
-		"typescript": "catalog:"
-	}
+  "name": "slack-bolt-with-next",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "vercel-slack build --cleanup && next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "oxlint src && oxfmt --check src",
+    "lint:fix": "oxlint --fix src && oxfmt src"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/slack-bolt": "workspace:*",
+    "next": "16.4.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@slack/cli-hooks": "^2.0.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "catalog:",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "tailwindcss": "^4.3.3",
+    "typescript": "catalog:"
+  }
 }
