@@ -1,6 +1,8 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   type App,
   AppInitializationError,
+  HTTPReceiverDeferredRequestError,
   type HTTPReceiverOptions,
   type ReceiverEvent,
 } from "@slack/bolt";
@@ -13,12 +15,16 @@ const superCalls = vi.hoisted((): unknown[] => []);
 // Stub HTTPReceiver so only our subclass logic runs. Like Bolt's, init()
 // stores the app it is given (Bolt then calls `this.app.processEvent`), and
 // the logger defaults when none is passed; the constructor records what our
-// subclass passes to super().
+// subclass passes to super(). requestListener answers with the method and URL
+// it received.
 vi.mock("@slack/bolt", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@slack/bolt")>();
   class HTTPReceiver {
     public app: unknown;
     public logger: unknown;
+    public requestListener = (req: IncomingMessage, res: ServerResponse) => {
+      res.writeHead(200).end(`${req.method} ${req.url}`);
+    };
     public constructor(options: { logger?: unknown }) {
       superCalls.push(options);
       this.logger = options.logger ?? { error: vi.fn() };
@@ -92,7 +98,9 @@ describe("constructor", () => {
 
     new VercelReceiver();
 
-    expect(superCalls).toEqual([{ signingSecret: "env-signing" }]);
+    expect(superCalls).toEqual([
+      { signingSecret: "env-signing", endpoints: "/slack/events" },
+    ]);
   });
 
   it("prefers the signingSecret option over the environment variable", () => {
@@ -100,27 +108,33 @@ describe("constructor", () => {
 
     new VercelReceiver({ signingSecret: "opt-signing" });
 
-    expect(superCalls).toEqual([{ signingSecret: "opt-signing" }]);
+    expect(superCalls).toEqual([
+      { signingSecret: "opt-signing", endpoints: "/slack/events" },
+    ]);
   });
 
   it("passes every other option to HTTPReceiver unchanged", () => {
     const options: VercelReceiverOptions = {
       signingSecret: "secret",
-      endpoints: "/api/slack/events",
+      unhandledRequestTimeoutMillis: 1000,
       processBeforeResponse: true,
       logger: { info: vi.fn() } as unknown as HTTPReceiverOptions["logger"],
     };
 
     new VercelReceiver(options);
 
-    expect(superCalls).toEqual([options]);
+    expect(superCalls).toEqual([{ ...options, endpoints: "/slack/events" }]);
   });
 
   it("does not require a secret when signatureVerification is false", () => {
     new VercelReceiver({ signatureVerification: false });
 
     expect(superCalls).toEqual([
-      { signatureVerification: false, signingSecret: "" },
+      {
+        signatureVerification: false,
+        signingSecret: "",
+        endpoints: "/slack/events",
+      },
     ]);
   });
 
@@ -354,5 +368,148 @@ describe("app proxy", () => {
 
     expect(wrapped.client).toBe(client);
     expect(wrapped.start).toBe(start);
+  });
+});
+
+describe("fetch", () => {
+  /** Sends a request through fetch and returns what requestListener saw. */
+  async function routed(
+    method: string,
+    url: string,
+    options: VercelReceiverOptions = {},
+  ) {
+    const receiver = new VercelReceiver({
+      signingSecret: "secret",
+      ...options,
+    });
+    const body = method === "POST" ? "{}" : undefined;
+    const response = await receiver.fetch(new Request(url, { method, body }));
+    return response.text();
+  }
+
+  it("sends POST requests at any path to the events endpoint", async () => {
+    await expect(routed("POST", "https://x/api/slack?a=1")).resolves.toBe(
+      "POST /slack/events?a=1",
+    );
+  });
+
+  it("keeps Bolt's endpoint even if JavaScript passes endpoints", () => {
+    new VercelReceiver({
+      signingSecret: "secret",
+      // @ts-expect-error endpoints is set by the receiver
+      endpoints: "/events",
+    });
+
+    expect(superCalls).toEqual([
+      expect.objectContaining({ endpoints: "/slack/events" }),
+    ]);
+  });
+
+  it("doesn't accept options for Bolt's own server", () => {
+    const signingSecret = "secret";
+    // @ts-expect-error customRoutes don't apply to fetch
+    new VercelReceiver({ signingSecret, customRoutes: [] });
+    // @ts-expect-error port doesn't apply to fetch
+    new VercelReceiver({ signingSecret, port: 3000 });
+    // @ts-expect-error dispatchErrorHandler doesn't apply to fetch
+    new VercelReceiver({ signingSecret, dispatchErrorHandler: () => {} });
+  });
+
+  it("sends other methods to the endpoint too, so Bolt answers them", async () => {
+    await expect(routed("GET", "https://x/api/slack?a=1")).resolves.toBe(
+      "GET /slack/events?a=1",
+    );
+  });
+
+  it("restores the request's URL after Bolt has routed it", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const seen: (string | undefined)[] = [];
+    const listener = (receiver as unknown as { requestListener: unknown })
+      .requestListener as (req: IncomingMessage, res: ServerResponse) => void;
+    Object.assign(receiver, {
+      requestListener: (req: IncomingMessage, res: ServerResponse) => {
+        seen.push(req.url);
+        res.once("finish", () => seen.push(req.url));
+        listener(req, res);
+      },
+    });
+
+    await (await receiver.fetch(new Request("https://x/api/slack?a=1"))).text();
+
+    expect(seen).toEqual(["/slack/events?a=1", "/api/slack?a=1"]);
+  });
+
+  it("responds 404 with an empty body when Bolt defers the request", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    Object.assign(receiver, {
+      requestListener: (req: IncomingMessage, res: ServerResponse) => {
+        throw new HTTPReceiverDeferredRequestError("unhandled", req, res);
+      },
+    });
+
+    const response = await receiver.fetch(new Request("https://x/"));
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe("");
+  });
+
+  it("answers 500 and logs other errors through the receiver's logger", async () => {
+    const logger = { error: vi.fn() };
+    const receiver = new VercelReceiver({
+      signingSecret: "secret",
+      logger: logger as unknown as HTTPReceiverOptions["logger"],
+    });
+    const error = new Error("boom");
+    Object.assign(receiver, {
+      requestListener: () => {
+        throw error;
+      },
+    });
+
+    const response = await receiver.fetch(new Request("https://x/"));
+
+    expect(response.status).toBe(500);
+    await expect(response.text()).resolves.toBe("");
+    expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn't handle the Slack request.",
+      error,
+    );
+  });
+
+  it("rejects a request whose body was already read", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const request = new Request("https://x/", { method: "POST", body: "{}" });
+    await request.text();
+
+    await expect(receiver.fetch(request)).rejects.toThrow(
+      new TypeError(
+        "Request body already read. Bolt needs the raw body to verify Slack's signature, so pass request.clone() to fetch instead.",
+      ),
+    );
+  });
+
+  it("works unbound", async () => {
+    const { fetch } = new VercelReceiver({ signingSecret: "secret" });
+
+    const response = await fetch(
+      new Request("https://x/api/slack", { method: "POST", body: "{}" }),
+    );
+
+    await expect(response.text()).resolves.toBe("POST /slack/events");
+  });
+
+  it("exposes POST as an unbound handler that calls fetch", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const fetch = vi.spyOn(receiver, "fetch");
+    const { POST } = receiver;
+    const request = new Request("https://x/api/slack", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const response = await POST(request);
+
+    await expect(response.text()).resolves.toBe("POST /slack/events");
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
   });
 });
