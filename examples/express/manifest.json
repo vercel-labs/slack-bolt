@@ -1,19 +1,19 @@
 {
-  "_metadata": {
-    "major_version": 1,
-    "minor_version": 1
-  },
   "display_information": {
-    "name": "slack-bolt-with-express"
+    "name": "Express Bolt Starter",
+    "description": "A starter template for building Bolt apps with Express",
+    "long_description": "Express Bolt Starter is a template Slack app built with Typescript, Express, and the Slack Bolt framework, deployed on Vercel. It replies to “hello” messages giving you a foundation for building custom Slack bots, integrations, and workflows.",
+    "background_color": "#000000"
   },
   "features": {
     "app_home": {
       "home_tab_enabled": true,
       "messages_tab_enabled": false,
-      "messages_tab_read_only_enabled": true
+      "messages_tab_read_only_enabled": true,
+      "agent_tasks_enabled": true
     },
     "bot_user": {
-      "display_name": "slack-bolt-with-express",
+      "display_name": "Express Bolt Starter",
       "always_online": true
     },
     "shortcuts": [
@@ -34,20 +34,21 @@
     ]
   },
   "oauth_config": {
+    "redirect_urls": ["https://<your-domain>/api/slack/events"],
     "scopes": {
       "bot": ["channels:history", "chat:write", "commands"]
     },
-    "redirect_urls": ["https://<your-domain>/api/slack/events"]
+    "pkce_enabled": false
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://<your-domain>/api/slack/events",
       "bot_events": [
         "app_home_opened",
-        "message.channels",
         "app_uninstalled",
+        "message.channels",
         "tokens_revoked"
-      ]
+      ],
+      "request_url": "https://<your-domain>/api/slack/events"
     },
     "interactivity": {
       "is_enabled": true,
@@ -55,6 +56,8 @@
     },
     "org_deploy_enabled": true,
     "socket_mode_enabled": false,
-    "token_rotation_enabled": true
+    "is_mcp_enabled": false,
+    "token_rotation_enabled": true,
+    "app_level_token_rotation_enabled": false
   }
 }
