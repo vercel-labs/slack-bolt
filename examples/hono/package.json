@@ -1,0 +1,27 @@
+{
+  "name": "slack-bolt-with-hono",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "srvx --import jiti/register src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src && oxfmt --check src",
+    "lint:fix": "oxlint --fix src && oxfmt src"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/slack-bolt": "workspace:*",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@slack/cli-hooks": "^2.0.0",
+    "@types/node": "catalog:",
+    "jiti": "^2.7.0",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "srvx": "^1.0.6",
+    "typescript": "catalog:"
+  }
+}

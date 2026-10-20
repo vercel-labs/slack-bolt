@@ -39,6 +39,43 @@ importers:
         specifier: 2.11.8
         version: 2.11.8
 
+  examples/hono:
+    dependencies:
+      '@slack/bolt':
+        specifier: ^5.1.0
+        version: 5.1.0(@types/express@5.0.3)(undici@7.29.1)
+      '@upstash/redis':
+        specifier: ^1.39.0
+        version: 1.39.0
+      '@vercel/slack-bolt':
+        specifier: workspace:*
+        version: link:../../packages/slack-bolt
+      hono:
+        specifier: ^4.13.13
+        version: 4.13.13
+    devDependencies:
+      '@slack/cli-hooks':
+        specifier: ^2.0.0
+        version: 2.0.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.73.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0
+      srvx:
+        specifier: ^1.0.6
+        version: 1.0.6
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   examples/nextjs:
     dependencies:
       '@slack/bolt':
@@ -2105,6 +2142,10 @@ packages:
 
   highlight.js@10.7.3:
     resolution: {integrity: sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A==}
+
+  hono@4.13.13:
+    resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
+    engines: {node: '>=16.9.0'}
 
   hookable@6.1.2:
     resolution: {integrity: sha512-+abwxtiEA52GCVIsQqut3S/uKTbUwYIp4Pe/vv+6py5XiXBCqMZHg6pA6Y5qhgLSEys0/cYuPbO0z1QFj5ZCmg==}
@@ -4756,6 +4797,8 @@ snapshots:
       function-bind: 1.1.2
 
   highlight.js@10.7.3: {}
+
+  hono@4.13.13: {}
 
   hookable@6.1.2: {}
 
