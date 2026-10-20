@@ -4,7 +4,16 @@
   "tasks": {
     "build": {
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"],
-      "env": ["VERCEL_*", "SLACK_SIGNING_SECRET", "SLACK_BOT_TOKEN"],
+      "env": [
+        "VERCEL_*",
+        "SLACK_SIGNING_SECRET",
+        "SLACK_CLIENT_ID",
+        "SLACK_CLIENT_SECRET",
+        "SLACK_STATE_SECRET",
+        "TOKEN_ENCRYPTION_SECRET",
+        "KV_REST_API_URL",
+        "KV_REST_API_TOKEN"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         ".env",

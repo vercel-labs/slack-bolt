@@ -1,1 +1,1 @@
-export { POST } from "@/bolt/app";
+export { GET, POST } from "@/bolt/app";

@@ -19,10 +19,9 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
 2. Choose the workspace you want to use
 3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next
 4. Review the configuration and click Create
-5. On the Install App tab, click Install to <Workspace_Name>. 
-      - You will be redirected to the App Configuration dashboard
-6. Copy the Bot User OAuth Token into your environment as `SLACK_BOT_TOKEN`
-7. On the Basic Information tab, copy your Signing Secret into your environment as `SLACK_SIGNING_SECRET`
+5. On the Basic Information tab, copy your Client ID, Client Secret and Signing Secret into your environment as `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` and `SLACK_SIGNING_SECRET`
+6. Set `SLACK_STATE_SECRET` and `TOKEN_ENCRYPTION_SECRET` to two different random strings, e.g. from `openssl rand -hex 32`. The first signs the OAuth state cookie; the second encrypts tokens in Redis
+7. Add [Upstash Redis](https://vercel.com/marketplace/upstash) to your Vercel project, which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Installations are stored there
 
 ### Prepare for Local Development
 
@@ -47,11 +46,11 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
 
 1. Create a new Slack app for production following the steps from above
 2. Create a new Vercel project [here](https://vercel.com/new) and select this repo
-2. Copy the Bot User OAuth Token into your Vercel environment variables as `SLACK_BOT_TOKEN`
-3. On the Basic Information tab, copy your Signing Secret into your Vercel environment variables as `SLACK_SIGNING_SECRET`
-4. When your deployment has finished, open your App Manifest from the Slack App Dashboard
-5. Update the manifest so all the `request_url` and `url` fields use `https://<your-app-domain>/api/slack/events`
-6. Click save and you will be prompted to verify the URL
+2. Add the environment variables from [Create a Slack App](#create-a-slack-app) to your Vercel project
+3. When your deployment has finished, open your App Manifest from the Slack App Dashboard
+4. Update the manifest so all the `request_url`, `url` and `redirect_urls` fields use `https://<your-app-domain>/api/slack/events`
+5. Click save and you will be prompted to verify the URL
+6. Open `https://<your-app-domain>`, click Install and approve the app for your workspace
 7. Open your Slack workspace and add your app to any channel
     - _Note_: Make sure you add the production app, not the local app we setup earlier
 8. Send `hello` and your app will respond with `world!`
@@ -66,7 +65,7 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
 
 ### [`src/bolt/app.ts`](./src/bolt/app.ts)
 
-This is the Bolt app entry. It creates `@vercel/slack-bolt/v2`'s `VercelReceiver`, registers listeners, and exports the receiver's `POST` handler
+This is the Bolt app entry. It creates `@vercel/slack-bolt/v2`'s `VercelReceiver` with Bolt's OAuth options, registers listeners, and exports the receiver's `GET` and `POST` handlers
 
 ### [`src/bolt/listeners`](./src/bolt/listeners)
 
@@ -74,7 +73,11 @@ Every incoming request is routed to a "listener". Inside this directory, we grou
 
 ### Route Handler: [`src/app/api/slack/events/route.ts`](./src/app/api/slack/events/route.ts)
 
-This file re-exports `POST` from [`src/bolt/app.ts`](./src/bolt/app.ts), so this one route receives every event, command and interaction from Slack. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
+This file re-exports `GET` and `POST` from [`src/bolt/app.ts`](./src/bolt/app.ts), so this one route receives every event, command and interaction from Slack, and serves the install page and OAuth callback. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
+
+### Installation store: [`src/lib/installation-store.ts`](./src/lib/installation-store.ts)
+
+Bolt calls this to save each workspace's installation and to look up its bot token for every request. It keeps installations in Upstash Redis, with tokens encrypted using `TOKEN_ENCRYPTION_SECRET`
 
 ## Notes
 - If you see a warning about `express` being externalized: `@slack/bolt` ships an Express receiver. Turbopack may analyze its static import even if you don't use it. Keeping `express` as a dependency or aliasing it to a stub resolves this during development.
