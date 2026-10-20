@@ -18,7 +18,7 @@ git clone https://github.com/vercel-labs/slack-bolt.git && cd slack-bolt/example
 1. Open https://api.slack.com/apps/new and choose "From an app manifest"
 2. Choose the workspace you want to use
 3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next
-4. Review the configuration and click Create
+4. Review the configuration and click Create, then upload [`app-icon.png`](./app-icon.png) as the App icon under Display Information on the Basic Information tab
 5. On the Basic Information tab, copy your Client ID, Client Secret and Signing Secret into your environment as `NITRO_SLACK_CLIENT_ID`, `NITRO_SLACK_CLIENT_SECRET` and `NITRO_SLACK_SIGNING_SECRET`
 6. Set `SLACK_STATE_SECRET` and `TOKEN_ENCRYPTION_SECRET` to two different random strings, e.g. from `openssl rand -hex 32`. The first signs the OAuth state cookie; the second encrypts tokens in Redis
 7. Add [Upstash Redis](https://vercel.com/marketplace/upstash) to your Vercel project, which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Installations are stored there
