@@ -10,10 +10,12 @@
     "lint:fix:root": "oxfmt '*.json' 'pnpm-workspace.yaml' '.github/**/*.yml' '.changeset/*.json' '.vscode/*.json' 'packages/*/*.{json,mjs}' 'packages/*/bin/*.js' 'examples/*/*.{json,ts,mjs}' '!.claude/**'",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
     "attw": "turbo run attw",
+    "boundaries": "turbo boundaries",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "turbo run build --filter=@vercel/slack-bolt && changeset publish",
+    "release": "turbo run build lint typecheck test attw --filter=@vercel/slack-bolt && changeset publish",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -21,7 +23,7 @@
     "husky": "^9.1.7",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "turbo": "2.11.8"
+    "turbo": "2.11.9"
   },
   "packageManager": "pnpm@11.10.0+sha512.0b7f8b98060031904c017e3a41eb187a16d40eeb829b95c4f8cb03681761fc4ab53dd219115b9b447f4dce1a05a214764461e7d3703392a9f32f9511ce8c86c8"
 }
