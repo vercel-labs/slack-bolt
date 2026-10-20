@@ -1,13 +1,10 @@
-import type { VercelConfig } from "@vercel/config/v1";
-
 // Deploys every example to one Vercel project as Vercel Services, each under
 // its own path: /nextjs, /hono, /express, /nitro and /tanstack-start. This is
 // only how we host the examples. Each example is a standalone template that
 // serves its Slack route at /api/slack/events, so the path prefix is added
 // here, at deploy time, and never in the examples' code.
 
-// @vercel/config types only the older experimentalServices key, so describe
-// the parts of `services` used here.
+// The parts of Vercel's `services` config used here.
 type Rewrite = {
   source: string;
   destination: string | { service: string };
@@ -83,7 +80,7 @@ const services = {
 type Name = keyof typeof services;
 const names = Object.keys(services) as Name[];
 
-export const config: Omit<VercelConfig, "rewrites"> & {
+export const config: {
   services: Record<Name, Service>;
   rewrites: Rewrite[];
 } = {
