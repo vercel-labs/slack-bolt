@@ -9,24 +9,26 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 
 Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template).
 
+Upgrading from v1? See [Migrating from v1](#migrating-from-v1).
+
 ## Installation
 
 ```bash
-npm install @vercel/slack-bolt
+npm install @vercel/slack-bolt @slack/bolt
 # or
-yarn add @vercel/slack-bolt
+yarn add @vercel/slack-bolt @slack/bolt
 # or
-pnpm add @vercel/slack-bolt
+pnpm add @vercel/slack-bolt @slack/bolt
 # or
-bun add @vercel/slack-bolt
+bun add @vercel/slack-bolt @slack/bolt
 ```
 
 ### Compatibility
 
-| Dependency    | Supported versions  |
-| ------------- | ------------------- |
+| Dependency    | Supported versions   |
+| ------------- | -------------------- |
 | `@slack/bolt` | `^4.7.3` or `^5.0.0` |
-| Node.js       | `>=22.12`           |
+| Node.js       | `>=22.12`            |
 
 `@slack/bolt` is a peer dependency, so declare it in your own `package.json` alongside this package. Do not install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer, and skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
 
@@ -70,15 +72,17 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 `VercelReceiver` takes Bolt's [`HTTPReceiver` options](https://docs.slack.dev/tools/bolt-js/reference), except `endpoints`, `port`, `customRoutes` and `dispatchErrorHandler`, which configure Bolt's own HTTP server. The ones you're most likely to need:
 
-| Name                        | Type                         | Default                            | Description                                                                                 |
-| --------------------------- | ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| `signingSecret`             | `string`                     | `process.env.SLACK_SIGNING_SECRET` | Verifies that requests come from Slack. Required unless `signatureVerification` is `false`. |
-| `signatureVerification`     | `boolean`                    | `true`                             | Set to `false` to skip signature verification, for example in tests.                        |
-| `logger`                    | `Logger`                     | Bolt's `ConsoleLogger`             | Pass it here: Bolt doesn't apply the `App`'s logger to a custom receiver.                   |
-| `logLevel`                  | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for the receiver's logger.                                                    |
-| `processBeforeResponse`     | `boolean`                    | `false`                            | Waits for your listeners to finish before answering Slack, instead of answering at `ack()`. |
-| `processEventErrorHandler`  | `(args) => Promise<boolean>` | Bolt's default                     | Handles an error from your listeners. The receiver keeps it running with `waitUntil`.       |
-| `customPropertiesExtractor` | `(req) => StringIndexed`     | None                               | Adds properties from the request to each event's `context`.                                 |
+| Name                            | Type                         | Default                            | Description                                                                                 |
+| ------------------------------- | ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| `signingSecret`                 | `string`                     | `process.env.SLACK_SIGNING_SECRET` | Verifies that requests come from Slack. Required unless `signatureVerification` is `false`. |
+| `signatureVerification`         | `boolean`                    | `true`                             | Set to `false` to skip signature verification, for example in tests.                        |
+| `logger`                        | `Logger`                     | Bolt's `ConsoleLogger`             | Pass it here: Bolt doesn't apply the `App`'s logger to a custom receiver.                   |
+| `logLevel`                      | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for the receiver's logger.                                                    |
+| `processBeforeResponse`         | `boolean`                    | `false`                            | Waits for your listeners to finish before answering Slack, instead of answering at `ack()`. |
+| `processEventErrorHandler`      | `(args) => Promise<boolean>` | Bolt's default                     | Handles an error from your listeners. The receiver keeps it running with `waitUntil`.       |
+| `unhandledRequestTimeoutMillis` | `number`                     | `3001`                             | How long to wait for a listener to call `ack()` before `unhandledRequestHandler` runs.      |
+| `unhandledRequestHandler`       | `(args) => void`             | Logs an error and answers `404`    | Answers Slack when no listener calls `ack()` in time.                                       |
+| `customPropertiesExtractor`     | `(req) => StringIndexed`     | None                               | Adds properties from the request to each event's `context`.                                 |
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
@@ -86,13 +90,13 @@ The constructor throws Bolt's `AppInitializationError` when the signing secret i
 
 #### `receiver.fetch(request)`
 
-Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` are the same function, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`.
+Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` are the same function, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`. See [Frameworks](#frameworks) for Hono, Express, Nitro and TanStack Start.
 
 - `POST` requests are events, slash commands and interactions.
 - With the OAuth options, a `GET` with a `code`, `error` or `state` query parameter is the OAuth callback, and any other `GET` is the install page.
 - Anything else gets a `404`.
 
-Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read. If you read it first, pass `request.clone()` instead.
+Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read. To read it yourself too, read a `request.clone()` and pass the original to `fetch`.
 
 ### `preview`
 
@@ -138,6 +142,78 @@ const result = await preview({
 | `isNew`         | `boolean` | `true` if a new Slack app was created, `false` if updated.        |
 | `installStatus` | `string`  | Installation outcome (e.g. `installed`, `missing_service_token`). |
 | `app`           | `object`  | Slack API response containing `app_id` and credentials.           |
+
+## Frameworks
+
+Serve the receiver from one route, and point your Slack app's request URLs at it. The route handles `POST` for events, slash commands and interactions, and with the [OAuth options](#oauth-multi-workspace-apps), `GET` for the install page and OAuth callback. In Next.js, export `POST` and `GET` from a route handler, as in [`VercelReceiver`](#vercelreceiver). The snippets below import `receiver` from the file that creates your `App`, so export it there with `export { receiver };`.
+
+Bolt verifies Slack's signature against the raw request body, so don't add middleware to the Slack route that reads the body first. The [examples](#examples) show each framework in a complete app.
+
+### Hono
+
+```typescript
+import { Hono } from "hono";
+import { receiver } from "./slack";
+
+const app = new Hono();
+
+app.all("/api/slack/events", (c) => receiver.fetch(c.req.raw));
+
+export default app;
+```
+
+### Express
+
+Express hands your route Node.js's request and response, not a Web `Request`, so adapt `receiver.fetch` with `toNodeHandler` from [srvx](https://srvx.h3.dev). This package uses srvx already, but add it to your own dependencies to import it.
+
+```typescript
+import express, { type RequestHandler } from "express";
+import { toNodeHandler } from "srvx/node";
+import { receiver } from "./slack";
+
+const app = express();
+
+// srvx types its handler for HTTP/1 and HTTP/2 servers; Express is HTTP/1,
+// hence the cast.
+app.all("/api/slack/events", toNodeHandler(receiver.fetch) as RequestHandler);
+
+export default app;
+```
+
+Add the Slack route before any body parser, like `express.json()` or `express.urlencoded()`, or add parsers only to the routes that need them.
+
+### Nitro
+
+```typescript
+// routes/api/slack/events.ts
+import { defineHandler } from "nitro";
+import { receiver } from "../../../slack";
+
+export default defineHandler((event) => receiver.fetch(event.req));
+```
+
+In Nitro 3, `event.req` is the Web `Request`. Put the route under `routes/api`: Nitro's top-level `api` directory [isn't compatible with Vercel](https://nitro.build/deploy/providers/vercel).
+
+### TanStack Start
+
+```typescript
+// src/routes/api/slack/events.ts
+import { createFileRoute } from "@tanstack/react-router";
+import { receiver } from "../../../slack";
+
+export const Route = createFileRoute("/api/slack/events")({
+  server: {
+    handlers: {
+      GET: ({ request }) => receiver.fetch(request),
+      POST: ({ request }) => receiver.fetch(request),
+    },
+  },
+});
+```
+
+### Other frameworks
+
+Any framework that hands your route a Web `Request` and takes a `Response` back works the same way: pass the request to `receiver.fetch`.
 
 ## OAuth (Multi-Workspace Apps)
 
@@ -277,6 +353,119 @@ Options:
 ```
 
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
+
+## Migrating from v1
+
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI are unchanged.
+
+### Replace `createHandler`
+
+`createHandler(app, receiver)` is removed. In v1, your route created the handler:
+
+```typescript
+// app/api/slack/events/route.ts
+import { createHandler } from "@vercel/slack-bolt";
+import { app, receiver } from "@/lib/slack";
+
+export const POST = createHandler(app, receiver);
+```
+
+In v2, export the receiver's `POST` where you create the `App`, and re-export it from the route:
+
+```typescript
+// lib/slack.ts, after creating the App
+export const { POST } = receiver;
+```
+
+```typescript
+// app/api/slack/events/route.ts
+export { POST } from "@/lib/slack";
+```
+
+Keep `deferInitialization: true` on the `App`. Like `createHandler`, the receiver then runs `app.init()` on the first request. Outside Next.js, pass each request to `receiver.fetch`, as in [Frameworks](#frameworks).
+
+### Serve OAuth with `GET`
+
+`receiver.handleInstall` and `receiver.handleCallback` are replaced by `receiver.GET`, which tells the install page and the OAuth callback apart by their query parameters. Your v1 routes can keep their paths:
+
+```typescript
+// app/api/slack/install/route.ts
+import { receiver } from "@/lib/slack";
+
+export const GET = receiver.GET; // was receiver.handleInstall
+```
+
+```typescript
+// app/api/slack/oauth-redirect/route.ts
+import { receiver } from "@/lib/slack";
+
+export const GET = receiver.GET; // was receiver.handleCallback
+```
+
+Or serve both from your events route with `export const { GET, POST } = receiver`, and make that route's URL your Slack app's Redirect URL.
+
+### Pass the OAuth credentials
+
+v1 read `clientId`, `clientSecret` and `stateSecret` from `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` and `SLACK_STATE_SECRET`. v2 only reads `SLACK_SIGNING_SECRET`, so pass the other three yourself:
+
+```typescript
+const receiver = new VercelReceiver({
+  clientId: process.env.SLACK_CLIENT_ID,
+  clientSecret: process.env.SLACK_CLIENT_SECRET,
+  stateSecret: process.env.SLACK_STATE_SECRET,
+  scopes: ["chat:write", "commands"],
+  installationStore,
+});
+```
+
+Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. The receiver also needs an `installationStore` whenever you set `clientId`, and throws an `AppInitializationError` without one. `redirectUri`, if you set it, must be a full URL.
+
+### Changed options
+
+`VercelReceiver` takes Bolt's `HTTPReceiver` options, described in [Options](#options). `installerOptions` takes the same fields as in v1.
+
+| v1                                     | v2                                                                                                                                                                         |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ackTimeoutMs`                         | `unhandledRequestTimeoutMillis`. Pass `unhandledRequestHandler` to change what Slack gets when no listener calls `ack()` in time.                                          |
+| `customPropertiesExtractor(req, body)` | `customPropertiesExtractor(req)`, where `req` is Bolt's `BufferedIncomingMessage`: read headers from `req.headers`, with lowercase names, and the body from `req.rawBody`. |
+| `scopes` as a function                 | Removed. `scopes` takes a fixed list.                                                                                                                                      |
+| `beforeProcess`                        | Removed. See [Replace `beforeProcess`](#replace-beforeprocess).                                                                                                            |
+
+`createHandler` and the `VercelHandler`, `BeforeProcessFn`, `ScopesResolver` and `VercelInstallerOptions` types are removed too. For the installer options' type, use `VercelReceiverOptions["installerOptions"]`.
+
+The installer is now Bolt's own, so v1's notes for Bolt 5 no longer apply: `installerOptions.clientOptions` and the errors passed to `installerOptions.callbackOptions.failure` come from the same `@slack/web-api` and `@slack/oauth` versions as your Bolt.
+
+### Replace `beforeProcess`
+
+To run code for every event, command and interaction after Bolt has verified it, use Bolt's [global middleware](https://docs.slack.dev/tools/bolt-js/concepts/global-middleware) with `app.use()`.
+
+To answer a request yourself instead of passing it to Bolt, as `beforeProcess` could, handle it in your route before calling `receiver.fetch`. Your route runs before Bolt verifies Slack's signature, so check it with Bolt's `isValidSlackRequest` before you trust the body:
+
+```typescript
+// app/api/slack/events/route.ts
+import { isValidSlackRequest } from "@slack/bolt";
+import { forward, shouldForward } from "@/lib/forward";
+import { receiver } from "@/lib/slack";
+
+export async function POST(request: Request) {
+  // Read a copy, so the receiver still gets the untouched body.
+  const body = await request.clone().text();
+  const verified = isValidSlackRequest({
+    signingSecret: process.env.SLACK_SIGNING_SECRET ?? "",
+    body,
+    headers: {
+      "x-slack-signature": request.headers.get("x-slack-signature") ?? "",
+      "x-slack-request-timestamp": Number(
+        request.headers.get("x-slack-request-timestamp"),
+      ),
+    },
+  });
+  if (verified && shouldForward(body)) return forward(body);
+  return receiver.fetch(request);
+}
+```
+
+`shouldForward` and `forward` stand in for your own code. `body` is the raw body: JSON for events, and form data for slash commands and interactions, which put their JSON in a `payload` field.
 
 ## Examples
 
