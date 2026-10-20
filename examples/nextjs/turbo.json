@@ -25,6 +25,9 @@
     },
     "typecheck": {
       "dependsOn": ["^build", "build"]
+    },
+    "dev": {
+      "passThroughEnv": ["$TURBO_EXTENDS$", "NEXT_SLACK_*"]
     }
   }
 }

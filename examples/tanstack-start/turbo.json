@@ -24,6 +24,9 @@
     },
     "typecheck": {
       "dependsOn": ["^build", "build"]
+    },
+    "dev": {
+      "passThroughEnv": ["$TURBO_EXTENDS$", "TANSTACK_START_SLACK_*"]
     }
   }
 }

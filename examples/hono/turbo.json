@@ -21,6 +21,9 @@
         ".env.production",
         ".env.production.local"
       ]
+    },
+    "dev": {
+      "passThroughEnv": ["$TURBO_EXTENDS$", "HONO_SLACK_*"]
     }
   }
 }

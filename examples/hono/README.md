@@ -1,6 +1,6 @@
 # Slack Bolt with Hono Template
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fslack-bolt%2Ftree%2Fmaster%2Fexamples%2Fhono&env=HONO_SLACK_SIGNING_SECRET%2CSLACK_CLIENT_ID%2CSLACK_CLIENT_SECRET%2CSLACK_STATE_SECRET%2CTOKEN_ENCRYPTION_SECRET&envLink=https%3A%2F%2Fapi.slack.com%2Fapps&project-name=slack-bolt-with-hono&repository-name=slack-bolt-with-hono)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fslack-bolt%2Ftree%2Fmaster%2Fexamples%2Fhono&env=HONO_SLACK_SIGNING_SECRET%2CHONO_SLACK_CLIENT_ID%2CHONO_SLACK_CLIENT_SECRET%2CSLACK_STATE_SECRET%2CTOKEN_ENCRYPTION_SECRET&envLink=https%3A%2F%2Fapi.slack.com%2Fapps&project-name=slack-bolt-with-hono&repository-name=slack-bolt-with-hono)
 
 This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps with Hono
 

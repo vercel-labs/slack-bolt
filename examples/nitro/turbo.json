@@ -14,6 +14,9 @@
         "KV_REST_API_URL",
         "KV_REST_API_TOKEN"
       ]
+    },
+    "dev": {
+      "passThroughEnv": ["$TURBO_EXTENDS$", "NITRO_SLACK_*"]
     }
   }
 }

@@ -1,6 +1,6 @@
 # Slack Bolt with Express Template
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fslack-bolt%2Ftree%2Fmaster%2Fexamples%2Fexpress&env=EXPRESS_SLACK_SIGNING_SECRET%2CSLACK_CLIENT_ID%2CSLACK_CLIENT_SECRET%2CSLACK_STATE_SECRET%2CTOKEN_ENCRYPTION_SECRET&envLink=https%3A%2F%2Fapi.slack.com%2Fapps&project-name=slack-bolt-with-express&repository-name=slack-bolt-with-express)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fslack-bolt%2Ftree%2Fmaster%2Fexamples%2Fexpress&env=EXPRESS_SLACK_SIGNING_SECRET%2CEXPRESS_SLACK_CLIENT_ID%2CEXPRESS_SLACK_CLIENT_SECRET%2CSLACK_STATE_SECRET%2CTOKEN_ENCRYPTION_SECRET&envLink=https%3A%2F%2Fapi.slack.com%2Fapps&project-name=slack-bolt-with-express&repository-name=slack-bolt-with-express)
 
 This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps with Express
 
