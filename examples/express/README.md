@@ -81,3 +81,4 @@ Bolt calls this to save each workspace's installation and to look up its bot tok
 
 ## Notes
 - Keep the Slack route before any body parser, like `express.json()` or `express.urlencoded()`. Bolt verifies Slack's signature against the raw request body, so a parser that runs first reads the body before Bolt can. Add parsers after the Slack route, or only on the routes that need them.
+- This app is an ES module (`"type": "module"`), so relative imports end in `.js` and the `manifest.json` import uses `with { type: "json" }`. It can't be CommonJS: Vercel bundles it as CommonJS then, and `srvx` is ESM-only, so the function fails with `ERR_REQUIRE_ESM`.

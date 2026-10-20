@@ -2,7 +2,7 @@
   "name": "slack-bolt-with-hono",
   "version": "0.1.0",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "dev": "srvx --import jiti/register src/index.ts",
     "typecheck": "tsc --noEmit",

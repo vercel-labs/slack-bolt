@@ -1,8 +1,8 @@
 import { App } from "@slack/bolt";
 import { VercelReceiver } from "@vercel/slack-bolt";
-import manifest from "../../manifest.json";
-import { installationStore } from "../lib/installation-store";
-import registerListeners from "./listeners";
+import manifest from "../../manifest.json" with { type: "json" };
+import { installationStore } from "../lib/installation-store.js";
+import registerListeners from "./listeners/index.js";
 
 // Reads SLACK_SIGNING_SECRET from the environment. Each workspace's bot token
 // comes from the installation store once the workspace installs the app.

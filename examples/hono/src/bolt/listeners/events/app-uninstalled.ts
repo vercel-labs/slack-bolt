@@ -1,5 +1,5 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs } from "@slack/bolt";
-import { installationStore } from "../../../lib/installation-store";
+import { installationStore } from "../../../lib/installation-store.js";
 
 // Slack sends this once a workspace or org removes the app. Its tokens are
 // already revoked, so Bolt doesn't authorize it; just forget the installation.

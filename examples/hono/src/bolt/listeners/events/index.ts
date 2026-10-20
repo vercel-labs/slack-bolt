@@ -1,8 +1,8 @@
 import type { App } from "@slack/bolt";
-import { appHomeOpenedCallback } from "./app-home-opened";
-import { appMentionCallback } from "./app-mention";
-import { appUninstalledCallback } from "./app-uninstalled";
-import { tokensRevokedCallback } from "./tokens-revoked";
+import { appHomeOpenedCallback } from "./app-home-opened.js";
+import { appMentionCallback } from "./app-mention.js";
+import { appUninstalledCallback } from "./app-uninstalled.js";
+import { tokensRevokedCallback } from "./tokens-revoked.js";
 
 const register = (app: App) => {
   app.event("app_mention", appMentionCallback);
