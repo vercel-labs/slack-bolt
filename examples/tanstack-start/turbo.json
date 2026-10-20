@@ -6,9 +6,9 @@
       "outputs": [".output/**", ".vercel/output/**"],
       "env": [
         "VERCEL_*",
-        "SLACK_SIGNING_SECRET",
-        "SLACK_CLIENT_ID",
-        "SLACK_CLIENT_SECRET",
+        "TANSTACK_START_SLACK_SIGNING_SECRET",
+        "TANSTACK_START_SLACK_CLIENT_ID",
+        "TANSTACK_START_SLACK_CLIENT_SECRET",
         "SLACK_STATE_SECRET",
         "TOKEN_ENCRYPTION_SECRET",
         "KV_REST_API_URL",

@@ -6,9 +6,10 @@
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"],
       "env": [
         "VERCEL_*",
-        "SLACK_SIGNING_SECRET",
-        "SLACK_CLIENT_ID",
-        "SLACK_CLIENT_SECRET",
+        "NEXTJS_SLACK_*",
+        "NEXT_SLACK_SIGNING_SECRET",
+        "NEXT_SLACK_CLIENT_ID",
+        "NEXT_SLACK_CLIENT_SECRET",
         "SLACK_STATE_SECRET",
         "TOKEN_ENCRYPTION_SECRET",
         "KV_REST_API_URL",
