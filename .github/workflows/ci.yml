@@ -4,9 +4,11 @@ on:
   pull_request:
     branches:
       - master
+      - v2
   push:
     branches:
       - master
+      - v2
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -79,6 +81,15 @@ jobs:
 
       - name: Build
         run: pnpm exec turbo run build
+
+      # Unit tests stub Bolt and attw doesn't run code, so load the built v2
+      # entry for real: its named imports from CommonJS Bolt only resolve if
+      # Node's ESM loader detects them.
+      - name: Load built v2 entry
+        working-directory: packages/slack-bolt
+        run: |
+          node -e "if (typeof require('./dist/index-v2.js').VercelReceiver !== 'function') process.exit(1)"
+          node --input-type=module -e "const { VercelReceiver } = await import('./dist/index-v2.mjs'); if (typeof VercelReceiver !== 'function') process.exit(1)"
 
       - name: Check exported types
         run: pnpm exec turbo run attw
