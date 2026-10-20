@@ -68,6 +68,13 @@ function workspaceKey(query: {
 
 type User = Installation["user"];
 
+// fetchInstallation puts the requesting user in `user` so Bolt gets their
+// token, and tags the result with the workspace's installer. Bolt saves a
+// refresh as a copy of that result, tag included, so storeInstallation keeps
+// the installer instead of recording whoever triggered the refresh.
+const INSTALLER = Symbol("installer");
+type Fetched = Installation & { [INSTALLER]?: string };
+
 export const installationStore: InstallationStore = {
   // Bolt also calls this to save refreshed tokens, with what
   // fetchInstallation returned.
@@ -78,35 +85,43 @@ export const installationStore: InstallationStore = {
       isEnterpriseInstall: installation.isEnterpriseInstall,
     });
     const { user } = installation;
-    const workspace = encrypt({ ...installation, user: { id: user.id } });
+    const installer = (installation as Fetched)[INSTALLER] ?? user.id;
+    const workspace = encrypt({ ...installation, user: { id: installer } });
+    // One atomic request, so the workspace and user token are saved together.
+    const tx = redis.multi();
     if (installation.bot) {
-      await redis.hset(key, { workspace });
+      tx.hset(key, { workspace });
     } else {
       // A user-only authorization has no bot, so don't replace a workspace
       // that has one; only save it if it's the first.
-      await redis.hsetnx(key, "workspace", workspace);
+      tx.hsetnx(key, "workspace", workspace);
     }
-    if (user.token) {
-      await redis.hset(key, { [`user:${user.id}`]: encrypt(user) });
-    }
+    if (user.token) tx.hset(key, { [`user:${user.id}`]: encrypt(user) });
+    await tx.exec();
   },
 
   fetchInstallation: async (query: InstallationQuery<boolean>) => {
     const key = workspaceKey(query);
-    const userField = `user:${query.userId}`;
+    const userField = query.userId ? `user:${query.userId}` : undefined;
     const fields = await redis.hmget<Record<string, string | null>>(
       key,
       "workspace",
-      userField,
+      ...(userField ? [userField] : []),
     );
     const workspace = fields?.workspace;
-    const user = query.userId ? fields?.[userField] : undefined;
+    const user = userField ? fields?.[userField] : undefined;
     if (!workspace) throw new Error(`No installation found for ${key}`);
     const installation = decrypt<Installation<"v1" | "v2", boolean>>(workspace);
     // Only the user who authorized gets a user token. Unlike Slack's
     // FileInstallationStore, a lookup with no user, like a bot message event,
     // doesn't get the installer's token, so no event acts as someone it isn't.
-    return user ? { ...installation, user: decrypt<User>(user) } : installation;
+    if (!user) return installation;
+    const fetched: Fetched = {
+      ...installation,
+      user: decrypt<User>(user),
+      [INSTALLER]: installation.user.id,
+    };
+    return fetched;
   },
 
   deleteInstallation: async (query: InstallationQuery<boolean>) => {
