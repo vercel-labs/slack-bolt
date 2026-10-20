@@ -42,7 +42,12 @@
   "settings": {
     "event_subscriptions": {
       "request_url": "https://<your-domain>/api/slack/events",
-      "bot_events": ["app_home_opened", "message.channels"]
+      "bot_events": [
+        "app_home_opened",
+        "message.channels",
+        "app_uninstalled",
+        "tokens_revoked"
+      ]
     },
     "interactivity": {
       "is_enabled": true,
