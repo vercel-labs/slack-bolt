@@ -25,7 +25,7 @@ bun add @vercel/slack-bolt
 
 | Dependency    | Supported versions  |
 | ------------- | ------------------- |
-| `@slack/bolt` | `^4.4.0` or `^5.0.0` |
+| `@slack/bolt` | `^4.7.3` or `^5.0.0` |
 | Node.js       | `>=22`              |
 
 `@slack/bolt` is a peer dependency, so declare it in your own `package.json` alongside this package. Do not install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer, and skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.

@@ -17,6 +17,14 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
+    "./v2": {
+      "types": {
+        "import": "./dist/index-v2.d.mts",
+        "require": "./dist/index-v2.d.ts"
+      },
+      "import": "./dist/index-v2.mjs",
+      "require": "./dist/index-v2.js"
+    },
     "./preview": {
       "types": {
         "import": "./dist/preview.d.mts",
@@ -30,6 +38,9 @@
     "*": {
       "preview": [
         "./dist/preview.d.ts"
+      ],
+      "v2": [
+        "./dist/index-v2.d.ts"
       ]
     }
   },
@@ -82,7 +93,7 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "@slack/bolt": "^4.4.0 || ^5.0.0"
+    "@slack/bolt": "^4.7.3 || ^5.0.0"
   },
   "peerDependenciesMeta": {
     "@slack/bolt": {
