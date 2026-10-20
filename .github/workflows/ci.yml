@@ -4,9 +4,11 @@ on:
   pull_request:
     branches:
       - master
+      - v2
   push:
     branches:
       - master
+      - v2
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,27 +19,24 @@ env:
   TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
 
 jobs:
-  ci:
-    name: Node.js ${{ matrix.node-version }} / Bolt ${{ matrix.slack-bolt }}.x
+  # Everything, once, on the lockfile's Bolt. Only the receiver depends on
+  # Bolt's version, so the receiver jobs below cover the rest of the range.
+  check:
+    name: Check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22, 24, 26]
-        slack-bolt: ["4", "5"]
-      fail-fast: false
     env:
-      # Turborepo doesn't hash the Node.js version, so without this the matrix
-      # jobs share Remote Cache entries and one Node version's results stand in
-      # for the others. Listed in `globalEnv` in turbo.json.
-      CI_NODE_VERSION: ${{ matrix.node-version }}
+      # Turborepo doesn't hash the Node.js version, so this keeps Remote Cache
+      # entries from one Node version standing in for another. Listed in
+      # `globalEnv` in turbo.json.
+      CI_NODE_VERSION: "24"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js ${{ env.CI_NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: ${{ env.CI_NODE_VERSION }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -60,11 +59,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Pin @slack/bolt ${{ matrix.slack-bolt }}.x
-        run: |
-          pnpm --filter @vercel/slack-bolt add -D "@slack/bolt@^${{ matrix.slack-bolt }}"
-          pnpm --filter slack-bolt-with-next add "@slack/bolt@^${{ matrix.slack-bolt }}"
-
       - name: Setup example env
         run: cp examples/nextjs/.env.example examples/nextjs/.env.local
 
@@ -82,3 +76,82 @@ jobs:
 
       - name: Check exported types
         run: pnpm exec turbo run attw
+
+  # The receiver extends Bolt's HTTPReceiver and uses its internals, so check it
+  # at both ends of the supported range: the oldest Node.js and Bolt it
+  # supports, and the newest, to catch a Bolt release that changes them.
+  receiver:
+    name: Receiver / Node.js ${{ matrix.node-version }} / Bolt ${{ matrix.slack-bolt }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # engines.node and the @slack/bolt peer range's minimums.
+          - node-version: 22.12.0
+            slack-bolt: 4.7.3
+          - node-version: 26
+            slack-bolt: latest
+      fail-fast: false
+    defaults:
+      run:
+        working-directory: packages/slack-bolt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # pnpm 11 needs Node.js 22.13 or later, so install and build on 24, then
+      # switch to the Node.js under test.
+      - name: Setup Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pin @slack/bolt ${{ matrix.slack-bolt }}
+        run: pnpm add -D "@slack/bolt@${{ matrix.slack-bolt }}"
+
+      # Typechecks the whole package, including the receiver's tests, against
+      # this Bolt's types.
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Build
+        run: pnpm exec tsdown
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # Run without pnpm, which may not support this Node.js.
+      - name: Test
+        run: ./node_modules/.bin/vitest run src/index
+
+      # Unit tests stub Bolt and attw doesn't run code, so load the built entry
+      # for real and send it one request: its named imports from CommonJS Bolt
+      # only resolve if Node's ESM loader detects them, and the CommonJS build
+      # require()s ESM-only srvx.
+      - name: Load built entry
+        run: |
+          node -e "const { VercelReceiver } = require('./dist/index.js'); new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')).then((r) => { if (r.status !== 404) process.exit(1) })"
+          node --input-type=module -e "const { VercelReceiver } = await import('./dist/index.mjs'); const r = await new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')); if (r.status !== 404) process.exit(1)"
