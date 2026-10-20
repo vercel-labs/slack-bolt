@@ -1,5 +1,5 @@
 import { App } from "@slack/bolt";
-import { VercelReceiver } from "@vercel/slack-bolt/v2";
+import { VercelReceiver } from "@vercel/slack-bolt";
 import manifest from "../../manifest.json";
 import { installationStore } from "../lib/installation-store";
 import registerListeners from "./listeners";

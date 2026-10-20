@@ -17,14 +17,6 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
-    "./v2": {
-      "types": {
-        "import": "./dist/index-v2.d.mts",
-        "require": "./dist/index-v2.d.ts"
-      },
-      "import": "./dist/index-v2.mjs",
-      "require": "./dist/index-v2.js"
-    },
     "./preview": {
       "types": {
         "import": "./dist/preview.d.mts",
@@ -38,9 +30,6 @@
     "*": {
       "preview": [
         "./dist/preview.d.ts"
-      ],
-      "v2": [
-        "./dist/index-v2.d.ts"
       ]
     }
   },
@@ -73,8 +62,6 @@
   "author": "Vercel",
   "license": "MIT",
   "dependencies": {
-    "@slack/logger": "^5.0.0",
-    "@slack/oauth": "3.0.5",
     "@vercel/functions": "^3.10.1",
     "commander": "^14.0.3",
     "srvx": "~1.0.6",

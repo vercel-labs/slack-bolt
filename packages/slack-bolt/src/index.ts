@@ -1,817 +1,290 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import {
-  type AckFn,
   type App,
+  AppInitializationError,
+  type CodedError,
+  ErrorCode,
+  HTTPReceiver,
   type HTTPReceiverOptions,
-  type Receiver,
-  ReceiverAuthenticityError,
-  type ReceiverEvent,
-  ReceiverMultipleAckError,
-  type StringIndexed,
-  verifySlackRequest,
 } from "@slack/bolt";
-import { ConsoleLogger, type Logger, LogLevel } from "@slack/logger";
-import {
-  type CallbackOptions,
-  type InstallPathOptions,
-  InstallProvider,
-  type InstallProviderOptions,
-  type InstallURLOptions,
-  type StateStore,
-} from "@slack/oauth";
 import { waitUntil } from "@vercel/functions";
-import {
-  ERROR_MESSAGES,
-  getErrorMessage,
-  getErrorType,
-  getStatusCode,
-  RequestParsingError,
-  VercelReceiverError,
-} from "./errors";
-import { createResponseCapture, toIncomingMessage } from "./oauth-adapters";
-
-// Types
-/**
- * A function to handle the request from the Slack app.
- * @param req - The request from the Slack app.
- * @returns A response object.
- */
-export type VercelHandler = (req: Request) => Promise<Response>;
+import { fetchNodeHandler } from "srvx/node";
 
 /**
- * A function that can intercept requests before they are processed by Bolt.
- * Return a Response to short-circuit processing, or undefined to continue.
- *
- * Called after signature verification and body parsing, but before Bolt event handling.
- * Note: This hook is NOT called for `url_verification` challenge requests, which are
- * handled automatically before `beforeProcess` is invoked.
- *
- * @param req - A new Request with the raw body (the original request body was consumed during parsing)
- * @param body - The parsed request body
- * @returns A Response to short-circuit processing, or undefined to continue to Bolt
- *
- * @example
- * ```typescript
- * const receiver = new VercelReceiver({
- *   signingSecret: process.env.SLACK_SIGNING_SECRET,
- *   beforeProcess: async (req, body) => {
- *     // Forward certain workspaces to a different service
- *     if (body.team_id === 'T_ENTERPRISE') {
- *       return fetch('https://enterprise-handler.example.com/slack', {
- *         method: 'POST',
- *         body: await req.text(),
- *         headers: req.headers,
- *       });
- *     }
- *     // Return undefined to continue normal Bolt processing
- *   },
- * });
- * ```
+ * Options for {@link VercelReceiver}: Bolt's `HTTPReceiver` options, minus
+ * the ones for Bolt's own server (`endpoints`, `customRoutes`, `port` and
+ * `dispatchErrorHandler`), which don't apply when your route calls `fetch`.
+ * Pass `logger` and `logLevel` here: Bolt doesn't apply the App's logger to a
+ * custom receiver. Pass the OAuth options (`clientId`, `clientSecret`,
+ * `stateSecret`, `scopes`, `installationStore`) here too, not to the App.
  */
-export type BeforeProcessFn = (
-  req: Request,
-  body: StringIndexed,
-) => Promise<Response | undefined> | Response | undefined;
-
-/**
- * A function that resolves scopes dynamically based on the request.
- * Useful for requesting different scopes based on team or user context.
- * @param req - The original request
- * @returns The scopes to request
- */
-export type ScopesResolver = (req: Request) => Promise<string[]> | string[];
-
-/**
- * Configuration options for the VercelReceiver.
- * @property signingSecret - The signing secret for the Slack app.
- * @property signatureVerification - If true, verifies the Slack request signature.
- * @property logger - The logger to use for the VercelReceiver.
- * @property logLevel - The log level to use for the VercelReceiver.
- * @property customPropertiesExtractor - A function to extract custom properties from the request.
- */
-/**
- * Options for customizing the OAuth installer behavior.
- * Mirrors the relevant subset of HTTPReceiverInstallerOptions,
- * excluding path-related options (serverless uses file-based routing).
- */
-export interface VercelInstallerOptions {
-  directInstall?: boolean;
-  renderHtmlForInstallPath?: (url: string) => string;
-  stateStore?: StateStore;
-  stateVerification?: boolean;
-  legacyStateVerification?: boolean;
-  stateCookieName?: string;
-  stateCookieExpirationSeconds?: number;
-  authVersion?: "v1" | "v2";
-  clientOptions?: InstallProviderOptions["clientOptions"];
-  authorizationUrl?: string;
-  metadata?: string;
-  userScopes?: string[];
-  installPathOptions?: InstallPathOptions;
-  callbackOptions?: CallbackOptions;
-}
-
-/**
- * Configuration options for the VercelReceiver.
- */
-export interface VercelReceiverOptions {
+export interface VercelReceiverOptions extends Omit<
+  HTTPReceiverOptions,
+  | "signingSecret"
+  | "endpoints"
+  | "customRoutes"
+  | "port"
+  | "dispatchErrorHandler"
+  | "installerOptions"
+> {
   /**
-   * The signing secret for the Slack app.
+   * Verifies that requests come from Slack. Required unless
+   * `signatureVerification` is `false`.
    * @default process.env.SLACK_SIGNING_SECRET
    */
-  signingSecret?: string;
+  signingSecret?: string | undefined;
   /**
-   * If true, verifies the Slack request signature.
-   * @default true
+   * Bolt's installer options, minus `installPath`, `redirectUriPath` and
+   * `port`: `fetch` serves the install page and OAuth callback at whatever
+   * path your route has.
    */
-  signatureVerification?: boolean;
-  /**
-   * The logger to use for the VercelReceiver.
-   * @default new ConsoleLogger()
-   */
-  logger?: Logger;
-  /**
-   * The log level to use for the VercelReceiver.
-   * @default LogLevel.INFO
-   */
-  logLevel?: LogLevel;
-  /**
-   * A function to extract custom properties from incoming events.
-   * Called after body parsing, so the parsed body is available.
-   * @default undefined
-   * @returns An object with custom properties.
-   */
-  customPropertiesExtractor?: (
-    req: Request,
-    body: StringIndexed,
-  ) => StringIndexed;
-  /**
-   * A function that can intercept requests before they are processed by Bolt.
-   * Return a Response to short-circuit processing (e.g., to forward to an external service),
-   * or undefined to continue normal Bolt processing.
-   *
-   * Called after signature verification and body parsing, but before Bolt event handling.
-   * Note: Not called for `url_verification` challenge requests.
-   * @default undefined
-   */
-  beforeProcess?: BeforeProcessFn;
-  /**
-   * The timeout in milliseconds for event acknowledgment.
-   * @default 3001
-   */
-  ackTimeoutMs?: number;
-  /**
-   * Your app's client ID, found under Basic Information on api.slack.com.
-   * Required for OAuth.
-   * @default process.env.SLACK_CLIENT_ID
-   */
-  clientId?: string;
-  /**
-   * Your app's client secret, found under Basic Information on api.slack.com.
-   * Required for OAuth.
-   * @default process.env.SLACK_CLIENT_SECRET
-   */
-  clientSecret?: string;
-  /**
-   * Secret used to generate and verify the state parameter for OAuth CSRF protection.
-   * Required unless a custom stateStore or stateVerification: false is provided.
-   * @default process.env.SLACK_STATE_SECRET
-   */
-  stateSecret?: string;
-  /**
-   * The bot scopes to request during the OAuth flow.
-   * Can be a static array or a function that resolves scopes dynamically
-   * based on the request (e.g., to request different scopes for different teams).
-   */
-  scopes?: string[] | ScopesResolver;
-  /**
-   * The redirect URI registered with your Slack app for OAuth callbacks.
-   */
-  redirectUri?: string;
-  /**
-   * Storage backend for OAuth installations (tokens, team info, etc.).
-   * Required for OAuth in serverless -- the default in-memory store does not persist.
-   */
-  installationStore?: InstallProviderOptions["installationStore"];
-  /**
-   * Advanced options for the OAuth installer.
-   */
-  installerOptions?: VercelInstallerOptions;
+  installerOptions?: Omit<
+    NonNullable<HTTPReceiverOptions["installerOptions"]>,
+    "installPath" | "redirectUriPath" | "port"
+  >;
 }
 
-// ---------------------------------------------------------------------------
-// Compile-time shape assertions
-// Verify our types match Bolt's underlying shapes without coupling optionality.
-// If Bolt changes a type upstream, tsc breaks here -- not in user-land at runtime.
-// ---------------------------------------------------------------------------
-type AssertShape<Source, Target> =
-  NonNullable<Source> extends NonNullable<Target> ? true : never;
+// The paths we give Bolt. fetch points each request at one of them, so they
+// never need to match the URLs Slack and your users call.
+const ENDPOINT = "/slack/events";
+const INSTALL_PATH = "/slack/install";
+const CALLBACK_PATH = "/slack/oauth_redirect";
 
-type _S1 = AssertShape<
-  VercelReceiverOptions["clientId"],
-  HTTPReceiverOptions["clientId"]
->;
-type _S2 = AssertShape<
-  VercelReceiverOptions["clientSecret"],
-  HTTPReceiverOptions["clientSecret"]
->;
-type _S3 = AssertShape<
-  VercelReceiverOptions["stateSecret"],
-  HTTPReceiverOptions["stateSecret"]
->;
-type _S4 = AssertShape<
-  VercelReceiverOptions["scopes"],
-  HTTPReceiverOptions["scopes"]
->;
-type _S5 = AssertShape<
-  VercelReceiverOptions["redirectUri"],
-  HTTPReceiverOptions["redirectUri"]
->;
-type _S6 = AssertShape<
-  VercelReceiverOptions["installationStore"],
-  HTTPReceiverOptions["installationStore"]
->;
-type _S7 = AssertShape<
-  VercelInstallerOptions["stateVerification"],
-  InstallProviderOptions["stateVerification"]
->;
-type _S8 = AssertShape<
-  VercelInstallerOptions["callbackOptions"],
-  CallbackOptions
->;
-type _S9 = AssertShape<
-  VercelInstallerOptions["stateStore"],
-  InstallProviderOptions["stateStore"]
->;
-type _S10 = AssertShape<
-  VercelInstallerOptions["authVersion"],
-  InstallProviderOptions["authVersion"]
->;
-type _S11 = AssertShape<
-  VercelInstallerOptions["userScopes"],
-  InstallURLOptions["userScopes"]
->;
-type _S12 = AssertShape<
-  VercelInstallerOptions["metadata"],
-  InstallURLOptions["metadata"]
->;
+// Slack sends these to the OAuth callback, never to the install page.
+const CALLBACK_PARAMS = ["code", "error", "state"];
 
-const LOG_PREFIX = "[@vercel/slack-bolt]";
-const ACK_TIMEOUT_MS = 3001;
-const SLACK_RETRY_NUM_HEADER = "x-slack-retry-num";
-const SLACK_RETRY_REASON_HEADER = "x-slack-retry-reason";
-const SLACK_TIMESTAMP_HEADER = "x-slack-request-timestamp";
-const SLACK_SIGNATURE_HEADER = "x-slack-signature";
+const BODY_USED =
+  "Request body already read. Bolt needs the raw body to verify Slack's signature, so pass request.clone() to fetch instead.";
+
+const noop = () => {};
+
+/** Keeps the function running until `work` settles, and returns `work`. */
+function keepAlive<T>(work: T): T {
+  waitUntil(Promise.resolve(work).then(noop, noop));
+  return work;
+}
+
+const isDeferred = (error: unknown) =>
+  (error as CodedError | undefined)?.code ===
+  ErrorCode.HTTPReceiverDeferredRequestError;
+
+/** The path of `redirectUri`, which Bolt needs as `redirectUriPath`. */
+function pathOf(redirectUri: string): string {
+  try {
+    return new URL(redirectUri).pathname;
+  } catch {
+    throw new AppInitializationError(
+      `redirectUri must be an absolute URL, like https://example.com/api/slack, but it's "${redirectUri}".`,
+    );
+  }
+}
 
 /**
- * A Slack Bolt receiver implementation designed for Vercel's serverless environment.
- * Handles Slack events, interactions, and slash commands with automatic request verification,
- * background processing, and timeout management.
+ * A Bolt receiver for Vercel Functions.
+ *
+ * Extends Bolt's `HTTPReceiver` and keeps each event's listeners running with
+ * `waitUntil` after Slack has been acknowledged. Serve it with
+ * {@link VercelReceiver.fetch} from a route at any path.
  *
  * @example
- * ```typescript
- * import { App } from '@slack/bolt';
- * import { VercelReceiver, createHandler } from '@vercel/slack-bolt';
+ * ```ts
+ * // lib/slack.ts
+ * import { App } from "@slack/bolt";
+ * import { VercelReceiver } from "@vercel/slack-bolt";
  *
  * const receiver = new VercelReceiver();
- *
  * const app = new App({
  *   receiver,
  *   token: process.env.SLACK_BOT_TOKEN,
- *   signingSecret: process.env.SLACK_SIGNING_SECRET,
+ *   // Checks the token on the first event, and again if that fails.
+ *   deferInitialization: true,
  * });
- * ```
  *
+ * export const { POST } = receiver;
+ *
+ * // app/api/slack/route.ts
+ * export { POST } from "@/lib/slack";
+ * ```
  */
-export class VercelReceiver implements Receiver {
-  private readonly signingSecret: string;
-  private readonly signatureVerification: boolean;
-  private readonly logger: Logger;
-  private readonly customPropertiesExtractor?: (
-    req: Request,
-    body: StringIndexed,
-  ) => StringIndexed;
-  private readonly beforeProcess?: BeforeProcessFn;
-  private readonly ackTimeoutMs: number;
-  private app?: App;
-
-  public installer?: InstallProvider;
-  private installUrlOptions?: InstallURLOptions;
-  private scopesResolver?: ScopesResolver;
-  private installCallbackOptions?: CallbackOptions;
-  private installPathOptions?: InstallPathOptions;
-  private stateVerification?: boolean;
-
+export class VercelReceiver extends HTTPReceiver {
   /**
-   * Gets the logger instance used by this receiver.
-   * @returns The logger instance
-   */
-  public getLogger(): Logger {
-    return this.logger;
-  }
-
-  /**
-   * Creates a new VercelReceiver instance.
+   * Handles a Slack request and resolves with the response once Slack is
+   * acknowledged; listeners keep running with `waitUntil`. Mount it at any
+   * path and point your Slack app's request URLs there: `POST` requests are
+   * events, commands and interactions. With the OAuth options, a `GET` with a
+   * `code`, `error` or `state` parameter is the OAuth callback and any other
+   * `GET` is the install page, so one route or separate ones both work.
+   * Anything else is a 404.
    *
-   * @param options - Configuration options for the receiver
-   * @throws {VercelReceiverError} When signing secret is not provided
-   *
-   * @example
-   * ```typescript
-   * const receiver = new VercelReceiver();
-   * ```
+   * @throws {TypeError} When the request body was already read.
    */
-  public constructor({
-    signingSecret = process.env.SLACK_SIGNING_SECRET,
-    signatureVerification = true,
-    logger,
-    logLevel = LogLevel.INFO,
-    customPropertiesExtractor,
-    beforeProcess,
-    ackTimeoutMs = ACK_TIMEOUT_MS,
-    clientId = process.env.SLACK_CLIENT_ID,
-    clientSecret = process.env.SLACK_CLIENT_SECRET,
-    stateSecret = process.env.SLACK_STATE_SECRET,
-    scopes,
-    redirectUri,
-    installationStore,
-    installerOptions = {},
-  }: VercelReceiverOptions = {}) {
-    if (!signingSecret) {
-      throw new VercelReceiverError(ERROR_MESSAGES.SIGNING_SECRET_REQUIRED);
+  public readonly fetch = async (request: Request): Promise<Response> => {
+    if (request.bodyUsed) throw new TypeError(BODY_USED);
+    try {
+      return await fetchNodeHandler(
+        (req: IncomingMessage, res: ServerResponse) => this.#route(req, res),
+        request,
+      );
+    } catch (error) {
+      // srvx's own Node server rejects instead of answering.
+      this["logger"].error("Couldn't handle the Slack request.", error);
+      return new Response(null, { status: 500 });
     }
-
-    this.signingSecret = signingSecret;
-    this.signatureVerification = signatureVerification;
-    this.logger = this.createScopedLogger(
-      logger ?? new ConsoleLogger(),
-      logLevel,
-    );
-    this.customPropertiesExtractor = customPropertiesExtractor;
-    this.beforeProcess = beforeProcess;
-    this.ackTimeoutMs = ackTimeoutMs;
-
-    this.stateVerification = installerOptions.stateVerification;
-
-    if (
-      clientId !== undefined &&
-      clientSecret !== undefined &&
-      (installerOptions.stateVerification === false ||
-        stateSecret !== undefined ||
-        installerOptions.stateStore !== undefined)
-    ) {
-      this.installer = new InstallProvider({
-        clientId,
-        clientSecret,
-        stateSecret,
-        installationStore,
-        logger,
-        logLevel,
-        directInstall: installerOptions.directInstall,
-        stateStore: installerOptions.stateStore,
-        stateVerification: installerOptions.stateVerification,
-        legacyStateVerification: installerOptions.legacyStateVerification,
-        stateCookieName: installerOptions.stateCookieName,
-        stateCookieExpirationSeconds:
-          installerOptions.stateCookieExpirationSeconds,
-        renderHtmlForInstallPath: installerOptions.renderHtmlForInstallPath,
-        authVersion: installerOptions.authVersion ?? "v2",
-        clientOptions: installerOptions.clientOptions,
-        authorizationUrl: installerOptions.authorizationUrl,
-      });
-
-      // If scopes is a function, store it separately for dynamic resolution
-      if (typeof scopes === "function") {
-        this.scopesResolver = scopes;
-        this.installUrlOptions = {
-          scopes: [], // Will be resolved dynamically in handleInstall
-          userScopes: installerOptions.userScopes,
-          metadata: installerOptions.metadata,
-          redirectUri,
-        };
-      } else {
-        this.installUrlOptions = {
-          scopes: scopes ?? [],
-          userScopes: installerOptions.userScopes,
-          metadata: installerOptions.metadata,
-          redirectUri,
-        };
-      }
-      this.installCallbackOptions = installerOptions.callbackOptions ?? {};
-      this.installPathOptions = installerOptions.installPathOptions ?? {};
-    }
-
-    this.logger.debug("VercelReceiver initialized");
-  }
-
-  /**
-   * Initializes the receiver with a Slack Bolt app instance.
-   * This method is called automatically by the Bolt framework.
-   *
-   * @param app - The Slack Bolt app instance
-   */
-  public init(app: App): void {
-    this.app = app;
-    this.logger.debug("App initialized in VercelReceiver");
-  }
-
-  /**
-   * Starts the receiver and returns a handler function for processing requests.
-   * This method is called automatically by the Bolt framework.
-   *
-   * @returns A handler function that processes incoming Slack requests
-   */
-  public async start(): Promise<VercelHandler> {
-    this.logger.debug("VercelReceiver started");
-    return this.toHandler();
-  }
-
-  /**
-   * Stops the receiver. This method is called automatically by the Bolt framework.
-   */
-  public async stop(): Promise<void> {
-    this.logger.debug("VercelReceiver stopped");
-  }
-
-  /**
-   * Handles requests to the OAuth install path.
-   * Renders an "Add to Slack" page or redirects directly to Slack's authorize URL.
-   */
-  public handleInstall = async (req: Request): Promise<Response> => {
-    if (!this.installer) {
-      throw new VercelReceiverError(ERROR_MESSAGES.OAUTH_NOT_CONFIGURED);
-    }
-
-    const nodeReq = toIncomingMessage(req);
-    const capture = createResponseCapture();
-
-    // Resolve scopes dynamically if a resolver function was provided
-    let installUrlOptions = this.installUrlOptions;
-    if (this.scopesResolver && installUrlOptions) {
-      const resolvedScopes = await this.scopesResolver(req);
-      installUrlOptions = {
-        ...installUrlOptions,
-        scopes: resolvedScopes,
-      };
-    }
-
-    await this.installer.handleInstallPath(
-      nodeReq,
-      capture,
-      this.installPathOptions,
-      installUrlOptions,
-    );
-
-    return capture.toResponse();
   };
 
-  /**
-   * Handles the OAuth redirect callback from Slack.
-   * Exchanges the authorization code for tokens and stores the installation.
-   */
-  public handleCallback = async (req: Request): Promise<Response> => {
-    if (!this.installer) {
-      throw new VercelReceiverError(ERROR_MESSAGES.OAUTH_NOT_CONFIGURED);
-    }
+  /** {@link VercelReceiver.fetch} for a framework's `POST` route export. */
+  public readonly POST = (request: Request): Promise<Response> =>
+    this.fetch(request);
 
-    const nodeReq = toIncomingMessage(req);
-    const capture = createResponseCapture();
+  /** {@link VercelReceiver.fetch} for a framework's `GET` route export. */
+  public readonly GET = (request: Request): Promise<Response> =>
+    this.fetch(request);
 
-    if (this.stateVerification === false) {
-      await this.installer.handleCallback(
-        nodeReq,
-        capture,
-        this.installCallbackOptions,
-        this.installUrlOptions,
-      );
-    } else {
-      await this.installer.handleCallback(
-        nodeReq,
-        capture,
-        this.installCallbackOptions,
-      );
-    }
-
-    return capture.toResponse();
-  };
+  readonly #installPath: string;
+  readonly #callbackPath: string;
 
   /**
-   * Creates a handler function that processes incoming Slack requests.
-   * This is the main entry point for handling Slack events in Vercel.
-   * It is called automatically by the Bolt framework in the start() method.
-   *
-   * @returns A handler function compatible with Vercel's function signature
+   * @param options Bolt `HTTPReceiver` options. `signingSecret` defaults to
+   * `process.env.SLACK_SIGNING_SECRET`.
+   * @throws {AppInitializationError} When the signing secret is missing and
+   * `signatureVerification` isn't `false`, when `clientId` is set without an
+   * `installationStore`, or when `redirectUri` isn't an absolute URL.
    */
-  public toHandler(): VercelHandler {
-    return async (req: Request): Promise<Response> => {
-      try {
-        const rawBody = await req.text();
+  public constructor(options: VercelReceiverOptions = {}) {
+    const {
+      signingSecret = process.env.SLACK_SIGNING_SECRET ?? "",
+      processEventErrorHandler,
+      installerOptions,
+      ...rest
+    } = options;
 
-        if (this.signatureVerification) {
-          this.verifyRequest(req, rawBody);
-        }
-
-        const body = await this.parseRequestBody(req, rawBody);
-
-        if (body.type === "url_verification") {
-          this.logger.debug("Handling URL verification challenge");
-          return Response.json({ challenge: body.challenge });
-        }
-
-        // Allow beforeProcess to intercept and short-circuit processing.
-        // We pass a new Request with the raw body since req.text() was already consumed.
-        if (this.beforeProcess) {
-          const reqWithBody = new Request(req.url, {
-            method: req.method,
-            headers: req.headers,
-            body: rawBody,
-          });
-          const interceptResponse = await this.beforeProcess(reqWithBody, body);
-          if (interceptResponse) {
-            this.logger.debug("Request intercepted by beforeProcess");
-            return interceptResponse;
-          }
-        }
-
-        return await this.handleSlackEvent(req, body);
-      } catch (error) {
-        return this.handleError(error);
-      }
-    };
-  }
-
-  private async parseRequestBody(
-    req: Request,
-    rawBody: string,
-  ): Promise<StringIndexed> {
-    const contentType = req.headers.get("content-type");
-
-    try {
-      if (contentType === "application/x-www-form-urlencoded") {
-        const parsedBody: StringIndexed = {};
-        const params = new URLSearchParams(rawBody);
-
-        for (const [key, value] of params.entries()) {
-          parsedBody[key] = value;
-        }
-
-        if (typeof parsedBody.payload === "string") {
-          return JSON.parse(parsedBody.payload);
-        }
-        return parsedBody;
-      }
-      if (contentType === "application/json") {
-        return JSON.parse(rawBody);
-      }
-
-      this.logger.warn(`Unexpected content-type detected: ${contentType}`);
-
-      return JSON.parse(rawBody);
-    } catch (e) {
-      throw new RequestParsingError(
-        `Failed to parse body as JSON data for content-type: ${contentType}. Error: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      );
-    }
-  }
-
-  private async handleSlackEvent(
-    req: Request,
-    body: StringIndexed,
-  ): Promise<Response> {
-    if (!this.app) {
-      throw new VercelReceiverError(ERROR_MESSAGES.APP_NOT_INITIALIZED, 500);
-    }
-
-    let isAcknowledged = false;
-    let responseResolver: (value: Response) => void;
-    let responseRejecter: (error: Error) => void;
-
-    const responsePromise = new Promise<Response>((resolve, reject) => {
-      responseResolver = resolve;
-      responseRejecter = reject;
-    });
-
-    // Slack requires an acknowledgment from your app within 3 seconds
-    const timeoutId = setTimeout(() => {
-      if (!isAcknowledged) {
-        isAcknowledged = true;
-        this.logger.error(ERROR_MESSAGES.EVENT_NOT_ACKNOWLEDGED);
-        const error = new VercelReceiverError(
-          ERROR_MESSAGES.REQUEST_TIMEOUT,
-          408,
-        );
-        responseRejecter(error);
-      }
-    }, this.ackTimeoutMs);
-
-    // Create acknowledgment function
-    const ackFn: AckFn<StringIndexed> = async (responseBody) => {
-      this.logger.debug(`ack() call begins (body: ${responseBody})`);
-      if (isAcknowledged) {
-        throw new ReceiverMultipleAckError();
-      }
-
-      isAcknowledged = true;
-      clearTimeout(timeoutId);
-
-      try {
-        let body: string | undefined;
-        if (typeof responseBody === "undefined") {
-          body = undefined;
-        } else if (typeof responseBody === "string") {
-          body = responseBody;
-        } else {
-          body = JSON.stringify(responseBody);
-        }
-        const response = new Response(body, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
-
-        responseResolver(response);
-      } catch (error) {
-        this.logger.error(ERROR_MESSAGES.ACKNOWLEDGMENT_ERROR, error);
-        responseRejecter(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    };
-
-    const event = this.createSlackReceiverEvent({
-      body,
-      headers: req.headers,
-      ack: ackFn,
-      request: req,
-    });
-
-    // Process event in background using waitUntil from Vercel Functions
-    // https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil
-    waitUntil(
-      this.app.processEvent(event).catch((error) => {
-        return this.handleError(error);
-      }),
-    );
-
-    try {
-      return await responsePromise;
-    } catch (error) {
-      return this.handleError(error);
-    }
-  }
-
-  private verifyRequest(req: Request, body: string): void {
-    const timestamp = req.headers.get(SLACK_TIMESTAMP_HEADER);
-    const signature = req.headers.get(SLACK_SIGNATURE_HEADER);
-
-    if (!signature) {
-      throw new ReceiverAuthenticityError(
-        ERROR_MESSAGES.MISSING_REQUIRED_HEADER(SLACK_SIGNATURE_HEADER),
+    // Fail closed with a clear message: Bolt < 4.7.3 accepts an empty secret,
+    // and pnpm and yarn don't enforce the peer range.
+    if (rest.signatureVerification !== false && !signingSecret) {
+      throw new AppInitializationError(
+        "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.",
       );
     }
 
-    if (!timestamp) {
-      throw new ReceiverAuthenticityError(
-        ERROR_MESSAGES.MISSING_REQUIRED_HEADER(SLACK_TIMESTAMP_HEADER),
+    // Bolt's default store keeps installations in memory, which Vercel doesn't
+    // share between instances or keep across deployments.
+    if (rest.clientId !== undefined && !rest.installationStore) {
+      throw new AppInitializationError(
+        "Missing installationStore. OAuth needs one that saves installations somewhere lasting, like a database, because Bolt's default keeps them in memory.",
       );
     }
 
-    try {
-      verifySlackRequest({
-        signingSecret: this.signingSecret,
-        body,
-        headers: {
-          "x-slack-signature": signature,
-          "x-slack-request-timestamp": Number.parseInt(timestamp, 10),
-        },
-        logger: this.logger,
-      });
-    } catch (error) {
-      throw new ReceiverAuthenticityError(
-        error instanceof Error
-          ? error.message
-          : "Failed to verify request signature",
-      );
-    }
-  }
+    // Bolt requires redirectUriPath to match the end of redirectUri, and the
+    // install page can't share the callback's path.
+    const callbackPath = rest.redirectUri
+      ? pathOf(rest.redirectUri)
+      : CALLBACK_PATH;
+    const installPath = callbackPath === INSTALL_PATH ? ENDPOINT : INSTALL_PATH;
 
-  private createSlackReceiverEvent({
-    body,
-    headers,
-    ack,
-    request,
-  }: {
-    body: StringIndexed;
-    headers: Headers;
-    ack: AckFn<StringIndexed>;
-    request: Request;
-  }): ReceiverEvent {
-    const customProperties = this.customPropertiesExtractor
-      ? this.customPropertiesExtractor(request, body)
-      : {};
-
-    const retryNum = headers.get(SLACK_RETRY_NUM_HEADER) || "0";
-
-    const retryReason = headers.get(SLACK_RETRY_REASON_HEADER) || "";
-
-    return {
-      body,
-      ack,
-      retryNum: Number(retryNum),
-      retryReason,
-      customProperties,
-    };
-  }
-
-  public handleError(error: unknown): Response {
-    const errorMessage = getErrorMessage(error);
-    const errorType = getErrorType(error);
-    const errorStatusCode = getStatusCode(error);
-
-    this.logger.error(error);
-    return new Response(
-      JSON.stringify({
-        error: errorMessage,
-        type: errorType,
-      }),
-      {
-        status: errorStatusCode,
-        headers: { "content-type": "application/json" },
+    super({
+      ...rest,
+      signingSecret,
+      endpoints: ENDPOINT,
+      installerOptions: {
+        ...installerOptions,
+        installPath,
+        redirectUriPath: callbackPath,
       },
+      // Bolt runs it after processEvent has settled, so keep it alive too.
+      ...(processEventErrorHandler && {
+        processEventErrorHandler: (args) =>
+          keepAlive(processEventErrorHandler(args)),
+      }),
+    });
+    this.#installPath = installPath;
+    this.#callbackPath = callbackPath;
+  }
+
+  /** The Bolt path that handles a request, whatever path it came in on. */
+  #pathFor(method: string | undefined, params: URLSearchParams): string {
+    // Bolt only serves GET with the OAuth options.
+    if (method !== "GET" || !this.installer) return ENDPOINT;
+    return CALLBACK_PARAMS.some((param) => params.has(param))
+      ? this.#callbackPath
+      : this.#installPath;
+  }
+
+  // Bolt's requestListener routes by path, but the framework has already
+  // routed this request, so send it to Bolt's path whatever its own.
+  #route(req: IncomingMessage, res: ServerResponse): void {
+    const original = req.url;
+    const { search, searchParams } = new URL(
+      original ?? "/",
+      "http://localhost",
+    );
+    req.url = this.#pathFor(req.method, searchParams) + search;
+
+    try {
+      this.requestListener(req, res);
+    } catch (error) {
+      // Bolt only handles POST, and GET with the OAuth options.
+      if (isDeferred(error)) {
+        res.writeHead(404).end();
+        return;
+      }
+      // Log through our logger, not srvx's console.error with every header.
+      this["logger"].error("Couldn't handle the Slack request.", error);
+      if (!res.headersSent) res.writeHead(500).end();
+    } finally {
+      // Bolt has routed by now; leave the framework's request as it was.
+      req.url = original;
+    }
+  }
+
+  /**
+   * Called by Bolt when the `App` is created. Registers each event's
+   * processing with `waitUntil` so listeners finish after the response, and
+   * runs `app.init()` on the first event for an App created with
+   * `deferInitialization`.
+   */
+  public override init(app: App): void {
+    // An App created with deferInitialization waits for app.init(), which
+    // nothing calls on Vercel. Run it once, on the first event, and have
+    // concurrent events wait for it. Retry on the next event if it fails.
+    let initializing: Promise<void> | undefined;
+    const ready = () => {
+      if (
+        !initializing &&
+        (app as unknown as { initialized?: boolean }).initialized === false
+      ) {
+        initializing = app.init().then(
+          () => {
+            initializing = undefined;
+          },
+          (error: unknown) => {
+            initializing = undefined;
+            // Bolt only logs a generic error for the event, so say why.
+            this["logger"].error(
+              "app.init() failed, so this event wasn't processed. It runs again on the next event.",
+              error,
+            );
+            throw error;
+          },
+        );
+      }
+      return initializing;
+    };
+
+    const processEvent: App["processEvent"] = (event) => {
+      const pending = ready();
+      return keepAlive(
+        pending
+          ? pending.then(() => app.processEvent(event))
+          : app.processEvent(event),
+      );
+    };
+    super.init(
+      new Proxy(app, {
+        get: (target, prop, receiver) =>
+          prop === "processEvent"
+            ? processEvent
+            : Reflect.get(target, prop, receiver),
+      }),
     );
   }
-
-  private createScopedLogger(logger: Logger, logLevel: LogLevel): Logger {
-    logger.setLevel(logLevel);
-
-    return {
-      ...logger,
-      error: (...args) => logger.error?.(LOG_PREFIX, ...args),
-      warn: (...args) => logger.warn?.(LOG_PREFIX, ...args),
-      info: (...args) => logger.info?.(LOG_PREFIX, ...args),
-      debug: (...args) => logger.debug?.(LOG_PREFIX, ...args),
-      setLevel: logger.setLevel,
-      getLevel: logger.getLevel,
-    };
-  }
-}
-
-/**
- * Creates a Vercel-compatible handler function for a Slack Bolt app.
- * This is the recommended way to create handlers for deployment on Vercel.
- *
- * @param {App} app - The initialized Slack Bolt app instance.
- * @param {VercelReceiver} receiver - The VercelReceiver instance.
- * @returns {VercelHandler} A handler function compatible with Vercel's function signature.
- *
- * @example
- * ```typescript
- * // api/events.ts
- * import { createHandler } from '@vercel/slack-bolt';
- * import { app, receiver } from '../app';
- *
- * const handler = createHandler(app, receiver);
- *
- * export const POST = async (req: Request) => {
- *   return handler(req);
- * };
- * ```
- *
- * @throws {Error} If app initialization fails.
- * @throws {VercelReceiverError} If request processing fails.
- */
-export function createHandler(
-  app: App,
-  receiver: VercelReceiver,
-): VercelHandler {
-  let initPromise: Promise<void> | null = null;
-
-  return async (req: Request) => {
-    try {
-      if (!initPromise) {
-        initPromise = app.init().catch((error) => {
-          // Reset initPromise so subsequent requests can retry initialization
-          initPromise = null;
-          throw error;
-        });
-      }
-      await initPromise;
-
-      receiver.init(app);
-      const handler = await receiver.start();
-      return handler(req);
-    } catch (error) {
-      // if app.init fails, we use console.error instead of logger.error because the logger is not available
-      console.error(ERROR_MESSAGES.CREATE_HANDLER_ERROR, error);
-      return new Response(
-        JSON.stringify({
-          error: ERROR_MESSAGES.INTERNAL_SERVER_ERROR_HANDLER,
-          type: ERROR_MESSAGES.TYPES.HANDLER_ERROR,
-        }),
-        { status: 500, headers: { "content-type": "application/json" } },
-      );
-    }
-  };
 }
