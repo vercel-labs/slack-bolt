@@ -1,0 +1,7 @@
+{
+  "extends": "nitro/tsconfig",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src", "nitro.config.ts"]
+}

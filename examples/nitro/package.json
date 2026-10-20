@@ -1,0 +1,27 @@
+{
+  "name": "slack-bolt-with-nitro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nitro dev",
+    "build": "nitro build",
+    "start": "nitro preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src && oxfmt --check src",
+    "lint:fix": "oxlint --fix src && oxfmt src"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/slack-bolt": "workspace:*",
+    "nitro": "3.0.260903-beta"
+  },
+  "devDependencies": {
+    "@slack/cli-hooks": "^2.0.0",
+    "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
