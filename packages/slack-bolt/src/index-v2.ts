@@ -15,9 +15,8 @@ import { fetchNodeHandler } from "srvx/node";
  * the ones for Bolt's own server (`endpoints`, `customRoutes`, `port` and
  * `dispatchErrorHandler`), which don't apply when your route calls `fetch`.
  * Pass `logger` and `logLevel` here: Bolt doesn't apply the App's logger to a
- * custom receiver. The OAuth options authorize events from your
- * `installationStore`, but `fetch` doesn't serve the install or redirect
- * pages yet.
+ * custom receiver. Pass the OAuth options (`clientId`, `clientSecret`,
+ * `stateSecret`, `scopes`, `installationStore`) here too, not to the App.
  */
 export interface VercelReceiverOptions extends Omit<
   HTTPReceiverOptions,
@@ -26,6 +25,7 @@ export interface VercelReceiverOptions extends Omit<
   | "customRoutes"
   | "port"
   | "dispatchErrorHandler"
+  | "installerOptions"
 > {
   /**
    * Verifies that requests come from Slack. Required unless
@@ -33,11 +33,25 @@ export interface VercelReceiverOptions extends Omit<
    * @default process.env.SLACK_SIGNING_SECRET
    */
   signingSecret?: string | undefined;
+  /**
+   * Bolt's installer options, minus `installPath`, `redirectUriPath` and
+   * `port`: `fetch` serves the install page and OAuth callback at whatever
+   * path your route has.
+   */
+  installerOptions?: Omit<
+    NonNullable<HTTPReceiverOptions["installerOptions"]>,
+    "installPath" | "redirectUriPath" | "port"
+  >;
 }
 
-// The one endpoint we give Bolt. fetch points every request here, so it never
-// needs to match the URL Slack calls.
+// The paths we give Bolt. fetch points each request at one of them, so they
+// never need to match the URLs Slack and your users call.
 const ENDPOINT = "/slack/events";
+const INSTALL_PATH = "/slack/install";
+const CALLBACK_PATH = "/slack/oauth_redirect";
+
+// Slack sends these to the OAuth callback, never to the install page.
+const CALLBACK_PARAMS = ["code", "error", "state"];
 
 const BODY_USED =
   "Request body already read. Bolt needs the raw body to verify Slack's signature, so pass request.clone() to fetch instead.";
@@ -53,6 +67,17 @@ function keepAlive<T>(work: T): T {
 const isDeferred = (error: unknown) =>
   (error as CodedError | undefined)?.code ===
   ErrorCode.HTTPReceiverDeferredRequestError;
+
+/** The path of `redirectUri`, which Bolt needs as `redirectUriPath`. */
+function pathOf(redirectUri: string): string {
+  try {
+    return new URL(redirectUri).pathname;
+  } catch {
+    throw new AppInitializationError(
+      `redirectUri must be an absolute URL, like https://example.com/api/slack, but it's "${redirectUri}".`,
+    );
+  }
+}
 
 /**
  * A Bolt receiver for Vercel Functions.
@@ -86,7 +111,10 @@ export class VercelReceiver extends HTTPReceiver {
    * Handles a Slack request and resolves with the response once Slack is
    * acknowledged; listeners keep running with `waitUntil`. Mount it at any
    * path and point your Slack app's request URLs there: `POST` requests are
-   * events, commands and interactions, and anything else is a 404.
+   * events, commands and interactions. With the OAuth options, a `GET` with a
+   * `code`, `error` or `state` parameter is the OAuth callback and any other
+   * `GET` is the install page, so one route or separate ones both work.
+   * Anything else is a 404.
    *
    * @throws {TypeError} When the request body was already read.
    */
@@ -108,16 +136,25 @@ export class VercelReceiver extends HTTPReceiver {
   public readonly POST = (request: Request): Promise<Response> =>
     this.fetch(request);
 
+  /** {@link VercelReceiver.fetch} for a framework's `GET` route export. */
+  public readonly GET = (request: Request): Promise<Response> =>
+    this.fetch(request);
+
+  readonly #installPath: string;
+  readonly #callbackPath: string;
+
   /**
    * @param options Bolt `HTTPReceiver` options. `signingSecret` defaults to
    * `process.env.SLACK_SIGNING_SECRET`.
    * @throws {AppInitializationError} When the signing secret is missing and
-   * `signatureVerification` isn't `false`.
+   * `signatureVerification` isn't `false`, when `clientId` is set without an
+   * `installationStore`, or when `redirectUri` isn't an absolute URL.
    */
   public constructor(options: VercelReceiverOptions = {}) {
     const {
       signingSecret = process.env.SLACK_SIGNING_SECRET ?? "",
       processEventErrorHandler,
+      installerOptions,
       ...rest
     } = options;
 
@@ -129,29 +166,63 @@ export class VercelReceiver extends HTTPReceiver {
       );
     }
 
+    // Bolt's default store keeps installations in memory, which Vercel doesn't
+    // share between instances or keep across deployments.
+    if (rest.clientId !== undefined && !rest.installationStore) {
+      throw new AppInitializationError(
+        "Missing installationStore. OAuth needs one that saves installations somewhere lasting, like a database, because Bolt's default keeps them in memory.",
+      );
+    }
+
+    // Bolt requires redirectUriPath to match the end of redirectUri, and the
+    // install page can't share the callback's path.
+    const callbackPath = rest.redirectUri
+      ? pathOf(rest.redirectUri)
+      : CALLBACK_PATH;
+    const installPath = callbackPath === INSTALL_PATH ? ENDPOINT : INSTALL_PATH;
+
     super({
       ...rest,
       signingSecret,
       endpoints: ENDPOINT,
+      installerOptions: {
+        ...installerOptions,
+        installPath,
+        redirectUriPath: callbackPath,
+      },
       // Bolt runs it after processEvent has settled, so keep it alive too.
       ...(processEventErrorHandler && {
         processEventErrorHandler: (args) =>
           keepAlive(processEventErrorHandler(args)),
       }),
     });
+    this.#installPath = installPath;
+    this.#callbackPath = callbackPath;
+  }
+
+  /** The Bolt path that handles a request, whatever path it came in on. */
+  #pathFor(method: string | undefined, params: URLSearchParams): string {
+    // Bolt only serves GET with the OAuth options.
+    if (method !== "GET" || !this.installer) return ENDPOINT;
+    return CALLBACK_PARAMS.some((param) => params.has(param))
+      ? this.#callbackPath
+      : this.#installPath;
   }
 
   // Bolt's requestListener routes by path, but the framework has already
-  // routed this request, so send it to Bolt's endpoint whatever its path.
+  // routed this request, so send it to Bolt's path whatever its own.
   #route(req: IncomingMessage, res: ServerResponse): void {
     const original = req.url;
-    const { search } = new URL(original ?? "/", "http://localhost");
-    req.url = ENDPOINT + search;
+    const { search, searchParams } = new URL(
+      original ?? "/",
+      "http://localhost",
+    );
+    req.url = this.#pathFor(req.method, searchParams) + search;
 
     try {
       this.requestListener(req, res);
     } catch (error) {
-      // Bolt only handles POST at its endpoint.
+      // Bolt only handles POST, and GET with the OAuth options.
       if (isDeferred(error)) {
         res.writeHead(404).end();
         return;

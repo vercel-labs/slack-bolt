@@ -2,17 +2,24 @@
 // network calls. They check the Bolt behaviour index-v2.test.ts stubs out:
 // App's constructor calls receiver.init(app), HTTPReceiver calls processEvent
 // on the app it was given with `this` intact, and HTTPReceiver keeps its
-// logger in the `logger` field we log through. Requests go through fetch both
+// logger in the `logger` field we log through, and Bolt's OAuth installer runs
+// on fetch's Node request and response. Requests go through fetch both
 // as plain Requests and from srvx's own Node server, which hands fetch the
 // real Node request.
 import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { App, AppInitializationError, type AppOptions } from "@slack/bolt";
+import {
+  App,
+  AppInitializationError,
+  type AppOptions,
+  type Installation,
+  type InstallationStore,
+} from "@slack/bolt";
 import { waitUntil } from "@vercel/functions";
 import { toNodeHandler } from "srvx/node";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VercelReceiver, type VercelReceiverOptions } from "./index-v2";
 
 vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
@@ -274,4 +281,136 @@ it("leaves the real Node request's URL as it was on srvx's Node server", async (
   expect(response.status).toBe(200);
   expect(notFound.status).toBe(404);
   expect(urlsAfter).toEqual(["/webhooks/slack", "/webhooks/slack?a=1"]);
+});
+
+describe("OAuth", () => {
+  let api: Server | undefined;
+  afterEach(async () => {
+    api?.close();
+    if (api) await once(api, "close");
+    api = undefined;
+  });
+
+  /** A fake Slack Web API for the OAuth callback; resolves with its URL. */
+  async function fakeSlackApi() {
+    api = createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url?.startsWith("/oauth.v2.access")) {
+        res.end(
+          JSON.stringify({
+            ok: true,
+            app_id: "A1",
+            authed_user: { id: "U9" },
+            scope: "chat:write",
+            token_type: "bot",
+            access_token: "xoxb-installed",
+            bot_user_id: "U1",
+            team: { id: "T1", name: "Team" },
+            enterprise: null,
+            is_enterprise_install: false,
+          }),
+        );
+        return;
+      }
+      res.end(JSON.stringify({ ok: true, bot_id: "B1", user_id: "U1" }));
+    }).listen(0, "127.0.0.1");
+    await once(api, "listening");
+    return `http://127.0.0.1:${(api.address() as AddressInfo).port}/`;
+  }
+
+  /** A real App doing Bolt's OAuth on a VercelReceiver, with an in-memory store. */
+  async function createOAuthApp(receiverOptions: VercelReceiverOptions = {}) {
+    const installations = new Map<string, Installation>();
+    const installationStore: InstallationStore = {
+      storeInstallation: async (installation) => {
+        installations.set(
+          installation.team?.id ?? "",
+          installation as Installation,
+        );
+      },
+      fetchInstallation: async ({ teamId }) => {
+        const installation = installations.get(teamId ?? "");
+        if (!installation) throw new Error("No installation");
+        return installation;
+      },
+    };
+    const receiver = new VercelReceiver({
+      signingSecret: SECRET,
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      stateSecret: "state-secret",
+      scopes: ["chat:write"],
+      installationStore,
+      installerOptions: {
+        clientOptions: { slackApiUrl: await fakeSlackApi() },
+      },
+      ...receiverOptions,
+    });
+    const app = new App({ receiver, deferInitialization: true });
+    return { receiver, app, installations };
+  }
+
+  it.each<[string, string, VercelReceiverOptions]>([
+    ["separate routes", "https://example.com/api/slack/oauth", {}],
+    [
+      "one route with a redirectUri",
+      "https://example.com/api/slack",
+      { redirectUri: "https://example.com/api/slack" },
+    ],
+  ])(
+    "installs through fetch with %s, then authorizes events from the store",
+    async (_, callbackUrl, receiverOptions) => {
+      const { receiver, app, installations } =
+        await createOAuthApp(receiverOptions);
+      const tokens: unknown[] = [];
+      app.event("app_mention", async ({ context }) => {
+        tokens.push(context.botToken);
+      });
+
+      const page = await receiver.fetch(
+        new Request("https://example.com/api/slack"),
+      );
+      const html = await page.text();
+      const state = html.match(/state=([^&"]+)/)?.[1];
+      const [cookie] = page.headers.getSetCookie();
+
+      expect(page.status).toBe(200);
+      expect(state).toBeDefined();
+      if (receiverOptions.redirectUri) {
+        expect(html).toContain(
+          `redirect_uri=${encodeURIComponent(receiverOptions.redirectUri)}`,
+        );
+      }
+
+      const callback = await receiver.fetch(
+        new Request(`${callbackUrl}?code=c1&state=${state}`, {
+          headers: { cookie: cookie.split(";")[0] },
+        }),
+      );
+
+      expect(callback.status).toBe(200);
+      expect(installations.get("T1")?.bot?.token).toBe("xoxb-installed");
+
+      const response = await postEvent(receiver, mention);
+
+      expect(response.status).toBe(200);
+      await vi.mocked(waitUntil).mock.calls[0][0];
+      expect(tokens).toEqual(["xoxb-installed"]);
+    },
+  );
+
+  it("rejects a callback from another browser session", async () => {
+    const { receiver, installations } = await createOAuthApp();
+    const page = await receiver.fetch(
+      new Request("https://example.com/api/slack"),
+    );
+    const state = (await page.text()).match(/state=([^&"]+)/)?.[1];
+
+    const callback = await receiver.fetch(
+      new Request(`https://example.com/api/slack?code=c1&state=${state}`),
+    );
+
+    expect(callback.status).toBe(400);
+    expect(installations.size).toBe(0);
+  });
 });
