@@ -1,7 +1,7 @@
 name: CI v2
 
-# Checks only the v2 receiver (packages/slack-bolt/src/index-v2*.ts). v1, the
-# CLI and the examples are covered by ci.yml.
+# Checks only the receiver (packages/slack-bolt/src/index*.ts). The CLI and
+# the examples are covered by ci.yml.
 on:
   pull_request:
     branches:
@@ -61,26 +61,26 @@ jobs:
         run: pnpm add -D "@slack/bolt@^${{ matrix.slack-bolt }}"
 
       - name: Lint
-        run: pnpm exec oxlint src/index-v2*.ts && pnpm exec oxfmt --check src/index-v2*.ts
+        run: pnpm exec oxlint src/index*.ts && pnpm exec oxfmt --check src/index*.ts
 
-      # Typechecks the whole package, which includes the v2 sources and tests.
+      # Typechecks the whole package, which includes the receiver and its tests.
       - name: Typecheck
         run: pnpm exec tsc --noEmit
 
       - name: Test
-        run: pnpm exec vitest run src/index-v2
+        run: pnpm exec vitest run src/index
 
       - name: Build
         run: pnpm exec tsdown
 
       - name: Check exported types
-        run: pnpm exec attw --pack . --entrypoints ./v2
+        run: pnpm exec attw --pack . --entrypoints .
 
-      # Unit tests stub Bolt and attw doesn't run code, so load the built v2
+      # Unit tests stub Bolt and attw doesn't run code, so load the built
       # entry for real and send it one request: its named imports from
       # CommonJS Bolt only resolve if Node's ESM loader detects them, and the
       # CommonJS build require()s ESM-only srvx.
-      - name: Load built v2 entry
+      - name: Load built entry
         run: |
-          node -e "const { VercelReceiver } = require('./dist/index-v2.js'); new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')).then((r) => { if (r.status !== 404) process.exit(1) })"
-          node --input-type=module -e "const { VercelReceiver } = await import('./dist/index-v2.mjs'); const r = await new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')); if (r.status !== 404) process.exit(1)"
+          node -e "const { VercelReceiver } = require('./dist/index.js'); new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')).then((r) => { if (r.status !== 404) process.exit(1) })"
+          node --input-type=module -e "const { VercelReceiver } = await import('./dist/index.mjs'); const r = await new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')); if (r.status !== 404) process.exit(1)"

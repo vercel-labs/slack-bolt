@@ -65,7 +65,7 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
 
 ### [`src/bolt/app.ts`](./src/bolt/app.ts)
 
-This is the Bolt app entry. It creates `@vercel/slack-bolt/v2`'s `VercelReceiver` with Bolt's OAuth options, registers listeners, and exports the receiver's `GET` and `POST` handlers
+This is the Bolt app entry. It creates `@vercel/slack-bolt`'s `VercelReceiver` with Bolt's OAuth options, registers listeners, and exports the receiver's `GET` and `POST` handlers
 
 ### [`src/bolt/listeners`](./src/bolt/listeners)
 

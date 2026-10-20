@@ -26,7 +26,7 @@ bun add @vercel/slack-bolt
 | Dependency    | Supported versions  |
 | ------------- | ------------------- |
 | `@slack/bolt` | `^4.7.3` or `^5.0.0` |
-| Node.js       | `>=22`              |
+| Node.js       | `>=22.12`           |
 
 `@slack/bolt` is a peer dependency, so declare it in your own `package.json` alongside this package. Do not install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer, and skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
 
@@ -34,20 +34,21 @@ bun add @vercel/slack-bolt
 
 ### `VercelReceiver`
 
-Responsible for handling and parsing any incoming requests from Slack and then forwarding them to your Bolt app for event processing.
+A Bolt receiver for Vercel Functions. It extends Bolt's `HTTPReceiver`: your route passes it each request, it answers Slack as soon as your listener calls `ack()`, and [`waitUntil`](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil) keeps the listeners running after the response.
 
-This example shows a single-tenant app with a fixed bot token. For multi-tenant apps that need OAuth, see [OAuth](#oauth-multi-tenant-apps) below.
+This example shows a single-workspace app with a fixed bot token. For an app that other workspaces install, see [OAuth](#oauth-multi-workspace-apps) below.
 
 ```typescript
+// lib/slack.ts
 import { App } from "@slack/bolt";
 import { VercelReceiver } from "@vercel/slack-bolt";
 
 const receiver = new VercelReceiver();
 
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
   receiver,
+  token: process.env.SLACK_BOT_TOKEN,
+  // Checks the token on the first event, and again if that fails.
   deferInitialization: true,
 });
 
@@ -55,129 +56,43 @@ app.message(/^(hi|hello|hey).*/, async ({ say }) => {
   await say("Hello, world!");
 });
 
-export { app, receiver };
-```
-
-#### Parameters
-
-| Name                        | Type                                                   | Default Value                      | Required       | Description                                                             |
-| --------------------------- | ------------------------------------------------------ | ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
-| `signingSecret`             | `string`                                               | `process.env.SLACK_SIGNING_SECRET` | No<sup>1</sup> | Signing secret for your Slack app used to verify requests.              |
-| `signatureVerification`     | `boolean`                                              | `true`                             | No             | Enable or disable request signature verification.                       |
-| `logger`                    | `Logger`<sup>2</sup>                                   | `new ConsoleLogger()`              | No             | Logger used for diagnostics.                                            |
-| `logLevel`                  | `LogLevel`<sup>2</sup>                                 | `LogLevel.INFO`                    | No             | Minimum log level for the logger.                                       |
-| `customPropertiesExtractor` | `(req: Request, body: StringIndexed) => StringIndexed` | `undefined`                        | No             | Return value is merged into Bolt event `customProperties`<sup>2</sup>.  |
-| `beforeProcess`             | `BeforeProcessFn`                                      | `undefined`                        | No             | Intercept requests before Bolt processing.                              |
-| `ackTimeoutMs`              | `number`                                               | `3001`                             | No             | Milliseconds to wait for `ack()` before returning a timeout error.      |
-| `clientId`                  | `string`                                               | `process.env.SLACK_CLIENT_ID`      | No<sup>3</sup> | Your app's client ID (required for OAuth).                              |
-| `clientSecret`              | `string`                                               | `process.env.SLACK_CLIENT_SECRET`  | No<sup>3</sup> | Your app's client secret (required for OAuth).                          |
-| `stateSecret`               | `string`                                               | `process.env.SLACK_STATE_SECRET`   | No<sup>3</sup> | Secret for OAuth CSRF state parameter.                                  |
-| `scopes`                    | `string[] \| ScopesResolver`                           | `undefined`                        | No             | Bot scopes for OAuth. Can be a function for dynamic scopes.             |
-| `redirectUri`               | `string`                                               | `undefined`                        | No             | Redirect URI registered with your Slack app.                            |
-| `installationStore`         | `InstallationStore`<sup>2</sup>                        | `undefined`                        | No<sup>4</sup> | Persistent storage backend for OAuth installations.                     |
-| `installerOptions`          | `VercelInstallerOptions`                               | `{}`                               | No             | Advanced OAuth options (user scopes, direct install, state store, etc). |
-
-<sup>1</sup> Optional if `process.env.SLACK_SIGNING_SECRET` is provided.
-
-<sup>2</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
-
-<sup>3</sup> Required for OAuth. Read from `process.env` automatically if not provided.
-
-<sup>4</sup> Required for OAuth in serverless environments -- the default in-memory store does not persist across cold starts.
-
-### `createHandler`
-
-A function that returns a Vercel-compatible request handler that will initialize and start your Bolt app to process the event.
-
-```typescript
-// An example using Next.js route handlers
-
-import { createHandler } from "@vercel/slack-bolt";
-import { app, receiver } from "./app";
-
-export const POST = createHandler(app, receiver);
-```
-
-#### Parameters
-
-| Name       | Type              | Required | Description                                                  |
-| ---------- | ----------------- | -------- | ------------------------------------------------------------ |
-| `app`      | `App`<sup>1</sup> | Yes      | Your Bolt app                                                |
-| `receiver` | `VercelReceiver`  | Yes      | The Vercel receiver instance used to process Slack requests. |
-
-<sup>1</sup> Provided by the [`@slack/bolt`](https://www.npmjs.com/package/@slack/bolt) library. More information [here](https://docs.slack.dev/tools/bolt-js/reference#app-options).
-
-## OAuth (Multi-Tenant Apps)
-
-`VercelReceiver` has built-in support for Slack's [OAuth v2 flow](https://docs.slack.dev/authentication/installing-with-oauth), allowing your app to be installed by multiple workspaces. For background on how OAuth works with Bolt, see the [Bolt OAuth guide](https://slack.dev/bolt-js/concepts/authenticating-oauth).
-
-### Environment variables
-
-Set these in your Vercel project (or `.env.local` for local development):
-
-| Variable               | Description                                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `SLACK_CLIENT_ID`      | App client ID, found under **Basic Information** on [api.slack.com](https://api.slack.com/apps). |
-| `SLACK_CLIENT_SECRET`  | App client secret, found in the same section.                                                    |
-| `SLACK_STATE_SECRET`   | A random string used to sign the OAuth state parameter.                                          |
-| `SLACK_SIGNING_SECRET` | Signing secret for verifying incoming Slack requests.                                            |
-
-All four are read from `process.env` automatically.
-
-### Receiver setup
-
-When using OAuth, the receiver manages token retrieval via the `installationStore` -- you no longer pass `token` or `signingSecret` to the `App` constructor.
-
-```typescript
-import { App } from "@slack/bolt";
-import { VercelReceiver } from "@vercel/slack-bolt";
-
-const receiver = new VercelReceiver({
-  scopes: ["chat:write", "commands"],
-  installationStore: myInstallationStore,
-  installerOptions: {
-    directInstall: true,
-  },
-});
-
-const app = new App({
-  receiver,
-  deferInitialization: true,
-});
-```
-
-### Route handlers
-
-Expose two GET routes for the OAuth flow. The paths can be anything -- just make sure the callback path matches the **Redirect URL** in your Slack app settings.
-
-```typescript
-// app/api/slack/install/route.ts
-import { receiver } from "@/bolt/app";
-
-export const GET = receiver.handleInstall;
+export const { POST } = receiver;
 ```
 
 ```typescript
-// app/api/slack/oauth-redirect/route.ts
-import { receiver } from "@/bolt/app";
-
-export const GET = receiver.handleCallback;
+// app/api/slack/events/route.ts
+export { POST } from "@/lib/slack";
 ```
 
-### Installation store
+Point your Slack app's event subscription, interactivity and slash command URLs at the route. It can live at any path. With `deferInitialization`, the receiver runs `app.init()` on the first request, so nothing calls Slack while your app builds.
 
-An `installationStore` is required in serverless environments. The default in-memory store does not survive cold starts, so each new function invocation would lose all installation data.
+#### Options
 
-Your store must implement `storeInstallation`, `fetchInstallation`, and optionally `deleteInstallation`. Any persistent backend works (Redis, PostgreSQL, DynamoDB, etc). See the [Bolt InstallationStore docs](https://slack.dev/bolt-js/concepts/authenticating-oauth#the-installation-store) for the full interface, and the [Next.js example](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/nextjs) for a working Redis implementation.
+`VercelReceiver` takes Bolt's [`HTTPReceiver` options](https://docs.slack.dev/tools/bolt-js/reference), except `endpoints`, `port`, `customRoutes` and `dispatchErrorHandler`, which configure Bolt's own HTTP server. The ones you're most likely to need:
 
-### Notes for Bolt 5
+| Name                        | Type                         | Default                            | Description                                                                                 |
+| --------------------------- | ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| `signingSecret`             | `string`                     | `process.env.SLACK_SIGNING_SECRET` | Verifies that requests come from Slack. Required unless `signatureVerification` is `false`. |
+| `signatureVerification`     | `boolean`                    | `true`                             | Set to `false` to skip signature verification, for example in tests.                        |
+| `logger`                    | `Logger`                     | Bolt's `ConsoleLogger`             | Pass it here: Bolt doesn't apply the `App`'s logger to a custom receiver.                   |
+| `logLevel`                  | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for the receiver's logger.                                                    |
+| `processBeforeResponse`     | `boolean`                    | `false`                            | Waits for your listeners to finish before answering Slack, instead of answering at `ack()`. |
+| `processEventErrorHandler`  | `(args) => Promise<boolean>` | Bolt's default                     | Handles an error from your listeners. The receiver keeps it running with `waitUntil`.       |
+| `customPropertiesExtractor` | `(req) => StringIndexed`     | None                               | Adds properties from the request to each event's `context`.                                 |
 
-The receiver's OAuth installer uses `@slack/oauth` 3.x internally, while Bolt 5 depends on `@slack/oauth` 4.x. Both are installed in a Bolt 5 app. This is safe: the `Installation`, `InstallationStore` and `Logger` types you write against are structurally identical in both versions, so an `installationStore` typed via `@slack/bolt` works unchanged. Two details differ:
+The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
-- `installerOptions.clientOptions` follows `@slack/web-api` 7's `WebClientOptions` (`agent`, `tls`), not 8's (`fetch`). A custom `fetch` you pass to the Bolt `App` is not used for the OAuth token exchange.
-- Errors passed to `installerOptions.callbackOptions.failure` are `@slack/oauth` 3.x instances. Check `error.code` rather than `instanceof` against classes imported from `@slack/oauth`, which would resolve to the 4.x copy.
+The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, or when `redirectUri` isn't an absolute URL.
 
-The installer will move to `@slack/oauth` 4.x in the next major release, when Bolt 4 support is dropped.
+#### `receiver.fetch(request)`
+
+Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` are the same function, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`.
+
+- `POST` requests are events, slash commands and interactions.
+- With the OAuth options, a `GET` with a `code`, `error` or `state` query parameter is the OAuth callback, and any other `GET` is the install page.
+- Anything else gets a `404`.
+
+Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read. If you read it first, pass `request.clone()` instead.
 
 ### `preview`
 
@@ -223,6 +138,51 @@ const result = await preview({
 | `isNew`         | `boolean` | `true` if a new Slack app was created, `false` if updated.        |
 | `installStatus` | `string`  | Installation outcome (e.g. `installed`, `missing_service_token`). |
 | `app`           | `object`  | Slack API response containing `app_id` and credentials.           |
+
+## OAuth (Multi-Workspace Apps)
+
+`VercelReceiver` uses Bolt's own [OAuth support](https://slack.dev/bolt-js/concepts/authenticating-oauth), so other workspaces can install your app. Pass the OAuth options to the receiver, not the `App`, and leave `token` off the `App`: Bolt looks up each workspace's tokens in your `installationStore`.
+
+```typescript
+import { App } from "@slack/bolt";
+import { VercelReceiver } from "@vercel/slack-bolt";
+import { installationStore } from "./installation-store";
+
+const receiver = new VercelReceiver({
+  clientId: process.env.SLACK_CLIENT_ID,
+  clientSecret: process.env.SLACK_CLIENT_SECRET,
+  stateSecret: process.env.SLACK_STATE_SECRET,
+  scopes: ["chat:write", "commands"],
+  installationStore,
+});
+
+const app = new App({ receiver, deferInitialization: true });
+
+export const { GET, POST } = receiver;
+```
+
+Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full URL, like `https://example.com/api/slack/oauth`.
+
+`installerOptions` takes Bolt's installer options, except `installPath`, `redirectUriPath` and `port`: the receiver serves the install page and callback at whatever path your route has.
+
+### Environment variables
+
+Set these in your Vercel project (or `.env.local` for local development):
+
+| Variable               | Description                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| `SLACK_CLIENT_ID`      | App client ID, found under **Basic Information** on [api.slack.com](https://api.slack.com/apps). |
+| `SLACK_CLIENT_SECRET`  | App client secret, found in the same section.                                                    |
+| `SLACK_STATE_SECRET`   | A random string used to sign the OAuth state parameter.                                          |
+| `SLACK_SIGNING_SECRET` | Signing secret for verifying incoming Slack requests.                                            |
+
+The receiver reads `SLACK_SIGNING_SECRET` from `process.env` automatically. Pass the other three as options, as in the example above.
+
+### Installation store
+
+Bolt's default installation store keeps installations in memory, which Vercel doesn't share between function instances or keep across deployments. So `VercelReceiver` requires an `installationStore` whenever you set `clientId`.
+
+Your store must implement `storeInstallation` and `fetchInstallation`, and optionally `deleteInstallation`. Any persistent backend works (Redis, PostgreSQL, DynamoDB, etc). See the [Bolt InstallationStore docs](https://slack.dev/bolt-js/concepts/authenticating-oauth#the-installation-store) for the full interface, and the [Next.js example](https://github.com/vercel-labs/slack-bolt/tree/master/examples/nextjs) for a working Redis implementation that also deletes installations on `app_uninstalled` and `tokens_revoked`.
 
 ## Preview Deployments
 
@@ -317,55 +277,6 @@ Options:
 ```
 
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
-
-## Advanced
-
-### Request Interception
-
-The `beforeProcess` hook lets you intercept requests after signature verification but before Bolt processes them. Return a `Response` to short-circuit, or `undefined` to continue normally.
-
-```typescript
-const receiver = new VercelReceiver({
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  beforeProcess: async (req, body) => {
-    if (body.team_id === "T_ENTERPRISE") {
-      return fetch("https://enterprise-handler.example.com/slack", {
-        method: "POST",
-        body: await req.text(),
-        headers: req.headers,
-      });
-    }
-    // Return undefined to continue normal Bolt processing
-  },
-});
-```
-
-> **Note:** `beforeProcess` is not called for `url_verification` challenges.
-
-### Dynamic Scopes
-
-The `scopes` option accepts either a static array or a resolver function. This enables requesting different OAuth scopes based on the install request context (e.g., different scopes for enterprise vs. standard workspaces).
-
-```typescript
-const receiver = new VercelReceiver({
-  clientId: process.env.SLACK_CLIENT_ID,
-  clientSecret: process.env.SLACK_CLIENT_SECRET,
-  stateSecret: process.env.SLACK_STATE_SECRET,
-  installationStore: myInstallationStore,
-  scopes: async (req) => {
-    const url = new URL(req.url);
-    const isEnterprise = url.searchParams.get("enterprise") === "true";
-
-    const baseScopes = ["chat:write", "commands"];
-    if (isEnterprise) {
-      return [...baseScopes, "users:read", "channels:read"];
-    }
-    return baseScopes;
-  },
-});
-```
-
-The resolver receives the install request, allowing you to inspect query parameters, headers, or any other request data to determine which scopes to request.
 
 ## Examples
 

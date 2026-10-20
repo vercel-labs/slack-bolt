@@ -1,5 +1,5 @@
 // Smoke tests against the real Bolt App and HTTPReceiver, with no Slack
-// network calls. They check the Bolt behaviour index-v2.test.ts stubs out:
+// network calls. They check the Bolt behaviour index.test.ts stubs out:
 // App's constructor calls receiver.init(app), HTTPReceiver calls processEvent
 // on the app it was given with `this` intact, and HTTPReceiver keeps its
 // logger in the `logger` field we log through, and Bolt's OAuth installer runs
@@ -20,7 +20,7 @@ import {
 import { waitUntil } from "@vercel/functions";
 import { toNodeHandler } from "srvx/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VercelReceiver, type VercelReceiverOptions } from "./index-v2";
+import { VercelReceiver, type VercelReceiverOptions } from "./index";
 
 vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
 
