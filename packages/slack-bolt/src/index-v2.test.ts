@@ -14,7 +14,8 @@ const superCalls = vi.hoisted((): unknown[] => []);
 
 // Stub HTTPReceiver so only our subclass logic runs. Like Bolt's, init()
 // stores the app it is given (Bolt then calls `this.app.processEvent`), and
-// the logger defaults when none is passed; the constructor records what our
+// the logger defaults when none is passed, and there's an installer when
+// clientId and clientSecret are set; the constructor records what our
 // subclass passes to super(). requestListener answers with the method and URL
 // it received.
 vi.mock("@slack/bolt", async (importOriginal) => {
@@ -22,12 +23,14 @@ vi.mock("@slack/bolt", async (importOriginal) => {
   class HTTPReceiver {
     public app: unknown;
     public logger: unknown;
+    public installer: unknown;
     public requestListener = (req: IncomingMessage, res: ServerResponse) => {
       res.writeHead(200).end(`${req.method} ${req.url}`);
     };
-    public constructor(options: { logger?: unknown }) {
+    public constructor(options: HTTPReceiverOptions) {
       superCalls.push(options);
       this.logger = options.logger ?? { error: vi.fn() };
+      if (options.clientId && options.clientSecret) this.installer = {};
     }
     public init(app: unknown): void {
       this.app = app;
@@ -44,6 +47,28 @@ type ErrorHandler = NonNullable<
 
 const INIT_FAILED =
   "app.init() failed, so this event wasn't processed. It runs again on the next event.";
+
+const MISSING_STORE =
+  "Missing installationStore. OAuth needs one that saves installations somewhere lasting, like a database, because Bolt's default keeps them in memory.";
+
+// What the receiver passes Bolt as installerOptions when none are given.
+const BOLT_PATHS = {
+  installerOptions: {
+    installPath: "/slack/install",
+    redirectUriPath: "/slack/oauth_redirect",
+  },
+};
+
+const oauth: VercelReceiverOptions = {
+  signingSecret: "secret",
+  clientId: "id",
+  clientSecret: "secret",
+  stateSecret: "state",
+  installationStore: {
+    storeInstallation: async () => {},
+    fetchInstallation: async () => ({}) as never,
+  },
+};
 
 const MISSING_SECRET =
   "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.";
@@ -99,7 +124,11 @@ describe("constructor", () => {
     new VercelReceiver();
 
     expect(superCalls).toEqual([
-      { signingSecret: "env-signing", endpoints: "/slack/events" },
+      {
+        signingSecret: "env-signing",
+        endpoints: "/slack/events",
+        ...BOLT_PATHS,
+      },
     ]);
   });
 
@@ -109,7 +138,11 @@ describe("constructor", () => {
     new VercelReceiver({ signingSecret: "opt-signing" });
 
     expect(superCalls).toEqual([
-      { signingSecret: "opt-signing", endpoints: "/slack/events" },
+      {
+        signingSecret: "opt-signing",
+        endpoints: "/slack/events",
+        ...BOLT_PATHS,
+      },
     ]);
   });
 
@@ -123,7 +156,9 @@ describe("constructor", () => {
 
     new VercelReceiver(options);
 
-    expect(superCalls).toEqual([{ ...options, endpoints: "/slack/events" }]);
+    expect(superCalls).toEqual([
+      { ...options, endpoints: "/slack/events", ...BOLT_PATHS },
+    ]);
   });
 
   it("does not require a secret when signatureVerification is false", () => {
@@ -134,6 +169,7 @@ describe("constructor", () => {
         signatureVerification: false,
         signingSecret: "",
         endpoints: "/slack/events",
+        ...BOLT_PATHS,
       },
     ]);
   });
@@ -152,6 +188,94 @@ describe("constructor", () => {
 
     expect(() => new VercelReceiver(options)).toThrow(
       new AppInitializationError(MISSING_SECRET),
+    );
+    expect(superCalls).toEqual([]);
+  });
+});
+
+describe("OAuth options", () => {
+  /** The installerOptions our receiver passed to HTTPReceiver. */
+  function installerOptionsFor(options: VercelReceiverOptions) {
+    new VercelReceiver({ ...oauth, ...options });
+    const [passed] = superCalls as HTTPReceiverOptions[];
+    return passed.installerOptions;
+  }
+
+  it("passes other installer options through", () => {
+    const beforeRedirection = async () => true;
+
+    expect(
+      installerOptionsFor({
+        installerOptions: {
+          directInstall: true,
+          installPathOptions: { beforeRedirection },
+        },
+      }),
+    ).toEqual({
+      directInstall: true,
+      installPathOptions: { beforeRedirection },
+      ...BOLT_PATHS.installerOptions,
+    });
+  });
+
+  it("derives redirectUriPath from redirectUri", () => {
+    expect(
+      installerOptionsFor({
+        redirectUri: "https://example.com/api/slack/oauth?x=1",
+      }),
+    ).toEqual({
+      installPath: "/slack/install",
+      redirectUriPath: "/api/slack/oauth",
+    });
+  });
+
+  it("moves the install page off the callback's path", () => {
+    expect(
+      installerOptionsFor({ redirectUri: "https://example.com/slack/install" }),
+    ).toEqual({
+      installPath: "/slack/events",
+      redirectUriPath: "/slack/install",
+    });
+  });
+
+  it("keeps Bolt's paths even if JavaScript passes them", () => {
+    expect(
+      installerOptionsFor({
+        installerOptions: {
+          // @ts-expect-error fetch serves the install page at any path
+          installPath: "/install",
+          redirectUriPath: "/redirect",
+        },
+      }),
+    ).toEqual(BOLT_PATHS.installerOptions);
+  });
+
+  it("doesn't accept installer options for Bolt's own server", () => {
+    const options: VercelReceiverOptions["installerOptions"][] = [
+      // @ts-expect-error fetch serves the install page at any path
+      { installPath: "/i" },
+      // @ts-expect-error fetch serves the callback at any path
+      { redirectUriPath: "/r" },
+      // @ts-expect-error port doesn't apply to fetch
+      { port: 3000 },
+    ];
+    expect(options).toHaveLength(3);
+  });
+
+  it("throws before calling HTTPReceiver when clientId has no installationStore", () => {
+    expect(
+      () => new VercelReceiver({ ...oauth, installationStore: undefined }),
+    ).toThrow(new AppInitializationError(MISSING_STORE));
+    expect(superCalls).toEqual([]);
+  });
+
+  it("throws before calling HTTPReceiver when redirectUri isn't an absolute URL", () => {
+    expect(
+      () => new VercelReceiver({ ...oauth, redirectUri: "/api/slack/oauth" }),
+    ).toThrow(
+      new AppInitializationError(
+        'redirectUri must be an absolute URL, like https://example.com/api/slack, but it\'s "/api/slack/oauth".',
+      ),
     );
     expect(superCalls).toEqual([]);
   });
@@ -421,6 +545,36 @@ describe("fetch", () => {
     );
   });
 
+  it("sends GET requests to the install page with the OAuth options", async () => {
+    await expect(routed("GET", "https://x/api/slack?a=1", oauth)).resolves.toBe(
+      "GET /slack/install?a=1",
+    );
+  });
+
+  it.each(["code=c&state=s", "error=access_denied&state=s", "code=c"])(
+    "sends GET requests with %s to the OAuth callback",
+    async (query) => {
+      await expect(
+        routed("GET", `https://x/api/slack?${query}`, oauth),
+      ).resolves.toBe(`GET /slack/oauth_redirect?${query}`);
+    },
+  );
+
+  it("sends the OAuth callback to the path redirectUri gives Bolt", async () => {
+    await expect(
+      routed("GET", "https://x/api/slack?code=c", {
+        ...oauth,
+        redirectUri: "https://x/api/slack",
+      }),
+    ).resolves.toBe("GET /api/slack?code=c");
+  });
+
+  it("still sends POST requests to the events endpoint with the OAuth options", async () => {
+    await expect(
+      routed("POST", "https://x/api/slack?code=c", oauth),
+    ).resolves.toBe("POST /slack/events?code=c");
+  });
+
   it("restores the request's URL after Bolt has routed it", async () => {
     const receiver = new VercelReceiver({ signingSecret: "secret" });
     const seen: (string | undefined)[] = [];
@@ -510,6 +664,18 @@ describe("fetch", () => {
     const response = await POST(request);
 
     await expect(response.text()).resolves.toBe("POST /slack/events");
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
+  });
+
+  it("exposes GET as an unbound handler that calls fetch", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const fetch = vi.spyOn(receiver, "fetch");
+    const { GET } = receiver;
+    const request = new Request("https://x/api/slack");
+
+    const response = await GET(request);
+
+    await expect(response.text()).resolves.toBe("GET /slack/events");
     expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
   });
 });
