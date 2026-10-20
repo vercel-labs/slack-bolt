@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "vercel-slack build --cleanup && next build",
+    "build": "next build",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "oxlint src && oxfmt --check src",
@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
-    "@upstash/redis": "^1.39.0",
     "@vercel/slack-bolt": "workspace:*",
     "next": "16.4.1",
     "react": "19.3.1",

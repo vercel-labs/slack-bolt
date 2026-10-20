@@ -36,8 +36,7 @@
   "oauth_config": {
     "scopes": {
       "bot": ["channels:history", "chat:write", "commands"]
-    },
-    "redirect_urls": ["https://<your-domain>/api/slack/oauth-redirect"]
+    }
   },
   "settings": {
     "event_subscriptions": {

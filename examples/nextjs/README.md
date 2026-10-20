@@ -66,7 +66,7 @@ git clone https://github.com/vercel-partner-solutions/slack-bolt-with-next.git &
 
 ### [`src/bolt/app.ts`](./src/bolt/app.ts)
 
-This is the Bolt app entry. It initializes `@vercel/slack-bolt`'s `VercelReceiver` and registers listeners
+This is the Bolt app entry. It creates `@vercel/slack-bolt/v2`'s `VercelReceiver`, registers listeners, and exports the receiver's `POST` handler
 
 ### [`src/bolt/listeners`](./src/bolt/listeners)
 
@@ -74,7 +74,7 @@ Every incoming request is routed to a "listener". Inside this directory, we grou
 
 ### Route Handler: [`src/app/api/slack/events/route.ts`](./src/app/api/slack/events/route.ts)
 
-This file defines your Next.js Route Handler that receives Slack events. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
+This file re-exports `POST` from [`src/bolt/app.ts`](./src/bolt/app.ts), so this one route receives every event, command and interaction from Slack. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
 
 ## Notes
 - If you see a warning about `express` being externalized: `@slack/bolt` ships an Express receiver. Turbopack may analyze its static import even if you don't use it. Keeping `express` as a dependency or aliasing it to a stub resolves this during development.
