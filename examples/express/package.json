@@ -1,0 +1,28 @@
+{
+  "name": "slack-bolt-with-express",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src && oxfmt --check src",
+    "lint:fix": "oxlint --fix src && oxfmt src"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/slack-bolt": "workspace:*",
+    "express": "^5.3.0",
+    "srvx": "~1.0.6"
+  },
+  "devDependencies": {
+    "@slack/cli-hooks": "^2.0.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "tsx": "^4.23.15",
+    "typescript": "catalog:"
+  }
+}

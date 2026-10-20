@@ -14,6 +14,7 @@ Monorepo for [`@vercel/slack-bolt`](https://www.npmjs.com/package/@vercel/slack-
 | --- | --- |
 | [`slack-bolt-with-next`](./examples/nextjs) | Next.js starter template |
 | [`slack-bolt-with-hono`](./examples/hono) | Hono starter template |
+| [`slack-bolt-with-express`](./examples/express) | Express starter template |
 
 ## Contributing
 

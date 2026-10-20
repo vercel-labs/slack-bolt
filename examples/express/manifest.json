@@ -1,0 +1,60 @@
+{
+  "_metadata": {
+    "major_version": 1,
+    "minor_version": 1
+  },
+  "display_information": {
+    "name": "slack-bolt-with-express"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": false,
+      "messages_tab_read_only_enabled": true
+    },
+    "bot_user": {
+      "display_name": "slack-bolt-with-express",
+      "always_online": true
+    },
+    "shortcuts": [
+      {
+        "name": "Run sample shortcut",
+        "type": "global",
+        "callback_id": "sample_shortcut_id",
+        "description": "Runs a sample shortcut"
+      }
+    ],
+    "slash_commands": [
+      {
+        "command": "/sample-command",
+        "description": "Runs a sample command",
+        "should_escape": false,
+        "url": "https://<your-domain>/api/slack/events"
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["channels:history", "chat:write", "commands"]
+    },
+    "redirect_urls": ["https://<your-domain>/api/slack/events"]
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://<your-domain>/api/slack/events",
+      "bot_events": [
+        "app_home_opened",
+        "message.channels",
+        "app_uninstalled",
+        "tokens_revoked"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://<your-domain>/api/slack/events"
+    },
+    "org_deploy_enabled": true,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": true
+  }
+}
