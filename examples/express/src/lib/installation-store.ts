@@ -9,7 +9,7 @@ import type {
   InstallationQuery,
   InstallationStore,
 } from "@slack/bolt";
-import { redis } from "./redis";
+import { redis } from "./redis.js";
 
 // Each workspace (or Enterprise Grid org) is one Redis hash: the `workspace`
 // field holds the installation with its bot token, and a `user:<id>` field
@@ -58,7 +58,7 @@ function workspaceKey(query: {
   enterpriseId?: string;
   isEnterpriseInstall?: boolean;
 }): string {
-  const prefix = `slack:${process.env.SLACK_CLIENT_ID}:workspace`;
+  const prefix = `slack:${process.env.EXPRESS_SLACK_CLIENT_ID}:workspace`;
   if (query.isEnterpriseInstall && query.enterpriseId) {
     return `${prefix}:enterprise:${query.enterpriseId}`;
   }

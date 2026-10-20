@@ -46,6 +46,7 @@
       "description": "Checks formatting of config files outside package src directories",
       "inputs": [
         "*.json",
+        "vercel.ts",
         "pnpm-workspace.yaml",
         ".github/**/*.yml",
         ".changeset/*.json",

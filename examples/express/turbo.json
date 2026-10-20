@@ -6,9 +6,9 @@
       "outputs": [],
       "env": [
         "VERCEL_*",
-        "SLACK_SIGNING_SECRET",
-        "SLACK_CLIENT_ID",
-        "SLACK_CLIENT_SECRET",
+        "EXPRESS_SLACK_SIGNING_SECRET",
+        "EXPRESS_SLACK_CLIENT_ID",
+        "EXPRESS_SLACK_CLIENT_SECRET",
         "SLACK_STATE_SECRET",
         "TOKEN_ENCRYPTION_SECRET",
         "KV_REST_API_URL",
@@ -21,6 +21,9 @@
         ".env.production",
         ".env.production.local"
       ]
+    },
+    "dev": {
+      "passThroughEnv": ["$TURBO_EXTENDS$", "EXPRESS_SLACK_*"]
     }
   }
 }

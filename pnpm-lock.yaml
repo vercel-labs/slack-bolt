@@ -6,18 +6,12 @@ settings:
 
 catalogs:
   default:
-    '@types/node':
-      specifier: ^26.6.5
-      version: 26.6.5
     oxfmt:
       specifier: 0.73.0
       version: 0.73.0
     oxlint:
       specifier: 1.88.0
       version: 1.88.0
-    typescript:
-      specifier: ~7.0.2
-      version: 7.0.2
 
 importers:
 

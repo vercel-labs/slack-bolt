@@ -1,6 +1,6 @@
 # Slack Bolt with Hono Template
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fslack-bolt%2Ftree%2Fmaster%2Fexamples%2Fhono&env=SLACK_SIGNING_SECRET%2CSLACK_CLIENT_ID%2CSLACK_CLIENT_SECRET%2CSLACK_STATE_SECRET%2CTOKEN_ENCRYPTION_SECRET&envLink=https%3A%2F%2Fapi.slack.com%2Fapps&project-name=slack-bolt-with-hono&repository-name=slack-bolt-with-hono)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fslack-bolt%2Ftree%2Fmaster%2Fexamples%2Fhono&env=HONO_SLACK_SIGNING_SECRET%2CHONO_SLACK_CLIENT_ID%2CHONO_SLACK_CLIENT_SECRET%2CSLACK_STATE_SECRET%2CTOKEN_ENCRYPTION_SECRET&envLink=https%3A%2F%2Fapi.slack.com%2Fapps&project-name=slack-bolt-with-hono&repository-name=slack-bolt-with-hono)
 
 This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps with Hono
 
@@ -19,7 +19,7 @@ git clone https://github.com/vercel-labs/slack-bolt.git && cd slack-bolt/example
 2. Choose the workspace you want to use
 3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next
 4. Review the configuration and click Create
-5. On the Basic Information tab, copy your Client ID, Client Secret and Signing Secret into your environment as `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` and `SLACK_SIGNING_SECRET`
+5. On the Basic Information tab, copy your Client ID, Client Secret and Signing Secret into your environment as `HONO_SLACK_CLIENT_ID`, `HONO_SLACK_CLIENT_SECRET` and `HONO_SLACK_SIGNING_SECRET`
 6. Set `SLACK_STATE_SECRET` and `TOKEN_ENCRYPTION_SECRET` to two different random strings, e.g. from `openssl rand -hex 32`. The first signs the OAuth state cookie; the second encrypts tokens in Redis
 7. Add [Upstash Redis](https://vercel.com/marketplace/upstash) to your Vercel project, which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Installations are stored there
 
@@ -80,4 +80,4 @@ This file creates your Hono app and exports it as the default export, which Verc
 Bolt calls this to save each workspace's installation and to look up its bot token for every request. It keeps installations in Upstash Redis, with tokens encrypted using `TOKEN_ENCRYPTION_SECRET`. The [`app_uninstalled`](./src/bolt/listeners/events/app-uninstalled.ts) and [`tokens_revoked`](./src/bolt/listeners/events/tokens-revoked.ts) listeners delete installations when a workspace removes the app or revokes its tokens, so the store never keeps dead credentials
 
 ## Notes
-- This app is CommonJS (`"type": "commonjs"`). Vercel compiles each file with TypeScript and runs the output with Node.js, and the listeners use relative imports without file extensions, which Node.js only resolves in CommonJS. To switch to `"type": "module"`, add `.js` to every relative import and `with { type: "json" }` to the `manifest.json` import.
+- This app is an ES module (`"type": "module"`), so relative imports end in `.js` and the `manifest.json` import uses `with { type: "json" }`. It can't be CommonJS: Vercel bundles it as CommonJS then, and `srvx`, which `@vercel/slack-bolt` uses, is ESM-only, so the function fails with `ERR_REQUIRE_ESM`.

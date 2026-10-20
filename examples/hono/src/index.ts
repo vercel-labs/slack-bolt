@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { receiver } from "./bolt/app";
+import { receiver } from "./bolt/app.js";
 
 const app = new Hono();
 

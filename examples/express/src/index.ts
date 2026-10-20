@@ -1,6 +1,6 @@
 import express, { type RequestHandler } from "express";
 import { toNodeHandler } from "srvx/node";
-import { receiver } from "./bolt/app";
+import { receiver } from "./bolt/app.js";
 
 const app = express();
 
@@ -42,7 +42,7 @@ app.get("/", (_req, res) => {
 
 // Vercel serves the default export. Listen only when this file is run
 // directly, like with `pnpm dev`.
-if (require.main === module) {
+if (import.meta.main) {
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, (error) => {
     if (error) throw error;

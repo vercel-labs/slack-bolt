@@ -2,7 +2,7 @@
   "name": "slack-bolt-with-express",
   "version": "0.1.0",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local src/index.ts",
     "typecheck": "tsc --noEmit",
