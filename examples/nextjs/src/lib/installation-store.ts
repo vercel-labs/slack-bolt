@@ -130,19 +130,21 @@ export const installationStore: InstallationStore = {
     try {
       const tk = teamKey(query);
 
-      if (query.userId) {
-        const data = await redis.get<StoredInstallation>(
-          userKey(tk, query.userId),
-        );
-        if (data) return decryptTokens(data);
-      }
-
       const data = await redis.get<StoredInstallation>(tk);
       if (!data) {
         const teamIdentifier =
           query.teamId || `enterprise:${query.enterpriseId}`;
         throw new Error(`No installation found for team ${teamIdentifier}`);
       }
+      if (query.userId) {
+        const userData = await redis.get<StoredInstallation>(
+          userKey(tk, query.userId),
+        );
+        // Bot credentials belong to the workspace and may have changed since
+        // this user's installation was stored.
+        if (userData) return decryptTokens({ ...data, user: userData.user });
+      }
+
       const installation = decryptTokens(data);
       if (query.userId) {
         // The team-level installation stores the installer's user token. When a
