@@ -75,13 +75,17 @@ export const installationStore: InstallationStore = {
       isEnterpriseInstall: installation.isEnterpriseInstall,
     });
     const { user } = installation;
-    const fields: Record<string, string> = {};
-    // A user-only authorization has no bot, so keep the workspace's.
+    const workspace = encrypt({ ...installation, user: { id: user.id } });
     if (installation.bot) {
-      fields.workspace = encrypt({ ...installation, user: { id: user.id } });
+      await redis.hset(key, { workspace });
+    } else {
+      // A user-only authorization has no bot, so don't replace a workspace
+      // that has one; only save it if it's the first.
+      await redis.hsetnx(key, "workspace", workspace);
     }
-    if (user.token) fields[`user:${user.id}`] = encrypt(user);
-    if (Object.keys(fields).length) await redis.hset(key, fields);
+    if (user.token) {
+      await redis.hset(key, { [`user:${user.id}`]: encrypt(user) });
+    }
   },
 
   fetchInstallation: async (query: InstallationQuery<boolean>) => {
