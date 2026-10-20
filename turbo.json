@@ -1,22 +1,35 @@
 {
-  "$schema": "https://turborepo.dev/schema.v2.json",
-  "ui": "tui",
-  "globalEnv": ["CI_NODE_VERSION"],
-  "globalPassThroughEnv": ["SLACK_*", "VERCEL_*"],
+  "$schema": "./node_modules/turbo/schema.json",
+  "agentGuidance": true,
+  "futureFlags": {
+    "globalConfiguration": true,
+    "affectedUsingTaskInputs": true,
+    "watchUsingTaskInputs": true
+  },
+  "global": {
+    "ui": "tui",
+    "env": ["CI_NODE_VERSION"],
+    "cacheMaxAge": "7d"
+  },
   "tasks": {
     "build": {
+      "description": "Builds the library and each example for production",
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
     "dev": {
+      "description": "Rebuilds the library on change and runs each example's dev server",
       "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["SLACK_*", "VERCEL_*"]
     },
     "typecheck": {
+      "description": "Type-checks with tsc against the built @vercel/slack-bolt types",
       "dependsOn": ["^build"]
     },
     "lint": {
+      "description": "Lints src with oxlint and checks its formatting with oxfmt",
       "dependsOn": ["//#lint:root"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -25,10 +38,12 @@
       ]
     },
     "lint:fix": {
+      "description": "Applies oxlint fixes and oxfmt formatting to src",
       "dependsOn": ["//#lint:fix:root"],
       "cache": false
     },
     "//#lint:root": {
+      "description": "Checks formatting of config files outside package src directories",
       "inputs": [
         "*.json",
         "pnpm-workspace.yaml",
@@ -41,11 +56,16 @@
       ]
     },
     "//#lint:fix:root": {
+      "description": "Formats config files outside package src directories",
       "cache": false
     },
-    "test": {},
-    "attw": {
-      "dependsOn": ["build"]
+    "test": {
+      "description": "Runs the Vitest suite once"
+    },
+    "test:watch": {
+      "description": "Runs the Vitest suite in watch mode",
+      "cache": false,
+      "persistent": true
     }
   }
 }

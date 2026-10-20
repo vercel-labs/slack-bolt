@@ -62,20 +62,16 @@ jobs:
       - name: Setup example env
         run: cp examples/nextjs/.env.example examples/nextjs/.env.local
 
-      - name: Lint
-        run: pnpm exec turbo run lint
+      # Fails when a package imports a file outside its directory or a package
+      # it doesn't declare, which would break an example copied out of the repo.
+      - name: Check package boundaries
+        run: pnpm exec turbo boundaries
 
-      - name: Typecheck
-        run: pnpm exec turbo run typecheck
-
-      - name: Test
-        run: pnpm exec turbo run test
-
-      - name: Build
-        run: pnpm exec turbo run build
-
-      - name: Check exported types
-        run: pnpm exec turbo run attw
+      # One run lets Turborepo schedule every task from one graph instead of
+      # waiting on each step, and --continue=dependencies-successful reports
+      # every failure rather than stopping at the first.
+      - name: Lint, typecheck, test, build, and check exported types
+        run: pnpm exec turbo run lint typecheck test build attw --continue=dependencies-successful
 
   # The receiver extends Bolt's HTTPReceiver and uses its internals, so check it
   # at both ends of the supported range: the oldest Node.js and Bolt it
