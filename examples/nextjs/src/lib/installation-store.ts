@@ -14,7 +14,9 @@ import { redis } from "./redis";
 // Each workspace (or Enterprise Grid org) is one Redis hash: the `workspace`
 // field holds the installation with its bot token, and a `user:<id>` field
 // holds the user token of each user who authorized user scopes. Both are
-// encrypted with TOKEN_ENCRYPTION_SECRET.
+// encrypted with TOKEN_ENCRYPTION_SECRET. Keys include the Slack app's client
+// ID, so apps sharing one Redis, like a development and a production app,
+// don't overwrite each other's installations.
 
 let key: Buffer | undefined;
 function encryptionKey(): Buffer {
@@ -56,10 +58,11 @@ function workspaceKey(query: {
   enterpriseId?: string;
   isEnterpriseInstall?: boolean;
 }): string {
+  const prefix = `slack:${process.env.SLACK_CLIENT_ID}:workspace`;
   if (query.isEnterpriseInstall && query.enterpriseId) {
-    return `slack:workspace:enterprise:${query.enterpriseId}`;
+    return `${prefix}:enterprise:${query.enterpriseId}`;
   }
-  if (query.teamId) return `slack:workspace:${query.teamId}`;
+  if (query.teamId) return `${prefix}:${query.teamId}`;
   throw new Error("Either teamId or enterpriseId is required");
 }
 
@@ -100,7 +103,9 @@ export const installationStore: InstallationStore = {
     const user = query.userId ? fields?.[userField] : undefined;
     if (!workspace) throw new Error(`No installation found for ${key}`);
     const installation = decrypt<Installation<"v1" | "v2", boolean>>(workspace);
-    // Only the user who authorized gets a user token.
+    // Only the user who authorized gets a user token. Unlike Slack's
+    // FileInstallationStore, a lookup with no user, like a bot message event,
+    // doesn't get the installer's token, so no event acts as someone it isn't.
     return user ? { ...installation, user: decrypt<User>(user) } : installation;
   },
 
