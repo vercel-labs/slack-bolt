@@ -56,7 +56,18 @@ const CALLBACK_PATH = "/slack/oauth_redirect";
 const CALLBACK_PARAMS = ["code", "error", "state"];
 
 const BODY_USED =
-  "Request body already read. Bolt needs the raw body to verify Slack's signature, so pass request.clone() to fetch instead.";
+  "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.";
+
+/**
+ * Whether the request's body was already read. A srvx Node request, like
+ * Express's and Nitro's, hands Bolt the Node stream underneath, which reading a
+ * clone also drains without setting `bodyUsed`.
+ */
+function bodyRead(request: Request): boolean {
+  const node = (request as { runtime?: { node?: { req?: IncomingMessage } } })
+    .runtime?.node?.req;
+  return request.bodyUsed || node?.readableDidRead === true;
+}
 
 const noop = () => {};
 
@@ -130,7 +141,7 @@ export class VercelReceiver extends HTTPReceiver {
    * @throws {TypeError} When the request body was already read.
    */
   public readonly fetch = async (request: Request): Promise<Response> => {
-    if (request.bodyUsed) throw new TypeError(BODY_USED);
+    if (bodyRead(request)) throw new TypeError(BODY_USED);
     try {
       return await fetchNodeHandler(
         (req: IncomingMessage, res: ServerResponse) => this.#route(req, res),

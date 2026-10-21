@@ -25,6 +25,8 @@ import { VercelReceiver, type VercelReceiverOptions } from "./index";
 vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
 
 const SECRET = "test-signing-secret";
+const BODY_USED =
+  "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.";
 const authorize = async () => ({
   botToken: "xoxb-test",
   botId: "B1",
@@ -107,6 +109,31 @@ async function viaNodeServer(receiver: VercelReceiver, request: Request) {
   return fetch(
     new Request(`http://127.0.0.1:${port}${pathname}${search}`, request),
   );
+}
+
+/**
+ * Like viaNodeServer, but the route is `route`, which gets srvx's Node-backed
+ * Request, the way Express's toNodeHandler and Nitro hand one over.
+ */
+async function viaNodeRoute(
+  route: (request: Request) => Promise<Response>,
+  request: Request,
+) {
+  const handler = toNodeHandler(route) as RequestListener;
+  server = createServer((req, res) => void handler(req, res)).listen(
+    0,
+    "127.0.0.1",
+  );
+  await once(server, "listening");
+  const { port } = server.address() as AddressInfo;
+  const { pathname, search } = new URL(request.url);
+  // A string body, so the client doesn't fail when the route answers before
+  // reading it all.
+  return fetch(`http://127.0.0.1:${port}${pathname}${search}`, {
+    method: request.method,
+    headers: request.headers,
+    body: await request.text(),
+  });
 }
 
 /** POSTs a signed Events API payload to /webhooks/slack on srvx's Node server. */
@@ -281,6 +308,56 @@ it("leaves the real Node request's URL as it was on srvx's Node server", async (
   expect(response.status).toBe(200);
   expect(notFound.status).toBe(404);
   expect(urlsAfter).toEqual(["/webhooks/slack", "/webhooks/slack?a=1"]);
+});
+
+describe("reading the body before fetch, on srvx's Node requests", () => {
+  const signedMention = () =>
+    signedRequest(
+      "https://example.com/webhooks/slack",
+      eventBody(mention),
+      "application/json",
+    );
+
+  it("works when the route clones first, reads the original and passes the clone", async () => {
+    const { receiver, app } = createApp();
+    const seen: string[] = [];
+    app.event("app_mention", async ({ event }) => {
+      seen.push(event.text);
+    });
+    let body = "";
+
+    const response = await viaNodeRoute(async (request) => {
+      const copy = request.clone();
+      body = await request.text();
+      return receiver.fetch(copy);
+    }, signedMention());
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(body).event.text).toBe("<@U1> hi");
+    await vi.mocked(waitUntil).mock.calls[0][0];
+    expect(seen).toEqual(["<@U1> hi"]);
+  });
+
+  // Reading a clone drains the Node stream Bolt reads, but leaves bodyUsed
+  // false, so without the receiver's check Bolt answered 401.
+  it("throws a TypeError when the route reads a clone and passes the original", async () => {
+    const { receiver } = createApp();
+    let thrown: unknown;
+
+    const response = await viaNodeRoute(async (request) => {
+      await request.clone().text();
+      try {
+        return await receiver.fetch(request);
+      } catch (error) {
+        thrown = error;
+        return new Response(null, { status: 500 });
+      }
+    }, signedMention());
+
+    expect(response.status).toBe(500);
+    expect(thrown).toBeInstanceOf(TypeError);
+    expect((thrown as TypeError).message).toBe(BODY_USED);
+  });
 });
 
 describe("OAuth", () => {
