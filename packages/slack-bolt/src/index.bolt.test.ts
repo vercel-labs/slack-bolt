@@ -435,4 +435,56 @@ describe("OAuth", () => {
     expect(callback.status).toBe(400);
     expect(installations.size).toBe(0);
   });
+
+  // Bolt runs the installer without awaiting it and only logs its errors, so
+  // without the receiver's help these responses never finish.
+  it.each<[string, string, VercelReceiverOptions["installerOptions"]]>([
+    [
+      "the install page",
+      "https://example.com/api/slack",
+      {
+        installPathOptions: {
+          beforeRedirection: async () => {
+            throw new Error("beforeRedirection failed");
+          },
+        },
+      },
+    ],
+    [
+      "the OAuth callback",
+      "https://example.com/api/slack?code=c1&state=not-this-session",
+      {
+        callbackOptions: {
+          failure: () => {
+            throw new Error("failure callback failed");
+          },
+        },
+      },
+    ],
+  ])(
+    "answers 500 when %s throws instead of leaving the request open",
+    async (_, url, installerOptions) => {
+      const logger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        setLevel: vi.fn(),
+        getLevel: vi.fn(),
+        setName: vi.fn(),
+      };
+      const { receiver } = await createOAuthApp({ installerOptions, logger });
+
+      const response = await Promise.race([
+        receiver.fetch(new Request(url)),
+        new Promise<"pending">((resolve) =>
+          setTimeout(() => resolve("pending"), 1000),
+        ),
+      ]);
+
+      expect(response).not.toBe("pending");
+      expect((response as Response).status).toBe(500);
+      expect(logger.error).toHaveBeenCalled();
+    },
+  );
 });
