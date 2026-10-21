@@ -10,4 +10,4 @@ Breaking changes, with upgrade steps in [Migrating from v1](https://github.com/v
 - The `VercelHandler`, `BeforeProcessFn`, `ScopesResolver` and `VercelInstallerOptions` types are removed.
 - `VercelReceiver` takes Bolt's `HTTPReceiver` options. `beforeProcess`, `ackTimeoutMs` and the `scopes` resolver function are removed, and `customPropertiesExtractor` receives Bolt's request instead of a `Request` and body.
 - OAuth uses Bolt's own installer. `receiver.handleInstall` and `receiver.handleCallback` are replaced by `GET`, which serves the install page and the callback from one route or from separate ones. `clientId`, `clientSecret` and `stateSecret` are no longer read from `process.env`, and `installationStore` is required whenever `clientId` is set.
-- `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer are required.
+- `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer are required. Bolt 5.1 and up need Node.js 22.19 or newer.

@@ -4,7 +4,7 @@
 
 This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps with Next.js
 
-Before getting started, make sure you have a development workspace where you have permissions to install apps. You can use a [developer sandbox](https://api.slack.com/developer-program) or [create a workspace](https://slack.com/create)
+Before getting started, make sure you have Node.js 22.19 or newer, and a development workspace where you have permissions to install apps. You can use a [developer sandbox](https://api.slack.com/developer-program) or [create a workspace](https://slack.com/create)
 
 ## Installation
 

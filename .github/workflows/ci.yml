@@ -85,6 +85,9 @@ jobs:
           # engines.node and the @slack/bolt peer range's minimums.
           - node-version: 22.12.0
             slack-bolt: 4.7.3
+          # Bolt 5.1 and up install undici 8, which needs Node.js 22.19.
+          - node-version: 22.19.0
+            slack-bolt: latest
           - node-version: 26
             slack-bolt: latest
       fail-fast: false
