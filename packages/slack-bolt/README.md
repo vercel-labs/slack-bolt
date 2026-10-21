@@ -104,7 +104,7 @@ Handles a Slack request and resolves with the `Response` once Slack is acknowled
 - With the OAuth options, a `GET` with a `code`, `error` or `state` query parameter is the OAuth callback, and any other `GET` is the install page.
 - Anything else gets a `404`.
 
-Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read. To read it yourself too, read a `request.clone()` and pass the original to `fetch`.
+Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read. To read it yourself too, clone the request before you read it, read the original and pass the clone to `fetch`. Do it in that order: in Express, Nitro and other frameworks whose `Request` wraps Node.js's request, reading a clone also uses up the original's body.
 
 ### `preview`
 
@@ -458,8 +458,9 @@ import { forward, shouldForward } from "@/lib/forward";
 import { receiver } from "@/lib/slack";
 
 export async function POST(request: Request) {
-  // Read a copy, so the receiver still gets the untouched body.
-  const body = await request.clone().text();
+  // Clone before reading, so the receiver gets an untouched body.
+  const copy = request.clone();
+  const body = await request.text();
   const verified = isValidSlackRequest({
     signingSecret: process.env.SLACK_SIGNING_SECRET ?? "",
     body,
@@ -471,7 +472,7 @@ export async function POST(request: Request) {
     },
   });
   if (verified && shouldForward(body)) return forward(body);
-  return receiver.fetch(request);
+  return receiver.fetch(copy);
 }
 ```
 

@@ -731,7 +731,7 @@ describe("fetch", () => {
 
     await expect(receiver.fetch(request)).rejects.toThrow(
       new TypeError(
-        "Request body already read. Bolt needs the raw body to verify Slack's signature, so pass request.clone() to fetch instead.",
+        "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.",
       ),
     );
   });
