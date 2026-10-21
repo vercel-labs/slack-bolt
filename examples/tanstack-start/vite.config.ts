@@ -6,15 +6,15 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   // Vite's dev server answers 403 to any host it doesn't know, which blocks
-  // Slack's requests through a tunnel. Allow the common tunnel domains; add
-  // yours here if you use another.
+  // Slack's requests through an ngrok tunnel. Add your own domain here if you
+  // use another tunnel.
   server: {
     allowedHosts: [
       ".ngrok-free.app",
       ".ngrok-free.dev",
       ".ngrok.app",
+      ".ngrok.dev",
       ".ngrok.io",
-      ".trycloudflare.com",
     ],
   },
   resolve: {

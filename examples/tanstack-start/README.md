@@ -32,7 +32,7 @@ The [Slack CLI](https://docs.slack.dev/tools/slack-cli/) copies this example int
 Slack sends requests to a public HTTPS URL, so expose your local server with a tunnel such as [ngrok](https://ngrok.com/docs/getting-started/).
 
 1. Start the app with `npm run dev`. It serves http://localhost:3000
-2. In another terminal, start a tunnel to port 3000, e.g. `ngrok http 3000`, and copy its `https://` URL. Vite's dev server only answers hosts it knows: [`vite.config.ts`](./vite.config.ts) allows ngrok and Cloudflare Tunnel domains, so add yours to `server.allowedHosts` if you use another tunnel
+2. In another terminal, start a tunnel to port 3000, e.g. `ngrok http 3000`, and copy its `https://` URL. Vite's dev server only answers hosts it knows: [`vite.config.ts`](./vite.config.ts) allows ngrok's domains, so add yours to `server.allowedHosts` if you use another tunnel
 3. Open your App Manifest from the Slack App Dashboard and update it so all the `request_url`, `url` and `redirect_urls` fields use `https://<your-tunnel-domain>/api/slack/events`
 4. Click save and you will be prompted to verify the URL
 5. Open `https://<your-tunnel-domain>`, click Install and approve the app for your workspace
