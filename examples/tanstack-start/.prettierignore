@@ -1,3 +1,0 @@
-# oxfmt reads this file. TanStack Router generates the route tree, so leave
-# its formatting alone.
-src/routeTree.gen.ts

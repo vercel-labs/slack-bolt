@@ -5,23 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "srvx --import jiti/register src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "lint": "oxlint src && oxfmt --check src",
-    "lint:fix": "oxlint --fix src && oxfmt src"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
     "@upstash/redis": "^1.39.0",
-    "@vercel/slack-bolt": "workspace:*",
+    "@vercel/slack-bolt": "canary",
     "hono": "^4.13.13"
   },
   "devDependencies": {
     "@slack/cli-hooks": "^2.0.0",
-    "@types/node": "catalog:",
+    "@types/node": "^26.6.5",
     "jiti": "^2.7.0",
-    "oxfmt": "catalog:",
-    "oxlint": "catalog:",
     "srvx": "^1.0.6",
-    "typescript": "catalog:"
+    "typescript": "~7.0.2"
   }
 }
