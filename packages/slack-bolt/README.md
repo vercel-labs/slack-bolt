@@ -15,11 +15,17 @@ Upgrading from v1? See [Migrating from v1](#migrating-from-v1).
 
 ```bash
 npm install @vercel/slack-bolt @slack/bolt
-# or
+```
+
+```bash
 yarn add @vercel/slack-bolt @slack/bolt
-# or
+```
+
+```bash
 pnpm add @vercel/slack-bolt @slack/bolt
-# or
+```
+
+```bash
 bun add @vercel/slack-bolt @slack/bolt
 ```
 
@@ -30,7 +36,7 @@ bun add @vercel/slack-bolt @slack/bolt
 | `@slack/bolt` | `^4.7.3` or `^5.0.0` |
 | Node.js       | `>=22.12`            |
 
-`@slack/bolt` is a peer dependency, so declare it in your own `package.json` alongside this package. Do not install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer, and skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
+Don't install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer dependency, so skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
 
 ## API Reference
 
