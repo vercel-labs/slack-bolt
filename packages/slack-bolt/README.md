@@ -160,7 +160,7 @@ The snippets below show a few common frameworks. Each imports `receiver` from th
 
 ```typescript
 import { Hono } from "hono";
-import { receiver } from "./slack";
+import { receiver } from "./lib/slack";
 
 const app = new Hono();
 
@@ -176,7 +176,7 @@ Express hands your route Node.js's request and response, not a Web `Request`, so
 ```typescript
 import express, { type RequestHandler } from "express";
 import { toNodeHandler } from "srvx/node";
-import { receiver } from "./slack";
+import { receiver } from "./lib/slack";
 
 const app = express();
 
@@ -194,7 +194,7 @@ Add the Slack route before any body parser, like `express.json()` or `express.ur
 ```typescript
 // routes/api/slack/events.ts
 import { defineHandler } from "nitro";
-import { receiver } from "~/slack";
+import { receiver } from "~/lib/slack";
 
 export default defineHandler((event) => receiver.fetch(event.req));
 ```
@@ -206,7 +206,7 @@ In Nitro 3, `event.req` is the Web `Request`. Put the route under `routes/api`: 
 ```typescript
 // src/routes/api/slack/events.ts
 import { createFileRoute } from "@tanstack/react-router";
-import { receiver } from "~/slack";
+import { receiver } from "~/lib/slack";
 
 export const Route = createFileRoute("/api/slack/events")({
   server: {
