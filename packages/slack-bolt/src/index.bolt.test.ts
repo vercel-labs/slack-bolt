@@ -350,8 +350,30 @@ describe("OAuth", () => {
     return { receiver, app, installations };
   }
 
+  it.each(["?x=1", "#fragment", "?", "#"])(
+    "rejects redirectUri suffix %s with a clear initialization error",
+    (suffix) => {
+      expect(
+        () =>
+          new VercelReceiver({
+            signingSecret: SECRET,
+            redirectUri: `https://example.com/api/slack/oauth${suffix}`,
+          }),
+      ).toThrow(
+        new AppInitializationError(
+          "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
+        ),
+      );
+    },
+  );
+
   it.each<[string, string, VercelReceiverOptions]>([
     ["separate routes", "https://example.com/api/slack/oauth", {}],
+    [
+      "a redirectUri with encoded path delimiters",
+      "https://example.com/api/slack%3Foauth%23callback",
+      { redirectUri: "https://example.com/api/slack%3Foauth%23callback" },
+    ],
     [
       "one route with a redirectUri",
       "https://example.com/api/slack",
