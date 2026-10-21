@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { validateAndBuildParams } from "../internal/schemas";
 import { executeBuild } from "./build";
 import { run } from "./index";
 
@@ -39,6 +40,17 @@ describe("vercel-slack build", () => {
         "Slack configuration token is invalid or expired.",
       ),
     );
+  });
+
+  it("exits with code 1 when required env vars are missing", async () => {
+    vi.mocked(validateAndBuildParams).mockImplementationOnce(() => {
+      throw new Error("Missing VERCEL_API_TOKEN");
+    });
+
+    await run("0.0.0");
+
+    expect(executeBuild).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it("exits with code 0 when the build succeeds", async () => {
