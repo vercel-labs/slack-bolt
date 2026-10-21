@@ -1,0 +1,7 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "extends": ["../.oxlintrc.json"],
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "react"],
+  "ignorePatterns": ["tanstack-start/src/routeTree.gen.ts"],
+  "overrides": [{ "files": ["nextjs/**"], "plugins": ["nextjs"] }]
+}

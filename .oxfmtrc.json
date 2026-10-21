@@ -13,5 +13,6 @@
   "bracketSameLine": false,
   "bracketSpacing": true,
   "sortImports": { "newlinesBetween": false },
-  "sortPackageJson": false
+  "sortPackageJson": false,
+  "ignorePatterns": ["examples/tanstack-start/src/routeTree.gen.ts"]
 }
