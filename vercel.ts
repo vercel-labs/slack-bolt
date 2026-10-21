@@ -19,8 +19,8 @@ type Service = {
   rewrites?: Rewrite[];
 };
 
-// The examples import @vercel/slack-bolt from the workspace, so every service
-// builds it first.
+// In this repo, `overrides` in pnpm-workspace.yaml links each example's
+// @vercel/slack-bolt to packages/slack-bolt, so every service builds it first.
 const buildLibrary =
   "pnpm --dir ../.. exec turbo run build --filter=@vercel/slack-bolt";
 

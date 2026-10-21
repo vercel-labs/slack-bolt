@@ -1,3 +1,13 @@
+# Dependencies
+node_modules
+
+# Environment
+.env*
+!.env.example
+
+# Vercel
 .vercel
+
+# Nitro
 .output
 .nitro

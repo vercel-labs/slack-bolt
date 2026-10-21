@@ -5,24 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "lint": "oxlint src && oxfmt --check src",
-    "lint:fix": "oxlint --fix src && oxfmt src"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
     "@upstash/redis": "^1.39.0",
-    "@vercel/slack-bolt": "workspace:*",
+    "@vercel/slack-bolt": "canary",
     "express": "^5.3.0",
     "srvx": "~1.0.6"
   },
   "devDependencies": {
     "@slack/cli-hooks": "^2.0.0",
     "@types/express": "^5.0.6",
-    "@types/node": "catalog:",
-    "oxfmt": "catalog:",
-    "oxlint": "catalog:",
+    "@types/node": "^26.6.5",
     "tsx": "^4.23.15",
-    "typescript": "catalog:"
+    "typescript": "~7.0.2"
   }
 }

@@ -6,12 +6,21 @@ settings:
 
 catalogs:
   default:
+    '@types/node':
+      specifier: ^26.6.5
+      version: 26.6.5
     oxfmt:
       specifier: 0.73.0
       version: 0.73.0
     oxlint:
       specifier: 1.88.0
       version: 1.88.0
+    typescript:
+      specifier: ~7.0.2
+      version: 7.0.2
+
+overrides:
+  '@vercel/slack-bolt': workspace:*
 
 importers:
 
@@ -58,19 +67,13 @@ importers:
         specifier: ^5.0.6
         version: 5.0.6
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^26.6.5
         version: 26.6.5
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.73.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
       typescript:
-        specifier: 'catalog:'
+        specifier: ~7.0.2
         version: 7.0.2
 
   examples/hono:
@@ -92,22 +95,16 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^26.6.5
         version: 26.6.5
       jiti:
         specifier: ^2.7.0
         version: 2.7.0
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.73.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0
       srvx:
         specifier: ^1.0.6
         version: 1.0.6
       typescript:
-        specifier: 'catalog:'
+        specifier: ~7.0.2
         version: 7.0.2
 
   examples/nextjs:
@@ -138,7 +135,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^26.6.5
         version: 26.6.5
       '@types/react':
         specifier: ^19.3.0
@@ -146,17 +143,11 @@ importers:
       '@types/react-dom':
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.73.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
       typescript:
-        specifier: 'catalog:'
+        specifier: ~7.0.2
         version: 7.0.2
 
   examples/nitro:
@@ -178,16 +169,10 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^26.6.5
         version: 26.6.5
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.73.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0
       typescript:
-        specifier: 'catalog:'
+        specifier: ~7.0.2
         version: 7.0.2
 
   examples/tanstack-start:
@@ -221,7 +206,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^26.6.5
         version: 26.6.5
       '@types/react':
         specifier: ^19.3.0
@@ -235,17 +220,11 @@ importers:
       nitro:
         specifier: ^3.0.260903-beta
         version: 3.0.260903-beta
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.73.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
       typescript:
-        specifier: 'catalog:'
+        specifier: ~7.0.2
         version: 7.0.2
       vite:
         specifier: ^8.3.4
