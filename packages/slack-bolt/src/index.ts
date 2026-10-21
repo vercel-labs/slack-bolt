@@ -161,8 +161,12 @@ export class VercelReceiver extends HTTPReceiver {
     // Fail closed with a clear message: Bolt < 4.7.3 accepts an empty secret,
     // and pnpm and yarn don't enforce the peer range.
     if (rest.signatureVerification !== false && !signingSecret) {
+      // An app that passes signingSecret reads it from its own env var, so
+      // don't send it looking for SLACK_SIGNING_SECRET.
       throw new AppInitializationError(
-        "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.",
+        "signingSecret" in options
+          ? "Missing signing secret. The signingSecret option is empty and SLACK_SIGNING_SECRET isn't set. Check that the environment variable you pass as signingSecret is set."
+          : "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.",
       );
     }
 

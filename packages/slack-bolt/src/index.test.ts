@@ -72,6 +72,8 @@ const oauth: VercelReceiverOptions = {
 
 const MISSING_SECRET =
   "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.";
+const MISSING_OPTION_SECRET =
+  "Missing signing secret. The signingSecret option is empty and SLACK_SIGNING_SECRET isn't set. Check that the environment variable you pass as signingSecret is set.";
 
 const makeEvent = () =>
   ({ body: {}, ack: async () => {} }) as unknown as ReceiverEvent;
@@ -176,7 +178,6 @@ describe("constructor", () => {
 
   it.each<[string, VercelReceiverOptions, string | undefined]>([
     ["neither the option nor the env var is set", {}, undefined],
-    ["the option is an empty string", { signingSecret: "" }, undefined],
     ["the env var is an empty string", {}, ""],
     [
       "signatureVerification is true",
@@ -188,6 +189,19 @@ describe("constructor", () => {
 
     expect(() => new VercelReceiver(options)).toThrow(
       new AppInitializationError(MISSING_SECRET),
+    );
+    expect(superCalls).toEqual([]);
+  });
+
+  // Like `signingSecret: process.env.MY_SIGNING_SECRET` with that var unset.
+  it.each<[string, VercelReceiverOptions]>([
+    ["undefined", { signingSecret: undefined }],
+    ["an empty string", { signingSecret: "" }],
+  ])("points at the app's own env var when the option is %s", (_, options) => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", undefined);
+
+    expect(() => new VercelReceiver(options)).toThrow(
+      new AppInitializationError(MISSING_OPTION_SECRET),
     );
     expect(superCalls).toEqual([]);
   });
