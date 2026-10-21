@@ -21,7 +21,7 @@ The [Slack CLI](https://docs.slack.dev/tools/slack-cli/) copies this example int
 
 1. Open https://api.slack.com/apps/new and choose "From an app manifest"
 2. Choose the workspace you want to use
-3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next
+3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next. Its URLs point at `example.com` for now; you replace them with your app's URL when you run it locally or deploy it
 4. Review the configuration and click Create, then upload [`app-icon.png`](./app-icon.png) as the App icon under Display Information on the Basic Information tab
 5. On the Basic Information tab, copy your Client ID, Client Secret and Signing Secret into `.env.local` as `TANSTACK_START_SLACK_CLIENT_ID`, `TANSTACK_START_SLACK_CLIENT_SECRET` and `TANSTACK_START_SLACK_SIGNING_SECRET`. Start from the example file with `cp .env.example .env.local`
 6. Set `SLACK_STATE_SECRET` and `TOKEN_ENCRYPTION_SECRET` to two different random strings, e.g. from `openssl rand -hex 32`. The first signs the OAuth state cookie; the second encrypts tokens in Redis

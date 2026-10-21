@@ -29,12 +29,12 @@
         "command": "/sample-command",
         "description": "Runs a sample command",
         "should_escape": false,
-        "url": "https://<your-domain>/api/slack/events"
+        "url": "https://example.com/api/slack/events"
       }
     ]
   },
   "oauth_config": {
-    "redirect_urls": ["https://<your-domain>/api/slack/events"],
+    "redirect_urls": ["https://example.com/api/slack/events"],
     "scopes": {
       "bot": ["channels:history", "chat:write", "commands"]
     },
@@ -48,11 +48,11 @@
         "message.channels",
         "tokens_revoked"
       ],
-      "request_url": "https://<your-domain>/api/slack/events"
+      "request_url": "https://example.com/api/slack/events"
     },
     "interactivity": {
       "is_enabled": true,
-      "request_url": "https://<your-domain>/api/slack/events"
+      "request_url": "https://example.com/api/slack/events"
     },
     "org_deploy_enabled": true,
     "socket_mode_enabled": false,
