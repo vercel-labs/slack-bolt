@@ -33,6 +33,8 @@ export interface VercelReceiverOptions extends Omit<
    * @default process.env.SLACK_SIGNING_SECRET
    */
   signingSecret?: string | undefined;
+  /** Absolute OAuth callback URL, without a query string or fragment. */
+  redirectUri?: string;
   /**
    * Bolt's installer options, minus `installPath`, `redirectUriPath` and
    * `port`: `fetch` serves the install page and OAuth callback at whatever
@@ -70,13 +72,22 @@ const isDeferred = (error: unknown) =>
 
 /** The path of `redirectUri`, which Bolt needs as `redirectUriPath`. */
 function pathOf(redirectUri: string): string {
+  let url: URL;
   try {
-    return new URL(redirectUri).pathname;
+    url = new URL(redirectUri);
   } catch {
     throw new AppInitializationError(
       `redirectUri must be an absolute URL, like https://example.com/api/slack, but it's "${redirectUri}".`,
     );
   }
+  // Bolt checks the original URL's suffix, then routes by pathname. Check
+  // the delimiters directly: URL.search and URL.hash omit empty "?" and "#".
+  if (redirectUri.includes("?") || redirectUri.includes("#")) {
+    throw new AppInitializationError(
+      "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
+    );
+  }
+  return url.pathname;
 }
 
 /**
@@ -150,7 +161,8 @@ export class VercelReceiver extends HTTPReceiver {
    * `signatureVerification` isn't `false`, when `clientId` is set without an
    * `installationStore`, a `clientSecret` or a `stateSecret` (unless
    * `installerOptions` has a `stateStore` or turns off `stateVerification`),
-   * or when `redirectUri` isn't an absolute URL.
+   * or when `redirectUri` isn't an absolute URL without a query string or
+   * fragment.
    */
   public constructor(options: VercelReceiverOptions = {}) {
     const {
@@ -163,8 +175,12 @@ export class VercelReceiver extends HTTPReceiver {
     // Fail closed with a clear message: Bolt < 4.7.3 accepts an empty secret,
     // and pnpm and yarn don't enforce the peer range.
     if (rest.signatureVerification !== false && !signingSecret) {
+      // An app that passes signingSecret reads it from its own env var, so
+      // don't send it looking for SLACK_SIGNING_SECRET.
       throw new AppInitializationError(
-        "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.",
+        "signingSecret" in options
+          ? "Missing signing secret. The signingSecret option is empty. Check that the environment variable you pass as signingSecret is set."
+          : "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.",
       );
     }
 

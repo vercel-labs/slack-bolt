@@ -78,6 +78,8 @@ const oauth: VercelReceiverOptions = {
 
 const MISSING_SECRET =
   "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.";
+const MISSING_OPTION_SECRET =
+  "Missing signing secret. The signingSecret option is empty. Check that the environment variable you pass as signingSecret is set.";
 
 const makeEvent = () =>
   ({ body: {}, ack: async () => {} }) as unknown as ReceiverEvent;
@@ -182,7 +184,6 @@ describe("constructor", () => {
 
   it.each<[string, VercelReceiverOptions, string | undefined]>([
     ["neither the option nor the env var is set", {}, undefined],
-    ["the option is an empty string", { signingSecret: "" }, undefined],
     ["the env var is an empty string", {}, ""],
     [
       "signatureVerification is true",
@@ -197,6 +198,28 @@ describe("constructor", () => {
     );
     expect(superCalls).toEqual([]);
   });
+
+  // Like `signingSecret: process.env.MY_SIGNING_SECRET` with that var unset.
+  // An empty string doesn't fall back to SLACK_SIGNING_SECRET, even when set.
+  it.each<[string, VercelReceiverOptions, string | undefined]>([
+    ["undefined", { signingSecret: undefined }, undefined],
+    ["an empty string", { signingSecret: "" }, undefined],
+    [
+      "an empty string and SLACK_SIGNING_SECRET is set",
+      { signingSecret: "" },
+      "env-secret",
+    ],
+  ])(
+    "points at the app's own env var when the option is %s",
+    (_, options, env) => {
+      vi.stubEnv("SLACK_SIGNING_SECRET", env);
+
+      expect(() => new VercelReceiver(options)).toThrow(
+        new AppInitializationError(MISSING_OPTION_SECRET),
+      );
+      expect(superCalls).toEqual([]);
+    },
+  );
 });
 
 describe("OAuth options", () => {
@@ -227,12 +250,27 @@ describe("OAuth options", () => {
   it("derives redirectUriPath from redirectUri", () => {
     expect(
       installerOptionsFor({
-        redirectUri: "https://example.com/api/slack/oauth?x=1",
+        redirectUri: "https://example.com/api/slack/oauth",
       }),
     ).toEqual({
       installPath: "/slack/install",
       redirectUriPath: "/api/slack/oauth",
     });
+  });
+
+  it("rejects a redirectUri query before calling HTTPReceiver without logging its value", () => {
+    expect(
+      () =>
+        new VercelReceiver({
+          ...oauth,
+          redirectUri: "https://example.com/api/slack/oauth?token=private",
+        }),
+    ).toThrow(
+      new AppInitializationError(
+        "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
+      ),
+    );
+    expect(superCalls).toEqual([]);
   });
 
   it("moves the install page off the callback's path", () => {

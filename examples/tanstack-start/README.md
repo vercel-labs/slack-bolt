@@ -4,7 +4,7 @@
 
 This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps with TanStack Start
 
-Before getting started, make sure you have a development workspace where you have permissions to install apps. You can use a [developer sandbox](https://api.slack.com/developer-program) or [create a workspace](https://slack.com/create)
+Before getting started, make sure you have Node.js 22.19 or newer and a development workspace where you have permissions to install apps. You can use a [developer sandbox](https://api.slack.com/developer-program) or [create a workspace](https://slack.com/create)
 
 ## Installation
 
@@ -21,18 +21,18 @@ The [Slack CLI](https://docs.slack.dev/tools/slack-cli/) copies this example int
 
 1. Open https://api.slack.com/apps/new and choose "From an app manifest"
 2. Choose the workspace you want to use
-3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next
+3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next. Its URLs point at `example.com` for now; you replace them with your app's URL when you run it locally or deploy it
 4. Review the configuration and click Create, then upload [`app-icon.png`](./app-icon.png) as the App icon under Display Information on the Basic Information tab
 5. On the Basic Information tab, copy your Client ID, Client Secret and Signing Secret into `.env.local` as `TANSTACK_START_SLACK_CLIENT_ID`, `TANSTACK_START_SLACK_CLIENT_SECRET` and `TANSTACK_START_SLACK_SIGNING_SECRET`. Start from the example file with `cp .env.example .env.local`
 6. Set `SLACK_STATE_SECRET` and `TOKEN_ENCRYPTION_SECRET` to two different random strings, e.g. from `openssl rand -hex 32`. The first signs the OAuth state cookie; the second encrypts tokens in Redis
-7. Add [Upstash Redis](https://vercel.com/marketplace/upstash) to your Vercel project, which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Installations are stored there. To run locally, copy both into `.env.local` too
+7. Create an [Upstash Redis](https://vercel.com/marketplace/upstash) database from the Vercel Marketplace. Installations are stored there, and your development and production apps can share it. You connect it to your Vercel project when you deploy; to run locally, copy its `KV_REST_API_URL` and `KV_REST_API_TOKEN` from the database's page in the Vercel dashboard into `.env.local`
 
 ### Run locally
 
 Slack sends requests to a public HTTPS URL, so expose your local server with a tunnel such as [ngrok](https://ngrok.com/docs/getting-started/).
 
 1. Start the app with `npm run dev`. It serves http://localhost:3000
-2. In another terminal, start a tunnel to port 3000, e.g. `ngrok http 3000`, and copy its `https://` URL
+2. In another terminal, start a tunnel to port 3000, e.g. `ngrok http 3000`, and copy its `https://` URL. Vite's dev server only answers hosts it knows: [`vite.config.ts`](./vite.config.ts) allows ngrok's domains, so add yours to `server.allowedHosts` if you use another tunnel
 3. Open your App Manifest from the Slack App Dashboard and update it so all the `request_url`, `url` and `redirect_urls` fields use `https://<your-tunnel-domain>/api/slack/events`
 4. Click save and you will be prompted to verify the URL
 5. Open `https://<your-tunnel-domain>`, click Install and approve the app for your workspace
@@ -41,10 +41,11 @@ Slack sends requests to a public HTTPS URL, so expose your local server with a t
 ## Deploy to Vercel
 
 1. Create a new Slack app for production following the steps from above
-2. Push your project to a Git repository, then create a new Vercel project [here](https://vercel.com/new) and import it
-3. Add the environment variables from [Create a Slack App](#create-a-slack-app) to your Vercel project
-4. When your deployment has finished, open your App Manifest from the Slack App Dashboard
-5. Update the manifest so all the `request_url`, `url` and `redirect_urls` fields use `https://<your-app-domain>/api/slack/events`
+2. Push your project to a Git repository, then import it as a new Vercel project [here](https://vercel.com/new). Before you click Deploy, add the environment variables from steps 5 and 6 of [Create a Slack App](#create-a-slack-app) under Environment Variables, with the production app's values and new random secrets. The app needs them from its first deployment
+3. When the deployment has finished, open your Upstash database under Storage in the Vercel dashboard and click Connect Project to connect it to this project. Leave Custom Prefix empty, so it adds `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Then redeploy from the Deployments tab so the app picks them up
+4. Open your App Manifest from the Slack App Dashboard
+5. Update the manifest so all the `request_url`, `url` and `redirect_urls` fields use `https://<your-app-domain>/api/slack/events`, where `<your-app-domain>` is your project's production domain, like `my-slack-app.vercel.app`
+    - _Note_: Use the domain listed under Domains on the project's page, not a deployment URL. With the default Deployment Protection, Vercel Authentication protects deployment URLs, so Slack can't reach them
 6. Click save and you will be prompted to verify the URL
 7. Open `https://<your-app-domain>`, click Install and approve the app for your workspace
 8. Open your Slack workspace and add your app to any channel

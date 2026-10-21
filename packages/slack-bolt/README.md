@@ -7,7 +7,7 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 
 ## Getting Started
 
-Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template).
+Start from one of the [examples](#examples): each is a complete Slack app, with OAuth and a Redis installation store, that you can run locally and deploy to Vercel. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template).
 
 Upgrading from v1? See [Migrating from v1](#migrating-from-v1).
 
@@ -31,10 +31,13 @@ bun add @vercel/slack-bolt @slack/bolt
 
 ### Compatibility
 
-| Dependency    | Supported versions   |
-| ------------- | -------------------- |
-| `@slack/bolt` | `^4.7.3` or `^5.0.0` |
-| Node.js       | `>=22.12`            |
+| Dependency       | Supported versions   |
+| ---------------- | -------------------- |
+| `@slack/bolt`    | `^4.7.3` or `^5.0.0` |
+| Node.js (Bolt 4) | `>=22.12`            |
+| Node.js (Bolt 5) | `>=22.19`            |
+
+Bolt 5 installs `undici` 8 through `@slack/socket-mode` 3.1, and `undici` 8 needs Node.js 22.19 or newer. On 22.12, for example, loading Bolt fails with a `TypeError` from `undici`. To stay on an older Node.js 22, install `undici@7` next to Bolt.
 
 Don't install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer dependency, so skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
 
@@ -91,7 +94,7 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
-The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
+The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL without a query string or fragment. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
 
 #### `receiver.fetch(request)`
 
@@ -240,7 +243,7 @@ const app = new App({ receiver, deferInitialization: true });
 export const { GET, POST } = receiver;
 ```
 
-Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full URL, like `https://example.com/api/slack/oauth`.
+Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full URL without a query string or fragment, like `https://example.com/api/slack/oauth`. Bolt requires the URL to end with its callback pathname. This restriction applies to the configured URL; Slack still adds `code` and `state` query parameters to the callback request.
 
 `installerOptions` takes Bolt's installer options, except `installPath`, `redirectUriPath` and `port`: the receiver serves the install page and callback at whatever path your route has.
 
@@ -355,11 +358,15 @@ Options:
   --version, -v    Show version
 ```
 
+`vercel-slack build` exits with code 1 when it can't set up the preview's Slack app, so a build script like `vercel-slack build && next build` stops and the preview deployment fails instead of going live without its Slack credentials. Production, development and local builds skip it and exit with code 0.
+
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
 
 ## Migrating from v1
 
-v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI are unchanged.
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API is unchanged, and so is the `vercel-slack` CLI, except that `vercel-slack build` now exits with code 1 when it can't set up the preview's Slack app, which stops a `vercel-slack build && next build` script.
+
+With Bolt 5, v2 needs Node.js 22.19 or newer. See [Compatibility](#compatibility).
 
 ### Replace `createHandler`
 
@@ -421,7 +428,7 @@ const receiver = new VercelReceiver({
 });
 ```
 
-Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full URL.
+Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full URL without a query string or fragment.
 
 ### Changed options
 
