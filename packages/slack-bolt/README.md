@@ -31,12 +31,13 @@ bun add @vercel/slack-bolt @slack/bolt
 
 ### Compatibility
 
-| Dependency    | Supported versions                                    |
-| ------------- | ----------------------------------------------------- |
-| `@slack/bolt` | `^4.7.3` or `^5.0.0`                                  |
-| Node.js       | `>=22.12`, or `>=22.19` with `@slack/bolt` 5.1 and up |
+| Dependency       | Supported versions   |
+| ---------------- | -------------------- |
+| `@slack/bolt`    | `^4.7.3` or `^5.0.0` |
+| Node.js (Bolt 4) | `>=22.12`            |
+| Node.js (Bolt 5) | `>=22.19`            |
 
-Bolt 5.1 and up install `undici` 8, which declares Node.js 22.19 or newer. On older versions, loading Bolt can fail with a `TypeError` from `undici` (it does on 22.12).
+Bolt 5 installs `undici` 8 through `@slack/socket-mode` 3.1, and `undici` 8 needs Node.js 22.19 or newer. On 22.12, for example, loading Bolt fails with a `TypeError` from `undici`. To stay on an older Node.js 22, install `undici@7` next to Bolt.
 
 Don't install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer dependency, so skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
 
@@ -361,7 +362,9 @@ All Vercel and Slack environment variables are read automatically. You can overr
 
 ## Migrating from v1
 
-v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer, or 22.19 or newer with Bolt 5.1 and up. The `preview` API and the `vercel-slack` CLI are unchanged.
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI are unchanged.
+
+With Bolt 5, v2 needs Node.js 22.19 or newer. See [Compatibility](#compatibility).
 
 ### Replace `createHandler`
 
