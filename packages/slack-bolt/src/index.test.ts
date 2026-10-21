@@ -221,12 +221,27 @@ describe("OAuth options", () => {
   it("derives redirectUriPath from redirectUri", () => {
     expect(
       installerOptionsFor({
-        redirectUri: "https://example.com/api/slack/oauth?x=1",
+        redirectUri: "https://example.com/api/slack/oauth",
       }),
     ).toEqual({
       installPath: "/slack/install",
       redirectUriPath: "/api/slack/oauth",
     });
+  });
+
+  it("rejects a redirectUri query before calling HTTPReceiver without logging its value", () => {
+    expect(
+      () =>
+        new VercelReceiver({
+          ...oauth,
+          redirectUri: "https://example.com/api/slack/oauth?token=private",
+        }),
+    ).toThrow(
+      new AppInitializationError(
+        "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
+      ),
+    );
+    expect(superCalls).toEqual([]);
   });
 
   it("moves the install page off the callback's path", () => {
