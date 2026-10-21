@@ -247,6 +247,8 @@ Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** un
 
 `installerOptions` takes Bolt's installer options, except `installPath`, `redirectUriPath` and `port`: the receiver serves the install page and callback at whatever path your route has.
 
+Bolt doesn't apply the `App`'s `clientOptions` to a custom receiver's installer. If you set `clientOptions` on the `App`, like a `slackApiUrl` for GovSlack, a proxy `agent`, `retryConfig` or `timeout`, pass the same options as `installerOptions.clientOptions` too, so the OAuth callback and token refreshes use them. For a Slack host other than slack.com, also set `installerOptions.authorizationUrl` to its OAuth authorize URL.
+
 ### Environment variables
 
 Set these in your Vercel project (or `.env.local` for local development):
