@@ -194,7 +194,7 @@ Add the Slack route before any body parser, like `express.json()` or `express.ur
 ```typescript
 // routes/api/slack/events.ts
 import { defineHandler } from "nitro";
-import { receiver } from "~/lib/slack";
+import { receiver } from "../../../lib/slack";
 
 export default defineHandler((event) => receiver.fetch(event.req));
 ```
