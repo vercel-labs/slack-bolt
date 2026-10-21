@@ -155,9 +155,11 @@ jobs:
 
       # Unit tests stub Bolt and attw doesn't run code, so load the built entry
       # for real and send it one request: its named imports from CommonJS Bolt
-      # only resolve if Node's ESM loader detects them, and the CommonJS build
-      # require()s ESM-only srvx.
+      # only resolve if Node's ESM loader detects them. The CommonJS build runs
+      # without require(esm), like in Jest, so it can't depend on an ESM-only
+      # package; srvx is bundled for that reason.
       - name: Load built entry
         run: |
-          node -e "const { VercelReceiver } = require('./dist/index.js'); new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')).then((r) => { if (r.status !== 404) process.exit(1) })"
+          node --no-experimental-require-module -e "const { VercelReceiver } = require('./dist/index.js'); new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')).then((r) => { if (r.status !== 404) process.exit(1) })"
+          node --no-experimental-require-module -e "require('./dist/preview.js')"
           node --input-type=module -e "const { VercelReceiver } = await import('./dist/index.mjs'); const r = await new VercelReceiver({ signatureVerification: false }).fetch(new Request('http://x/any')); if (r.status !== 404) process.exit(1)"
