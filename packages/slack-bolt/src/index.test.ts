@@ -277,6 +277,32 @@ describe("OAuth options", () => {
     expect(superCalls).toEqual([]);
   });
 
+  // Like an unset SLACK_REDIRECT_URI= in a .env file.
+  it("treats an empty redirectUri as unset", () => {
+    new VercelReceiver({ ...oauth, redirectUri: "" });
+
+    const [passed] = superCalls as HTTPReceiverOptions[];
+    expect(passed).not.toHaveProperty("redirectUri");
+    expect(passed.installerOptions).toEqual(BOLT_PATHS.installerOptions);
+  });
+
+  // URL trims whitespace, but Bolt and Slack would get it.
+  it.each([
+    " https://example.com/api/slack/oauth",
+    "\thttps://example.com/api/slack/oauth",
+    "https://example.com/api/slack/oauth\n",
+  ])(
+    "throws before calling HTTPReceiver when redirectUri %j has whitespace at either end",
+    (redirectUri) => {
+      expect(() => new VercelReceiver({ ...oauth, redirectUri })).toThrow(
+        new AppInitializationError(
+          `redirectUri must not start or end with whitespace, but it's ${JSON.stringify(redirectUri)}.`,
+        ),
+      );
+      expect(superCalls).toEqual([]);
+    },
+  );
+
   it("moves the install page off the callback's path", () => {
     expect(
       installerOptionsFor({ redirectUri: "https://example.com/slack/install" }),
@@ -416,6 +442,79 @@ describe("processEventErrorHandler", () => {
 
     expect(wrap(handler)({} as Parameters<ErrorHandler>[0])).toBe(true);
     expect(await isSettled(keptAlive())).toBe(true);
+  });
+});
+
+describe("customPropertiesExtractor", () => {
+  type Extractor = NonNullable<
+    HTTPReceiverOptions["customPropertiesExtractor"]
+  >;
+  const req = {} as Parameters<Extractor>[0];
+
+  /** The extractor our receiver passed to HTTPReceiver. */
+  function wrap(extractor: Extractor): Extractor {
+    new VercelReceiver({
+      signingSecret: "secret",
+      customPropertiesExtractor: extractor,
+    });
+    const [options] = superCalls as HTTPReceiverOptions[];
+    return options.customPropertiesExtractor as Extractor;
+  }
+
+  it("passes the extractor's properties through", () => {
+    const properties = { tenant: "acme" };
+    const extractor = vi.fn<Extractor>(() => properties);
+
+    expect(wrap(extractor)(req)).toBe(properties);
+    expect(extractor).toHaveBeenCalledExactlyOnceWith(req);
+  });
+
+  // Bolt calls the extractor outside any try, so a throw would be an
+  // unhandled rejection.
+  it("rejects the event with what the extractor threw, without processing it", async () => {
+    const error = new Error("no tenant");
+    const extracted = wrap(() => {
+      throw error;
+    })(req);
+    const logger = { error: vi.fn() };
+    // Not initialized yet, as with deferInitialization.
+    const app = {
+      initialized: false,
+      init: vi.fn(async () => {}),
+      processEvent: vi.fn<App["processEvent"]>(async () => {}),
+    };
+    const wrapped = initWith(app as unknown as Partial<App>, {
+      logger: logger as unknown as HTTPReceiverOptions["logger"],
+    });
+
+    await expect(
+      wrapped.processEvent({ ...makeEvent(), customProperties: extracted }),
+    ).rejects.toBe(error);
+    expect(app.init).not.toHaveBeenCalled();
+    expect(app.processEvent).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+      "customPropertiesExtractor threw, so this event wasn't processed.",
+      error,
+    );
+  });
+
+  // Bolt 4's default processEventErrorHandler runs `"code" in error`.
+  it("rejects with an Error when the extractor throws something else", async () => {
+    const extracted = wrap(() => {
+      throw "no tenant";
+    })(req);
+    const wrapped = initWith({ processEvent: vi.fn() } as Partial<App>, {
+      logger: { error: vi.fn() } as unknown as HTTPReceiverOptions["logger"],
+    });
+
+    const rejection = wrapped
+      .processEvent({ ...makeEvent(), customProperties: extracted })
+      .catch((error: unknown) => error);
+
+    expect(await rejection).toEqual(
+      expect.objectContaining({ message: "no tenant", cause: "no tenant" }),
+    );
+    expect(await rejection).toBeInstanceOf(Error);
   });
 });
 
@@ -645,14 +744,18 @@ describe("fetch", () => {
     );
   });
 
-  it.each(["code=c&state=s", "error=access_denied&state=s", "code=c"])(
-    "sends GET requests with %s to the OAuth callback",
-    async (query) => {
-      await expect(
-        routed("GET", `https://x/api/slack?${query}`, oauth),
-      ).resolves.toBe(`GET /slack/oauth_redirect?${query}`);
-    },
-  );
+  // Without stateVerification, a user who cancels comes back with only error.
+  it.each([
+    "code=c&state=s",
+    "error=access_denied&state=s",
+    "code=c",
+    "error=access_denied",
+    "state=s",
+  ])("sends GET requests with %s to the OAuth callback", async (query) => {
+    await expect(
+      routed("GET", `https://x/api/slack?${query}`, oauth),
+    ).resolves.toBe(`GET /slack/oauth_redirect?${query}`);
+  });
 
   it("sends the OAuth callback to the path redirectUri gives Bolt", async () => {
     await expect(
@@ -661,6 +764,16 @@ describe("fetch", () => {
         redirectUri: "https://x/api/slack",
       }),
     ).resolves.toBe("GET /api/slack?code=c");
+  });
+
+  // new URL("//[", base) throws, which srvx would log with every header.
+  it("routes a path that isn't a valid relative URL by its query", async () => {
+    await expect(routed("POST", "https://x//[?a=1")).resolves.toBe(
+      "POST /slack/events?a=1",
+    );
+    await expect(routed("GET", "https://x//[?code=c", oauth)).resolves.toBe(
+      "GET /slack/oauth_redirect?code=c",
+    );
   });
 
   it("still sends POST requests to the events endpoint with the OAuth options", async () => {
@@ -728,6 +841,20 @@ describe("fetch", () => {
     const receiver = new VercelReceiver({ signingSecret: "secret" });
     const request = new Request("https://x/", { method: "POST", body: "{}" });
     await request.text();
+
+    await expect(receiver.fetch(request)).rejects.toThrow(
+      new TypeError(
+        "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.",
+      ),
+    );
+  });
+
+  // bodyUsed stays false until the reader reads. srvx would answer 500 and log
+  // the request with every header.
+  it("rejects a request whose body something holds a reader on", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const request = new Request("https://x/", { method: "POST", body: "{}" });
+    request.body?.getReader();
 
     await expect(receiver.fetch(request)).rejects.toThrow(
       new TypeError(

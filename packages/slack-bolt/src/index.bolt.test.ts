@@ -41,7 +41,11 @@ const mention = {
   event_ts: "1.1",
 };
 
-let server: Server | undefined;
+const INIT_FAILED =
+  "app.init() failed, so this event wasn't processed. It runs again on the next event.";
+
+/** The servers a test started, closed after it. */
+const servers: Server[] = [];
 /** The real Node request URL after each response, as the server sees it. */
 const urlsAfter: (string | undefined)[] = [];
 
@@ -51,10 +55,65 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  server?.close();
-  if (server) await once(server, "close");
-  server = undefined;
+  await Promise.all(
+    servers.splice(0).map((server) => {
+      server.close();
+      return once(server, "close");
+    }),
+  );
 });
+
+/** Starts `server` on a free local port, and resolves with the port. */
+async function listen(server: Server): Promise<number> {
+  servers.push(server.listen(0, "127.0.0.1"));
+  await once(server, "listening");
+  return (server.address() as AddressInfo).port;
+}
+
+/** A Bolt logger that records its calls. */
+const createLogger = () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  setLevel: vi.fn(),
+  getLevel: vi.fn(),
+  setName: vi.fn(),
+});
+
+/**
+ * A fake Slack Web API, which answers the OAuth callback's oauth.v2.access
+ * and answers anything else, like auth.test, with `answer`. Resolves with its
+ * URL.
+ */
+async function fakeSlackApi(
+  answer: () => object = () => ({ ok: true, bot_id: "B1", user_id: "U1" }),
+) {
+  const port = await listen(
+    createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url?.startsWith("/oauth.v2.access")) {
+        res.end(
+          JSON.stringify({
+            ok: true,
+            app_id: "A1",
+            authed_user: { id: "U9" },
+            scope: "chat:write",
+            token_type: "bot",
+            access_token: "xoxb-installed",
+            bot_user_id: "U1",
+            team: { id: "T1", name: "Team" },
+            enterprise: null,
+            is_enterprise_install: false,
+          }),
+        );
+        return;
+      }
+      res.end(JSON.stringify(answer()));
+    }),
+  );
+  return `http://127.0.0.1:${port}/`;
+}
 
 /** A real App on a VercelReceiver, authorized without calling Slack. */
 function createApp(
@@ -99,12 +158,12 @@ const eventBody = (event: object) =>
 /** Serves fetch from srvx's Node server, then sends `request` to it. */
 async function viaNodeServer(receiver: VercelReceiver, request: Request) {
   const handler = toNodeHandler(receiver.fetch) as RequestListener;
-  server = createServer((req, res) => {
-    res.once("finish", () => urlsAfter.push(req.url));
-    void handler(req, res);
-  }).listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address() as AddressInfo;
+  const port = await listen(
+    createServer((req, res) => {
+      res.once("finish", () => urlsAfter.push(req.url));
+      void handler(req, res);
+    }),
+  );
   const { pathname, search } = new URL(request.url);
   return fetch(
     new Request(`http://127.0.0.1:${port}${pathname}${search}`, request),
@@ -120,12 +179,7 @@ async function viaNodeRoute(
   request: Request,
 ) {
   const handler = toNodeHandler(route) as RequestListener;
-  server = createServer((req, res) => void handler(req, res)).listen(
-    0,
-    "127.0.0.1",
-  );
-  await once(server, "listening");
-  const { port } = server.address() as AddressInfo;
+  const port = await listen(createServer((req, res) => void handler(req, res)));
   const { pathname, search } = new URL(request.url);
   // A string body, so the client doesn't fail when the route answers before
   // reading it all.
@@ -188,15 +242,7 @@ it("initializes an App created with deferInitialization on its first event", asy
 });
 
 it("logs why a deferred App couldn't initialize", async () => {
-  const logger = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    setLevel: vi.fn(),
-    getLevel: vi.fn(),
-    setName: vi.fn(),
-  };
+  const logger = createLogger();
   // No token and no authorize, so Bolt's app.init() throws.
   const { receiver } = createApp(
     { deferInitialization: true, authorize: undefined },
@@ -207,9 +253,43 @@ it("logs why a deferred App couldn't initialize", async () => {
 
   expect(response.status).toBe(500);
   expect(logger.error).toHaveBeenCalledWith(
-    "app.init() failed, so this event wasn't processed. It runs again on the next event.",
+    INIT_FAILED,
     expect.any(AppInitializationError),
   );
+});
+
+// The receiver retries only because Bolt's app.init() sets `initialized` back
+// to false when it fails.
+it("initializes a deferred App on the next event after auth.test fails", async () => {
+  let authTests = 0;
+  const slackApiUrl = await fakeSlackApi(() =>
+    ++authTests === 1
+      ? { ok: false, error: "invalid_auth" }
+      : { ok: true, bot_id: "B1", user_id: "U1" },
+  );
+  const logger = createLogger();
+  const { receiver, app } = createApp(
+    {
+      token: "xoxb-token",
+      authorize: undefined,
+      deferInitialization: true,
+      clientOptions: { slackApiUrl, retryConfig: { retries: 0 } },
+    },
+    { logger },
+  );
+  const tokens: unknown[] = [];
+  app.event("app_mention", async ({ context }) => {
+    tokens.push(context.botToken);
+  });
+
+  const failed = await postEvent(receiver, mention);
+  const response = await postEvent(receiver, mention);
+
+  expect(failed.status).toBe(500);
+  expect(logger.error).toHaveBeenCalledWith(INIT_FAILED, expect.any(Error));
+  expect(response.status).toBe(200);
+  await vi.mocked(waitUntil).mock.calls[1][0];
+  expect(tokens).toEqual(["xoxb-token"]);
 });
 
 it("answers Slack's URL verification through fetch at any path", async () => {
@@ -323,6 +403,77 @@ describe("customPropertiesExtractor", () => {
     );
     expect(tenant).toBe("acme");
   });
+
+  // Bolt calls it outside any try, so a throw would be an unhandled
+  // rejection, which crashes srvx's Node server.
+  it("answers 500 without running listeners when it throws", async () => {
+    const logger = createLogger();
+    const error = new Error("no tenant");
+    const { receiver, app } = createApp(
+      {},
+      {
+        logger,
+        customPropertiesExtractor: () => {
+          throw error;
+        },
+        unhandledRequestTimeoutMillis: 10,
+      },
+    );
+    const listener = vi.fn();
+    app.event("app_mention", listener);
+
+    const response = await postEvent(receiver, mention);
+
+    expect(response.status).toBe(500);
+    await expect(response.text()).resolves.toBe("");
+    expect(listener).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      "customPropertiesExtractor threw, so this event wasn't processed.",
+      error,
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      "An unhandled error occurred while Bolt processed an event",
+    );
+    // Bolt's timer for an unacknowledged event still fires, and leaves the
+    // finished response alone.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("not acknowledged within 3 seconds"),
+    );
+  });
+
+  it("hands what it threw to processEventErrorHandler", async () => {
+    const error = new Error("no tenant");
+    const processEventErrorHandler = vi.fn<
+      NonNullable<VercelReceiverOptions["processEventErrorHandler"]>
+    >(async ({ response }) => {
+      response.writeHead(503).end();
+      return true;
+    });
+    const { receiver } = createApp(
+      {},
+      {
+        logger: createLogger(),
+        customPropertiesExtractor: () => {
+          throw error;
+        },
+        processEventErrorHandler,
+      },
+    );
+
+    const response = await receiver.fetch(
+      signedRequest(
+        "https://example.com/api/slack",
+        eventBody(mention),
+        "application/json",
+      ),
+    );
+
+    expect(response.status).toBe(503);
+    expect(processEventErrorHandler).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ error }),
+    );
+  });
 });
 
 it("acks a slash command through fetch before its listener finishes", async () => {
@@ -363,15 +514,7 @@ it("acks a slash command through fetch before its listener finishes", async () =
 });
 
 it("rejects a bad signature through fetch", async () => {
-  const logger = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    setLevel: vi.fn(),
-    getLevel: vi.fn(),
-    setName: vi.fn(),
-  };
+  const logger = createLogger();
   const { receiver } = createApp({}, { logger });
   const request = signedRequest(
     "https://example.com/api/slack",
@@ -409,6 +552,44 @@ it("leaves the real Node request's URL as it was on srvx's Node server", async (
   expect(response.status).toBe(200);
   expect(notFound.status).toBe(404);
   expect(urlsAfter).toEqual(["/webhooks/slack", "/webhooks/slack?a=1"]);
+});
+
+// srvx's Request.body getter starts reading the Node stream Bolt reads, which
+// stalls a body bigger than that stream's buffer.
+it("leaves a large body on srvx's Node server for Bolt to read", async () => {
+  const { receiver } = createApp();
+
+  const response = await postEvent(receiver, {
+    ...mention,
+    text: "x".repeat(100_000),
+  });
+
+  expect(response.status).toBe(200);
+});
+
+// srvx's Node server rejects instead of answering. Bolt only throws to defer
+// a request, which the receiver answers, so it takes the receiver's own error
+// handling failing, like a logger that throws.
+it("answers 500 on srvx's Node server when handling an error fails", async () => {
+  const logger = createLogger();
+  const failure = new Error("log transport failed");
+  logger.error.mockImplementationOnce(() => {
+    throw failure;
+  });
+  const { receiver } = createApp({}, { logger });
+  Object.assign(receiver, {
+    requestListener: () => {
+      throw new Error("boom");
+    },
+  });
+
+  const response = await postEvent(receiver, mention);
+
+  expect(response.status).toBe(500);
+  expect(logger.error).toHaveBeenLastCalledWith(
+    "Couldn't handle the Slack request.",
+    failure,
+  );
 });
 
 describe("reading the body before fetch, on srvx's Node requests", () => {
@@ -462,38 +643,25 @@ describe("reading the body before fetch, on srvx's Node requests", () => {
 });
 
 describe("OAuth", () => {
-  let api: Server | undefined;
-  afterEach(async () => {
-    api?.close();
-    if (api) await once(api, "close");
-    api = undefined;
-  });
-
-  /** A fake Slack Web API for the OAuth callback; resolves with its URL. */
-  async function fakeSlackApi() {
-    api = createServer((req, res) => {
-      res.setHeader("content-type", "application/json");
-      if (req.url?.startsWith("/oauth.v2.access")) {
-        res.end(
-          JSON.stringify({
-            ok: true,
-            app_id: "A1",
-            authed_user: { id: "U9" },
-            scope: "chat:write",
-            token_type: "bot",
-            access_token: "xoxb-installed",
-            bot_user_id: "U1",
-            team: { id: "T1", name: "Team" },
-            enterprise: null,
-            is_enterprise_install: false,
-          }),
-        );
-        return;
-      }
-      res.end(JSON.stringify({ ok: true, bot_id: "B1", user_id: "U1" }));
-    }).listen(0, "127.0.0.1");
-    await once(api, "listening");
-    return `http://127.0.0.1:${(api.address() as AddressInfo).port}/`;
+  /**
+   * Sends a GET to `url` through fetch and reads the response to the end, or
+   * resolves with "pending" if it hasn't ended after a second.
+   */
+  async function fetchToEnd(receiver: VercelReceiver, url: string) {
+    let timer: NodeJS.Timeout | undefined;
+    const response = await Promise.race([
+      receiver.fetch(new Request(url)).then(async (response) => {
+        await response.text();
+        return response;
+      }),
+      new Promise<"pending">((resolve) => {
+        timer = setTimeout(() => resolve("pending"), 1000);
+      }),
+    ]);
+    clearTimeout(timer);
+    // Let Bolt log what the installer threw.
+    await new Promise((resolve) => setImmediate(resolve));
+    return response;
   }
 
   /** A real App doing Bolt's OAuth on a VercelReceiver, with an in-memory store. */
@@ -519,10 +687,11 @@ describe("OAuth", () => {
       stateSecret: "state-secret",
       scopes: ["chat:write"],
       installationStore,
+      ...receiverOptions,
       installerOptions: {
         clientOptions: { slackApiUrl: await fakeSlackApi() },
+        ...receiverOptions.installerOptions,
       },
-      ...receiverOptions,
     });
     const app = new App({ receiver, deferInitialization: true });
     return { receiver, app, installations };
@@ -554,7 +723,11 @@ describe("OAuth", () => {
     ],
     [
       "https://example.com/api/slack/ü",
-      'redirectUri must be percent-encoded, like https://example.com/api/slack/%C3%BC, but it\'s "https://example.com/api/slack/ü".',
+      'redirectUri must be percent-encoded and normalized, like https://example.com/api/slack/%C3%BC, but it\'s "https://example.com/api/slack/ü".',
+    ],
+    [
+      "https://example.com/api/./slack",
+      'redirectUri must be percent-encoded and normalized, like https://example.com/api/slack, but it\'s "https://example.com/api/./slack".',
     ],
   ])(
     "rejects redirectUri %s with a clear initialization error",
@@ -567,6 +740,11 @@ describe("OAuth", () => {
 
   it.each<[string, string, VercelReceiverOptions]>([
     ["separate routes", "https://example.com/api/slack/oauth", {}],
+    [
+      "an empty redirectUri",
+      "https://example.com/api/slack/oauth",
+      { redirectUri: "" },
+    ],
     [
       "a redirectUri at the domain root",
       "https://example.com/",
@@ -605,6 +783,8 @@ describe("OAuth", () => {
         expect(html).toContain(
           `redirect_uri=${encodeURIComponent(receiverOptions.redirectUri)}`,
         );
+      } else {
+        expect(html).not.toContain("redirect_uri");
       }
 
       const callback = await receiver.fetch(
@@ -619,7 +799,9 @@ describe("OAuth", () => {
       const response = await postEvent(receiver, mention);
 
       expect(response.status).toBe(200);
-      await vi.mocked(waitUntil).mock.calls[0][0];
+      // The install page and callback were kept alive first.
+      expect(waitUntil).toHaveBeenCalledTimes(3);
+      await vi.mocked(waitUntil).mock.calls[2][0];
       expect(tokens).toEqual(["xoxb-installed"]);
     },
   );
@@ -641,7 +823,7 @@ describe("OAuth", () => {
 
   // Bolt runs the installer without awaiting it and only logs its errors, so
   // without the receiver's help these responses never finish.
-  it.each<[string, string, VercelReceiverOptions["installerOptions"]]>([
+  it.each<[string, string, VercelReceiverOptions["installerOptions"], string]>([
     [
       "the install page",
       "https://example.com/api/slack",
@@ -652,6 +834,7 @@ describe("OAuth", () => {
           },
         },
       },
+      "An unhandled error occurred while Bolt processed a request to the installation path",
     ],
     [
       "the OAuth callback",
@@ -663,31 +846,132 @@ describe("OAuth", () => {
           },
         },
       },
+      "HTTPReceiver encountered an unexpected error while handling the OAuth install redirect",
     ],
   ])(
     "answers 500 when %s throws instead of leaving the request open",
-    async (_, url, installerOptions) => {
-      const logger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        setLevel: vi.fn(),
-        getLevel: vi.fn(),
-        setName: vi.fn(),
-      };
+    async (_, url, installerOptions, boltError) => {
+      const logger = createLogger();
       const { receiver } = await createOAuthApp({ installerOptions, logger });
 
-      const response = await Promise.race([
-        receiver.fetch(new Request(url)),
-        new Promise<"pending">((resolve) =>
-          setTimeout(() => resolve("pending"), 1000),
-        ),
-      ]);
+      const response = await fetchToEnd(receiver, url);
 
       expect(response).not.toBe("pending");
       expect((response as Response).status).toBe(500);
-      expect(logger.error).toHaveBeenCalled();
+      // Bolt's own log line, which it writes only if the receiver rethrows.
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining(boltError),
+      );
     },
   );
+
+  // Answering 500 after the headers were sent would throw
+  // ERR_HTTP_HEADERS_SENT and leave the response open.
+  it("keeps the status a callback wrote before it threw, and ends the response", async () => {
+    const logger = createLogger();
+    const { receiver } = await createOAuthApp({
+      logger,
+      installerOptions: {
+        callbackOptions: {
+          failure: (_error, _options, _req, res) => {
+            res.writeHead(302, { location: "https://example.com/oops" });
+            throw new Error("after headers");
+          },
+        },
+      },
+    });
+
+    const response = await fetchToEnd(
+      receiver,
+      "https://example.com/api/slack?code=c1&state=not-this-session",
+    );
+
+    expect(response).not.toBe("pending");
+    expect((response as Response).status).toBe(302);
+    expect(logger.debug).toHaveBeenCalledWith(
+      "Error details: Error: after headers",
+    );
+  });
+
+  // srvx resolves the response once its head is written, and @slack/oauth
+  // runs successAsync after success has answered.
+  it("keeps the installer's work after the response alive with waitUntil", async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let welcomed = false;
+    const { receiver, installations } = await createOAuthApp({
+      installerOptions: {
+        callbackOptions: {
+          success: (_installation, _options, _req, res) => {
+            res.writeHead(302, { location: "https://example.com/thanks" });
+            res.end();
+          },
+          successAsync: async () => {
+            await released;
+            welcomed = true;
+          },
+        },
+      },
+    });
+    const page = await receiver.fetch(
+      new Request("https://example.com/api/slack"),
+    );
+    const state = (await page.text()).match(/state=([^&"]+)/)?.[1];
+    const [cookie] = page.headers.getSetCookie();
+
+    const callback = await receiver.fetch(
+      new Request(`https://example.com/api/slack?code=c1&state=${state}`, {
+        headers: { cookie: cookie.split(";")[0] },
+      }),
+    );
+    await callback.text();
+
+    expect(callback.status).toBe(302);
+    expect(installations.has("T1")).toBe(true);
+    // One for the install page and one for the callback, which is still
+    // waiting for successAsync.
+    expect(waitUntil).toHaveBeenCalledTimes(2);
+    const kept = vi.mocked(waitUntil).mock.calls[1][0];
+    let settled = false;
+    void kept.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    release();
+    await kept;
+    expect(welcomed).toBe(true);
+  });
+
+  // Bolt calls the installer while the request has Bolt's path, and these
+  // callbacks run before the installer's first await.
+  it("gives the installer's callbacks the URL the route was called on", async () => {
+    const urls: (string | undefined)[] = [];
+    const { receiver } = await createOAuthApp({
+      logger: createLogger(),
+      installerOptions: {
+        installPathOptions: {
+          beforeRedirection: async (req) => {
+            urls.push(req.url);
+            return true;
+          },
+        },
+        callbackOptions: {
+          failure: (_error, _options, req, res) => {
+            urls.push(req.url);
+            res.writeHead(400).end();
+          },
+        },
+      },
+    });
+
+    await fetchToEnd(receiver, "https://example.com/api/slack?team=T1");
+    // No state, so the callback fails before its first await.
+    await fetchToEnd(receiver, "https://example.com/api/slack?code=c1");
+
+    expect(urls).toEqual(["/api/slack?team=T1", "/api/slack?code=c1"]);
+  });
 });

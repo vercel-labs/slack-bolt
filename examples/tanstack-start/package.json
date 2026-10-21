@@ -14,7 +14,7 @@
     "@tanstack/react-router": "1.170.45",
     "@tanstack/react-start": "1.169.3",
     "@upstash/redis": "^1.39.0",
-    "@vercel/slack-bolt": "canary",
+    "@vercel/slack-bolt": "^2.0.0-0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

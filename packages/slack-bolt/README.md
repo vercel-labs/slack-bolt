@@ -7,7 +7,7 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 
 ## Getting Started
 
-Start from one of the [examples](#examples): each is a complete Slack app, with OAuth and a Redis installation store, that you can run locally and deploy to Vercel. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template).
+Start from one of the [examples](#examples): each is a complete Slack app, with OAuth and a Redis installation store, that you can run locally and deploy to Vercel. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template).
 
 Upgrading from v1? See [Migrating from v1](#migrating-from-v1).
 
@@ -18,7 +18,7 @@ npm install @vercel/slack-bolt @slack/bolt
 ```
 
 ```bash
-yarn add @vercel/slack-bolt @slack/bolt
+yarn add @vercel/slack-bolt @slack/bolt undici
 ```
 
 ```bash
@@ -39,7 +39,7 @@ bun add @vercel/slack-bolt @slack/bolt
 
 Bolt 5 installs `undici` 8 through `@slack/socket-mode` 3.1, and `undici` 8 needs Node.js 22.19 or newer. On 22.12, for example, loading Bolt fails with a `TypeError` from `undici`. To stay on an older Node.js 22, install `undici@7` next to Bolt.
 
-Don't install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer dependency, so skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
+Bolt 5's `@slack/socket-mode` declares `undici` as a peer dependency, so loading Bolt fails with `Cannot find module 'undici'` if nothing installs it. npm and pnpm install peers for you, except with npm's `--legacy-peer-deps` or with pnpm's `autoInstallPeers` turned off. Yarn doesn't, which is why the `yarn add` command above adds `undici` itself: `undici@8` on Node.js 22.19 or newer, `undici@7` on older 22.x.
 
 ## API Reference
 
@@ -74,7 +74,7 @@ export const { POST } = receiver;
 export { POST } from "@/lib/slack";
 ```
 
-Point your Slack app's event subscription, interactivity and slash command URLs at the route. It can live at any path. With `deferInitialization`, the receiver runs `app.init()` on the first request, so nothing calls Slack while your app builds.
+Point your Slack app's event subscription, interactivity and slash command URLs at the route. It can live at any path. With `deferInitialization`, the receiver runs `app.init()` on the first event, command or interaction, so nothing calls Slack while your app builds.
 
 #### Options
 
@@ -85,7 +85,7 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 | `signingSecret`                 | `string`                     | `process.env.SLACK_SIGNING_SECRET` | Verifies that requests come from Slack. Required unless `signatureVerification` is `false`.              |
 | `signatureVerification`         | `boolean`                    | `true`                             | Set to `false` to skip signature verification, for example in tests.                                     |
 | `logger`                        | `Logger`                     | Bolt's `ConsoleLogger`             | Pass it here: Bolt doesn't apply the `App`'s logger to a custom receiver.                                |
-| `logLevel`                      | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for the receiver's logger.                                                                 |
+| `logLevel`                      | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for Bolt's default logger. Set the level on your own `logger` yourself.                    |
 | `processBeforeResponse`         | `boolean`                    | `false`                            | Waits for your listeners to finish before answering Slack, instead of answering at `ack()`.              |
 | `processEventErrorHandler`      | `(args) => Promise<boolean>` | Bolt's default                     | Handles an error from your listeners. The receiver keeps it running with `waitUntil`.                    |
 | `unhandledRequestTimeoutMillis` | `number`                     | `3001`                             | How long to wait for a listener to call `ack()` before `unhandledRequestHandler` runs.                   |
@@ -94,7 +94,7 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
-The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL with a path and without a query string or fragment. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
+The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute, percent-encoded URL with a normalized path (no `.` or `..` segments) and without a query string, fragment or surrounding whitespace. An empty `redirectUri` counts as not set. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
 
 #### Custom properties
 
@@ -117,7 +117,7 @@ app.event("app_mention", async ({ context }) => {
 });
 ```
 
-Bolt calls it before your listeners and doesn't catch its errors. If it throws, Slack gets no answer (a `404` after 3 seconds) and the error becomes an unhandled promise rejection, so catch your own errors and decide what a missing value means.
+Bolt calls it before your listeners. If it throws, your listeners don't run, and the receiver passes the error to `processEventErrorHandler` as if a listener had failed: with Bolt's default handler, Slack gets a `500`, so it retries events, and a `processEventErrorHandler` of your own gets the original error. To carry on without the properties instead, catch your own errors and decide what a missing value means.
 
 #### `receiver.fetch(request)`
 
@@ -225,7 +225,7 @@ import { receiver } from "../../../lib/slack";
 export default defineHandler((event) => receiver.fetch(event.req));
 ```
 
-In Nitro 3, `event.req` is the Web `Request`. Put the route under `routes/api`: Nitro's top-level `api` directory [isn't compatible with Vercel](https://nitro.build/deploy/providers/vercel).
+In Nitro 3, `event.req` is the Web `Request`. Put the route under `routes/api`: Nitro's top-level `api` directory [isn't compatible with Vercel](https://nitro.build/deploy/providers/vercel). Nitro 3 doesn't scan for routes until you set `serverDir` in `nitro.config.ts`: `serverDir: "./"` serves the `routes` directory at your project's root, and the [Nitro example](https://github.com/vercel-labs/slack-bolt/tree/master/examples/nitro) sets `"./src"`.
 
 ### TanStack Start
 
@@ -261,14 +261,16 @@ const receiver = new VercelReceiver({
   installationStore,
 });
 
-const app = new App({ receiver, deferInitialization: true });
+const app = new App({ receiver });
 
 export const { GET, POST } = receiver;
 ```
 
-Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full URL with a path and without a query string or fragment, like `https://example.com/api/slack/oauth`. For a route at the root of your domain, end it with a slash, like `https://example.com/`. Bolt requires the URL to end with its callback pathname. This restriction applies to the configured URL; Slack still adds `code` and `state` query parameters to the callback request.
+An OAuth `App` doesn't need `deferInitialization`: its `init()` doesn't call Slack, and without it a missing `clientId` fails when the `App` is created instead of turning OAuth off.
 
-`installerOptions` takes Bolt's installer options, except `installPath`, `redirectUriPath` and `port`: the receiver serves the install page and callback at whatever path your route has.
+Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full, percent-encoded URL with a path and without a query string or fragment, like `https://example.com/api/slack/oauth` ([Options](#options) lists the exact rules), and an empty string counts as not set. For a route at the root of your domain, end it with a slash, like `https://example.com/`. Bolt requires the URL to end with its callback pathname. This restriction applies to the configured URL; Slack still adds `code` and `state` query parameters to the callback request.
+
+`installerOptions` takes Bolt's installer options, except `installPath`, `redirectUriPath` and `port`: the receiver serves the install page and callback at whatever path your route has, and installer callbacks like `installPathOptions.beforeRedirection` see your route's own `req.url`. Like listeners, the install page and callback keep running with `waitUntil`, so a `callbackOptions.successAsync` or `failureAsync` can finish after the response.
 
 Bolt doesn't apply the `App`'s `clientOptions` to a custom receiver's installer. If you set `clientOptions` on the `App`, like a `slackApiUrl` for GovSlack, a proxy `agent`, `retryConfig` or `timeout`, pass the same options as `installerOptions.clientOptions` too, so the OAuth callback and token refreshes use them. For a Slack host other than slack.com, also set `installerOptions.authorizationUrl` to its OAuth authorize URL.
 
@@ -285,11 +287,13 @@ Set these in your Vercel project (or `.env.local` for local development):
 
 The receiver reads `SLACK_SIGNING_SECRET` from `process.env` automatically. Pass the other three as options, as in the example above.
 
+The [examples](#examples) prefix `SLACK_SIGNING_SECRET`, `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` with their framework, like `NEXT_SLACK_SIGNING_SECRET`, and pass them to the receiver themselves. When you start from one, set the names in its `.env.example`: with only the unprefixed names, the example has no client ID, so creating its `App` throws Bolt's `AppInitializationError` at startup.
+
 ### Installation store
 
 Bolt's default installation store keeps installations in memory, which Vercel doesn't share between function instances or keep across deployments. So `VercelReceiver` requires an `installationStore` whenever you set `clientId`.
 
-Your store must implement `storeInstallation` and `fetchInstallation`, and optionally `deleteInstallation`. Any persistent backend works (Redis, PostgreSQL, DynamoDB, etc). See the [Bolt InstallationStore docs](https://slack.dev/bolt-js/concepts/authenticating-oauth#the-installation-store) for the full interface, and the [Next.js example](https://github.com/vercel-labs/slack-bolt/tree/master/examples/nextjs) for a working Redis implementation that also deletes installations on `app_uninstalled` and `tokens_revoked`.
+Your store must implement `storeInstallation` and `fetchInstallation`, and optionally `deleteInstallation`. Any persistent backend works (Redis, PostgreSQL, DynamoDB, etc). See the [Bolt InstallationStore docs](https://docs.slack.dev/tools/bolt-js/concepts/authenticating-oauth#installation-store) for the full interface, and the [Next.js example](https://github.com/vercel-labs/slack-bolt/tree/master/examples/nextjs) for a working Redis implementation that also deletes installations on `app_uninstalled` and `tokens_revoked`.
 
 ## Preview Deployments
 
@@ -389,7 +393,7 @@ All Vercel and Slack environment variables are read automatically. You can overr
 
 ## Migrating from v1
 
-v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API is unchanged, and so is the `vercel-slack` CLI, except that `vercel-slack build` now exits with code 1 when it can't set up the preview's Slack app, which stops a `vercel-slack build && next build` script.
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change, apart from the details in [Other changes](#other-changes): what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API is unchanged, and so is the `vercel-slack` CLI, except that `vercel-slack build` now exits with code 1 when it can't set up the preview's Slack app, which stops a `vercel-slack build && next build` script.
 
 With Bolt 5, v2 needs Node.js 22.19 or newer. See [Compatibility](#compatibility).
 
@@ -417,7 +421,7 @@ export const { POST } = receiver;
 export { POST } from "@/lib/slack";
 ```
 
-Keep `deferInitialization: true` on the `App`. Like `createHandler`, the receiver then runs `app.init()` on the first request. Outside Next.js, pass each request to `receiver.fetch`, as in [Frameworks](#frameworks).
+Keep `deferInitialization: true` on an `App` with a `token`. The receiver then runs `app.init()` on the first event, command or interaction, where `createHandler` ran it on the first request. An OAuth `App` doesn't need it; see [OAuth](#oauth-multi-workspace-apps). Outside Next.js, pass each request to `receiver.fetch`, as in [Frameworks](#frameworks).
 
 ### Serve OAuth with `GET`
 
@@ -453,18 +457,18 @@ const receiver = new VercelReceiver({
 });
 ```
 
-Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full URL with a path and without a query string or fragment.
+Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full, percent-encoded URL with a path and without a query string or fragment, where v1 accepted any string.
 
 ### Changed options
 
 `VercelReceiver` takes Bolt's `HTTPReceiver` options, described in [Options](#options). `installerOptions` takes the same fields as in v1.
 
-| v1                                     | v2                                                                                                                                                                                                                                                             |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ackTimeoutMs`                         | `unhandledRequestTimeoutMillis`. Pass `unhandledRequestHandler` to change what Slack gets when no listener calls `ack()` in time.                                                                                                                              |
-| `customPropertiesExtractor(req, body)` | `customPropertiesExtractor(req)`, where `req` is Bolt's `BufferedIncomingMessage`. `req.url` is now the path and query, not a full URL, and the body is `req.rawBody`, unparsed. Unlike v1, a throw isn't caught. See [Custom properties](#custom-properties). |
-| `scopes` as a function                 | Removed. `scopes` takes a fixed list.                                                                                                                                                                                                                          |
-| `beforeProcess`                        | Removed. See [Replace `beforeProcess`](#replace-beforeprocess).                                                                                                                                                                                                |
+| v1                                     | v2                                                                                                                                                                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ackTimeoutMs`                         | `unhandledRequestTimeoutMillis`. Pass `unhandledRequestHandler` to change what Slack gets when no listener calls `ack()` in time.                                                                                                                                         |
+| `customPropertiesExtractor(req, body)` | `customPropertiesExtractor(req)`, where `req` is Bolt's `BufferedIncomingMessage`. `req.url` is now the path and query, not a full URL, and the body is `req.rawBody`, unparsed. A throw goes to `processEventErrorHandler`. See [Custom properties](#custom-properties). |
+| `scopes` as a function                 | Removed. `scopes` takes a fixed list.                                                                                                                                                                                                                                     |
+| `beforeProcess`                        | Removed. See [Replace `beforeProcess`](#replace-beforeprocess).                                                                                                                                                                                                           |
 
 `createHandler` and the `VercelHandler`, `BeforeProcessFn`, `ScopesResolver` and `VercelInstallerOptions` types are removed too. For the installer options' type, use `VercelReceiverOptions["installerOptions"]`.
 
@@ -502,6 +506,14 @@ export async function POST(request: Request) {
 ```
 
 `shouldForward` and `forward` stand in for your own code. `body` is the raw body: JSON for events, and form data for slash commands and interactions, which put their JSON in a `payload` field.
+
+### Other changes
+
+- The receiver's `toHandler()`, `handleError()` and `getLogger()` methods are removed. Serve it with `fetch`, `POST` and `GET`, and log through the `logger` you pass it.
+- Don't call `receiver.start()` or `app.start()`. In v1, `start()` returned the request handler. In v2 it's Bolt's `HTTPReceiver.start()`, which starts Bolt's own HTTP server, on port 3000 unless you pass one.
+- Error responses are Bolt's, with empty bodies: `401` when a request fails signature verification, `400` for a body Bolt can't parse, `500` when a listener throws before `ack()`, and `404` when no listener calls `ack()` in time. v1 answered with JSON bodies, and with `408` in the last two cases.
+- `context.retryNum` and `context.retryReason` are `undefined` when Slack isn't retrying a request, where v1 set them to `0` and `""`.
+- `logLevel` only sets the level of Bolt's default logger. v1 also applied it to a `logger` you passed, so set your own logger's level yourself.
 
 ## Examples
 

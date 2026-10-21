@@ -64,14 +64,17 @@ const BODY_USED =
   "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.";
 
 /**
- * Whether the request's body was already read. A srvx Node request, like
- * Express's and Nitro's, hands Bolt the Node stream underneath, which reading a
- * clone also drains without setting `bodyUsed`.
+ * Whether the request's body was already read, or something holds a reader on
+ * it. A srvx Node request, like Express's and Nitro's, hands Bolt the Node
+ * stream underneath, which reading a clone also drains without setting
+ * `bodyUsed`. Its `body` getter would start reading that stream, so check the
+ * stream instead.
  */
 function bodyRead(request: Request): boolean {
+  if (request.bodyUsed) return true;
   const node = (request as { runtime?: { node?: { req?: IncomingMessage } } })
     .runtime?.node?.req;
-  return request.bodyUsed || node?.readableDidRead === true;
+  return node ? node.readableDidRead : request.body?.locked === true;
 }
 
 const noop = () => {};
@@ -85,6 +88,11 @@ function keepAlive<T>(work: T): T {
 const isDeferred = (error: unknown) =>
   (error as CodedError | undefined)?.code ===
   ErrorCode.HTTPReceiverDeferredRequestError;
+
+// What customPropertiesExtractor threw, which the receiver's wrapper returns
+// as the event's custom properties. A symbol can't clash with the extractor's
+// own keys.
+const EXTRACT_FAILED = Symbol("customPropertiesExtractor threw");
 
 /** The path of `redirectUri`, which Bolt needs as `redirectUriPath`. */
 function pathOf(redirectUri: string): string {
@@ -103,14 +111,21 @@ function pathOf(redirectUri: string): string {
       "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
     );
   }
+  // URL trims whitespace, but Bolt and Slack get redirectUri as it is.
+  if (redirectUri.trim() !== redirectUri) {
+    throw new AppInitializationError(
+      `redirectUri must not start or end with whitespace, but it's ${JSON.stringify(redirectUri)}.`,
+    );
+  }
   // Bolt also checks that redirectUri ends with this path, and blames
   // installerOptions.redirectUriPath if not. A bare origin's path is "/", and
-  // URL percent-encodes characters like "ü" in the path.
+  // URL percent-encodes characters like "ü" and resolves "." and ".." in the
+  // path.
   if (!redirectUri.endsWith(url.pathname)) {
     throw new AppInitializationError(
       url.pathname === "/"
         ? `redirectUri must include a path, like https://example.com/api/slack/oauth, but it's "${redirectUri}".`
-        : `redirectUri must be percent-encoded, like ${url.origin}${url.pathname}, but it's "${redirectUri}".`,
+        : `redirectUri must be percent-encoded and normalized, like ${url.origin}${url.pathname}, but it's "${redirectUri}".`,
     );
   }
   return url.pathname;
@@ -153,7 +168,8 @@ export class VercelReceiver extends HTTPReceiver {
    * `GET` is the install page, so one route or separate ones both work.
    * Anything else is a 404.
    *
-   * @throws {TypeError} When the request body was already read.
+   * @throws {TypeError} When the request body was already read, or something
+   * holds a reader on it.
    */
   public readonly fetch = async (request: Request): Promise<Response> => {
     if (bodyRead(request)) throw new TypeError(BODY_USED);
@@ -179,6 +195,8 @@ export class VercelReceiver extends HTTPReceiver {
 
   readonly #installPath: string;
   readonly #callbackPath: string;
+  /** Each request's URL before #route pointed it at Bolt's path. */
+  readonly #urls = new WeakMap<IncomingMessage, string | undefined>();
 
   /**
    * @param options Bolt `HTTPReceiver` options. `signingSecret` defaults to
@@ -187,13 +205,16 @@ export class VercelReceiver extends HTTPReceiver {
    * `signatureVerification` isn't `false`, when `clientId` is set without an
    * `installationStore`, a `clientSecret` or a `stateSecret` (unless
    * `installerOptions` has a `stateStore` or turns off `stateVerification`),
-   * or when `redirectUri` isn't an absolute URL without a query string or
-   * fragment.
+   * or when `redirectUri` isn't an absolute, percent-encoded and normalized
+   * URL with a path, without a query string, a fragment or whitespace at
+   * either end. An empty `redirectUri` counts as unset.
    */
   public constructor(options: VercelReceiverOptions = {}) {
     const {
       signingSecret = process.env.SLACK_SIGNING_SECRET ?? "",
+      redirectUri,
       processEventErrorHandler,
+      customPropertiesExtractor,
       installerOptions,
       ...rest
     } = options;
@@ -237,14 +258,14 @@ export class VercelReceiver extends HTTPReceiver {
     }
 
     // Bolt requires redirectUriPath to match the end of redirectUri, and the
-    // install page can't share the callback's path.
-    const callbackPath = rest.redirectUri
-      ? pathOf(rest.redirectUri)
-      : CALLBACK_PATH;
+    // install page can't share the callback's path. Like the secrets above,
+    // an empty redirectUri counts as unset, so Bolt doesn't send it to Slack.
+    const callbackPath = redirectUri ? pathOf(redirectUri) : CALLBACK_PATH;
     const installPath = callbackPath === INSTALL_PATH ? ENDPOINT : INSTALL_PATH;
 
     super({
       ...rest,
+      ...(redirectUri && { redirectUri }),
       signingSecret,
       endpoints: ENDPOINT,
       installerOptions: {
@@ -257,6 +278,18 @@ export class VercelReceiver extends HTTPReceiver {
         processEventErrorHandler: (args) =>
           keepAlive(processEventErrorHandler(args)),
       }),
+      // Bolt calls it outside any try, so a throw would be an unhandled
+      // rejection, which crashes a Node server. Hand the error to processEvent
+      // instead, which rejects with it for processEventErrorHandler.
+      ...(customPropertiesExtractor && {
+        customPropertiesExtractor: (req) => {
+          try {
+            return customPropertiesExtractor(req);
+          } catch (error) {
+            return { [EXTRACT_FAILED]: error };
+          }
+        },
+      }),
     });
     this.#installPath = installPath;
     this.#callbackPath = callbackPath;
@@ -265,14 +298,18 @@ export class VercelReceiver extends HTTPReceiver {
     // answering, so a failing install page or callback (a throwing
     // beforeRedirection, state store or failure callback) would hold the
     // request open until the function times out. Answer 500 instead, and
-    // rethrow so Bolt still logs the error.
+    // rethrow so Bolt still logs the error. Work like successAsync can run
+    // after the response, so keep it alive too.
     const { installer } = this;
     if (installer) {
       for (const method of ["handleInstallPath", "handleCallback"] as const) {
         const handle = installer[method].bind(installer);
         installer[method] = async (req, res, ...rest) => {
+          // Bolt has routed by now, so give the installer's callbacks, like
+          // beforeRedirection, the URL the route was called on.
+          if (this.#urls.has(req)) req.url = this.#urls.get(req);
           try {
-            await handle(req, res, ...rest);
+            await keepAlive(handle(req, res, ...rest));
           } catch (error) {
             if (!res.headersSent) res.writeHead(500);
             if (!res.writableEnded) res.end();
@@ -296,11 +333,13 @@ export class VercelReceiver extends HTTPReceiver {
   // routed this request, so send it to Bolt's path whatever its own.
   #route(req: IncomingMessage, res: ServerResponse): void {
     const original = req.url;
-    const { search, searchParams } = new URL(
-      original ?? "/",
-      "http://localhost",
-    );
-    req.url = this.#pathFor(req.method, searchParams) + search;
+    // Only the query matters, so don't parse a URL, which throws on a path
+    // like "//[". URLSearchParams never throws.
+    const url = original ?? "";
+    const query = url.indexOf("?");
+    const search = query === -1 ? "" : url.slice(query);
+    this.#urls.set(req, original);
+    req.url = this.#pathFor(req.method, new URLSearchParams(search)) + search;
 
     try {
       this.requestListener(req, res);
@@ -321,9 +360,10 @@ export class VercelReceiver extends HTTPReceiver {
 
   /**
    * Called by Bolt when the `App` is created. Registers each event's
-   * processing with `waitUntil` so listeners finish after the response, and
-   * runs `app.init()` on the first event for an App created with
-   * `deferInitialization`.
+   * processing with `waitUntil` so listeners finish after the response, runs
+   * `app.init()` on the first event for an App created with
+   * `deferInitialization`, and rejects an event whose
+   * `customPropertiesExtractor` threw, for `processEventErrorHandler`.
    */
   public override init(app: App): void {
     // An App created with deferInitialization waits for app.init(), which
@@ -354,6 +394,22 @@ export class VercelReceiver extends HTTPReceiver {
     };
 
     const processEvent: App["processEvent"] = (event) => {
+      const extracted = event.customProperties;
+      if (extracted && EXTRACT_FAILED in extracted) {
+        const thrown = extracted[EXTRACT_FAILED];
+        // Bolt only logs a generic error for the event, so say why.
+        this["logger"].error(
+          "customPropertiesExtractor threw, so this event wasn't processed.",
+          thrown,
+        );
+        // Bolt 4's default processEventErrorHandler runs `"code" in error`,
+        // which throws for a thrown string or number, so wrap those.
+        return Promise.reject(
+          typeof thrown === "object" && thrown !== null
+            ? thrown
+            : new Error(String(thrown), { cause: thrown }),
+        );
+      }
       const pending = ready();
       return keepAlive(
         pending
