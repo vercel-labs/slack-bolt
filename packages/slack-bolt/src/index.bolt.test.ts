@@ -224,6 +224,107 @@ it("answers Slack's URL verification through fetch at any path", async () => {
   await expect(response.json()).resolves.toEqual({ challenge: "c1" });
 });
 
+describe("customPropertiesExtractor", () => {
+  /** What the extractor saw, and returns a tenant from the query and a header. */
+  function recordingExtractor() {
+    const seen: { url?: string; headers?: object; rawBody?: unknown }[] = [];
+    const customPropertiesExtractor = (
+      req: Parameters<
+        NonNullable<VercelReceiverOptions["customPropertiesExtractor"]>
+      >[0],
+    ) => {
+      seen.push({ url: req.url, headers: req.headers, rawBody: req.rawBody });
+      return {
+        tenant: new URL(req.url ?? "/", "http://localhost").searchParams.get(
+          "tenant",
+        ),
+        region: req.headers["x-region"],
+      };
+    };
+    return { seen, customPropertiesExtractor };
+  }
+
+  /** Adds the custom and retry headers a test request carries. */
+  function withHeaders(request: Request) {
+    request.headers.set("X-Region", "iad1");
+    request.headers.set("X-Slack-Retry-Num", "2");
+    request.headers.set("X-Slack-Retry-Reason", "http_timeout");
+    return request;
+  }
+
+  it("gets the path and query, lowercase headers and the raw JSON body of an event", async () => {
+    const { seen, customPropertiesExtractor } = recordingExtractor();
+    const { receiver, app } = createApp({}, { customPropertiesExtractor });
+    const contexts: Record<string, unknown>[] = [];
+    app.event("app_mention", async ({ context }) => {
+      contexts.push(context);
+    });
+    const body = eventBody(mention);
+
+    const response = await receiver.fetch(
+      withHeaders(
+        signedRequest(
+          "https://example.com/api/slack?tenant=acme",
+          body,
+          "application/json",
+        ),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    // The path the route was called on, not an absolute URL.
+    expect(seen[0].url).toBe("/api/slack?tenant=acme");
+    expect(seen[0].headers).toMatchObject({
+      "x-region": "iad1",
+      "x-slack-retry-num": "2",
+    });
+    expect(Buffer.isBuffer(seen[0].rawBody)).toBe(true);
+    expect(String(seen[0].rawBody)).toBe(body);
+    await vi.mocked(waitUntil).mock.calls[0][0];
+    expect(contexts[0]).toMatchObject({
+      tenant: "acme",
+      region: "iad1",
+      retryNum: 2,
+      retryReason: "http_timeout",
+    });
+  });
+
+  it("gets a slash command's raw form-encoded body", async () => {
+    const { seen, customPropertiesExtractor } = recordingExtractor();
+    const { receiver, app } = createApp({}, { customPropertiesExtractor });
+    let tenant: unknown;
+    app.command("/hello", async ({ ack, context }) => {
+      tenant = context.tenant;
+      await ack();
+    });
+    const body = new URLSearchParams({
+      command: "/hello",
+      text: "",
+      user_id: "U2",
+      team_id: "T1",
+      channel_id: "C1",
+      trigger_id: "t1",
+      response_url: "https://example.com/response",
+    }).toString();
+
+    const response = await receiver.fetch(
+      withHeaders(
+        signedRequest(
+          "https://example.com/api/slack?tenant=acme",
+          body,
+          "application/x-www-form-urlencoded",
+        ),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(new URLSearchParams(String(seen[0].rawBody)).get("command")).toBe(
+      "/hello",
+    );
+    expect(tenant).toBe("acme");
+  });
+});
+
 it("acks a slash command through fetch before its listener finishes", async () => {
   const { receiver, app } = createApp();
   let release!: () => void;
