@@ -56,7 +56,6 @@ const receiver = new VercelReceiver();
 const app = new App({
   receiver,
   token: process.env.SLACK_BOT_TOKEN,
-  // Checks the token on the first event, and again if that fails.
   deferInitialization: true,
 });
 
