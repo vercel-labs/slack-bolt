@@ -10,7 +10,7 @@ Before getting started, make sure you have a development workspace where you hav
 
 ### Clone and install dependencies
 ```bash
-git clone https://github.com/vercel-labs/slack-bolt.git && cd slack-bolt/examples/nextjs && pnpm install
+git clone https://github.com/vercel-labs/slack-bolt.git && cd slack-bolt/examples/nextjs && pnpm install && pnpm --filter @vercel/slack-bolt build
 ```
 
 ### Create a Slack App
