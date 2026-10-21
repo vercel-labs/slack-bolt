@@ -194,7 +194,7 @@ Add the Slack route before any body parser, like `express.json()` or `express.ur
 ```typescript
 // routes/api/slack/events.ts
 import { defineHandler } from "nitro";
-import { receiver } from "../../../slack";
+import { receiver } from "~/slack";
 
 export default defineHandler((event) => receiver.fetch(event.req));
 ```
@@ -206,7 +206,7 @@ In Nitro 3, `event.req` is the Web `Request`. Put the route under `routes/api`: 
 ```typescript
 // src/routes/api/slack/events.ts
 import { createFileRoute } from "@tanstack/react-router";
-import { receiver } from "../../../slack";
+import { receiver } from "~/slack";
 
 export const Route = createFileRoute("/api/slack/events")({
   server: {
