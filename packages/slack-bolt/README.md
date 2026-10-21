@@ -174,7 +174,7 @@ export default app;
 
 ### Express
 
-Express hands your route Node.js's request and response, not a Web `Request`, so adapt `receiver.fetch` with `toNodeHandler` from [srvx](https://srvx.h3.dev). This package uses srvx already, but add it to your own dependencies to import it.
+Express hands your route Node.js's request and response, not a Web `Request`, so adapt `receiver.fetch` with `toNodeHandler` from [srvx](https://srvx.h3.dev). Add srvx to your own dependencies to import it.
 
 ```typescript
 import express, { type RequestHandler } from "express";

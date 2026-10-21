@@ -238,9 +238,6 @@ importers:
       commander:
         specifier: ^14.0.3
         version: 14.0.3
-      srvx:
-        specifier: ~1.0.6
-        version: 1.0.6
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -266,6 +263,9 @@ importers:
       oxlint:
         specifier: 'catalog:'
         version: 1.88.0
+      srvx:
+        specifier: ~1.0.6
+        version: 1.0.6
       tsdown:
         specifier: ^0.23.1
         version: 0.23.1(@arethetypeswrong/core@0.18.5)(tsx@4.23.15)(typescript@7.0.2)(unrun@0.2.34(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3))
