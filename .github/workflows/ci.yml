@@ -85,8 +85,14 @@ jobs:
           # engines.node and the @slack/bolt peer range's minimums.
           - node-version: 22.12.0
             slack-bolt: 4.7.3
+          # Bolt 5 installs undici 8, which needs Node.js 22.19. The lockfile
+          # pins undici 7, so pin undici too to test what users install.
+          - node-version: 22.19.0
+            slack-bolt: latest
+            undici: latest
           - node-version: 26
             slack-bolt: latest
+            undici: latest
       fail-fast: false
     defaults:
       run:
@@ -125,6 +131,10 @@ jobs:
 
       - name: Pin @slack/bolt ${{ matrix.slack-bolt }}
         run: pnpm add -D "@slack/bolt@${{ matrix.slack-bolt }}"
+
+      - name: Pin undici ${{ matrix.undici }}
+        if: matrix.undici
+        run: pnpm add -D "undici@${{ matrix.undici }}"
 
       # Typechecks the whole package, including the receiver's tests, against
       # this Bolt's types.
