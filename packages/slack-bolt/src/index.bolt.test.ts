@@ -444,8 +444,33 @@ describe("OAuth", () => {
     },
   );
 
+  // Bolt requires redirectUri to end with its path, and would otherwise blame
+  // installerOptions.redirectUriPath, which users can't set.
+  it.each([
+    [
+      "https://example.com",
+      'redirectUri must include a path, like https://example.com/api/slack/oauth, but it\'s "https://example.com".',
+    ],
+    [
+      "https://example.com/api/slack/ü",
+      'redirectUri must be percent-encoded, like https://example.com/api/slack/%C3%BC, but it\'s "https://example.com/api/slack/ü".',
+    ],
+  ])(
+    "rejects redirectUri %s with a clear initialization error",
+    (redirectUri, message) => {
+      expect(
+        () => new VercelReceiver({ signingSecret: SECRET, redirectUri }),
+      ).toThrow(new AppInitializationError(message));
+    },
+  );
+
   it.each<[string, string, VercelReceiverOptions]>([
     ["separate routes", "https://example.com/api/slack/oauth", {}],
+    [
+      "a redirectUri at the domain root",
+      "https://example.com/",
+      { redirectUri: "https://example.com/" },
+    ],
     [
       "a redirectUri with encoded path delimiters",
       "https://example.com/api/slack%3Foauth%23callback",
