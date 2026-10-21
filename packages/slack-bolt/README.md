@@ -80,21 +80,44 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 `VercelReceiver` takes Bolt's [`HTTPReceiver` options](https://docs.slack.dev/tools/bolt-js/reference), except `endpoints`, `port`, `customRoutes` and `dispatchErrorHandler`, which configure Bolt's own HTTP server. The ones you're most likely to need:
 
-| Name                            | Type                         | Default                            | Description                                                                                 |
-| ------------------------------- | ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| `signingSecret`                 | `string`                     | `process.env.SLACK_SIGNING_SECRET` | Verifies that requests come from Slack. Required unless `signatureVerification` is `false`. |
-| `signatureVerification`         | `boolean`                    | `true`                             | Set to `false` to skip signature verification, for example in tests.                        |
-| `logger`                        | `Logger`                     | Bolt's `ConsoleLogger`             | Pass it here: Bolt doesn't apply the `App`'s logger to a custom receiver.                   |
-| `logLevel`                      | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for the receiver's logger.                                                    |
-| `processBeforeResponse`         | `boolean`                    | `false`                            | Waits for your listeners to finish before answering Slack, instead of answering at `ack()`. |
-| `processEventErrorHandler`      | `(args) => Promise<boolean>` | Bolt's default                     | Handles an error from your listeners. The receiver keeps it running with `waitUntil`.       |
-| `unhandledRequestTimeoutMillis` | `number`                     | `3001`                             | How long to wait for a listener to call `ack()` before `unhandledRequestHandler` runs.      |
-| `unhandledRequestHandler`       | `(args) => void`             | Logs an error and answers `404`    | Answers Slack when no listener calls `ack()` in time.                                       |
-| `customPropertiesExtractor`     | `(req) => StringIndexed`     | None                               | Adds properties from the request to each event's `context`.                                 |
+| Name                            | Type                         | Default                            | Description                                                                                              |
+| ------------------------------- | ---------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `signingSecret`                 | `string`                     | `process.env.SLACK_SIGNING_SECRET` | Verifies that requests come from Slack. Required unless `signatureVerification` is `false`.              |
+| `signatureVerification`         | `boolean`                    | `true`                             | Set to `false` to skip signature verification, for example in tests.                                     |
+| `logger`                        | `Logger`                     | Bolt's `ConsoleLogger`             | Pass it here: Bolt doesn't apply the `App`'s logger to a custom receiver.                                |
+| `logLevel`                      | `LogLevel`                   | `LogLevel.INFO`                    | Minimum level for the receiver's logger.                                                                 |
+| `processBeforeResponse`         | `boolean`                    | `false`                            | Waits for your listeners to finish before answering Slack, instead of answering at `ack()`.              |
+| `processEventErrorHandler`      | `(args) => Promise<boolean>` | Bolt's default                     | Handles an error from your listeners. The receiver keeps it running with `waitUntil`.                    |
+| `unhandledRequestTimeoutMillis` | `number`                     | `3001`                             | How long to wait for a listener to call `ack()` before `unhandledRequestHandler` runs.                   |
+| `unhandledRequestHandler`       | `(args) => void`             | Logs an error and answers `404`    | Answers Slack when no listener calls `ack()` in time.                                                    |
+| `customPropertiesExtractor`     | `(req) => StringIndexed`     | None                               | Adds properties from the request to each event's `context`. See [Custom properties](#custom-properties). |
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
 The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL with a path and without a query string or fragment. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
+
+#### Custom properties
+
+`customPropertiesExtractor` gets Bolt's `BufferedIncomingMessage` for each event, command and interaction, and what it returns is added to your listener's `context`:
+
+- `req.url` is the path and query your route was called on, like `/api/slack/events?tenant=acme`, not a full URL. Parse it with a base: `new URL(req.url ?? "/", "http://localhost")`.
+- `req.headers` has lowercase names, like `req.headers["x-region"]`.
+- `req.rawBody` is a `Buffer` with the raw body: JSON for events, form-encoded for slash commands, and form-encoded with the JSON in a `payload` field for interactions.
+
+```typescript
+const receiver = new VercelReceiver({
+  customPropertiesExtractor: (req) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    return { tenant: url.searchParams.get("tenant") ?? undefined };
+  },
+});
+
+app.event("app_mention", async ({ context }) => {
+  console.log(context.tenant);
+});
+```
+
+Bolt calls it before your listeners and doesn't catch its errors. If it throws, Slack gets no answer (a `404` after 3 seconds) and the error becomes an unhandled promise rejection, so catch your own errors and decide what a missing value means.
 
 #### `receiver.fetch(request)`
 
@@ -436,12 +459,12 @@ Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and 
 
 `VercelReceiver` takes Bolt's `HTTPReceiver` options, described in [Options](#options). `installerOptions` takes the same fields as in v1.
 
-| v1                                     | v2                                                                                                                                                                         |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ackTimeoutMs`                         | `unhandledRequestTimeoutMillis`. Pass `unhandledRequestHandler` to change what Slack gets when no listener calls `ack()` in time.                                          |
-| `customPropertiesExtractor(req, body)` | `customPropertiesExtractor(req)`, where `req` is Bolt's `BufferedIncomingMessage`: read headers from `req.headers`, with lowercase names, and the body from `req.rawBody`. |
-| `scopes` as a function                 | Removed. `scopes` takes a fixed list.                                                                                                                                      |
-| `beforeProcess`                        | Removed. See [Replace `beforeProcess`](#replace-beforeprocess).                                                                                                            |
+| v1                                     | v2                                                                                                                                                                                                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ackTimeoutMs`                         | `unhandledRequestTimeoutMillis`. Pass `unhandledRequestHandler` to change what Slack gets when no listener calls `ack()` in time.                                                                                                                              |
+| `customPropertiesExtractor(req, body)` | `customPropertiesExtractor(req)`, where `req` is Bolt's `BufferedIncomingMessage`. `req.url` is now the path and query, not a full URL, and the body is `req.rawBody`, unparsed. Unlike v1, a throw isn't caught. See [Custom properties](#custom-properties). |
+| `scopes` as a function                 | Removed. `scopes` takes a fixed list.                                                                                                                                                                                                                          |
+| `beforeProcess`                        | Removed. See [Replace `beforeProcess`](#replace-beforeprocess).                                                                                                                                                                                                |
 
 `createHandler` and the `VercelHandler`, `BeforeProcessFn`, `ScopesResolver` and `VercelInstallerOptions` types are removed too. For the installer options' type, use `VercelReceiverOptions["installerOptions"]`.
 
