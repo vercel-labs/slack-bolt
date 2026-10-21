@@ -91,7 +91,7 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
-The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, or when `redirectUri` isn't an absolute URL.
+The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
 
 #### `receiver.fetch(request)`
 
@@ -421,7 +421,7 @@ const receiver = new VercelReceiver({
 });
 ```
 
-Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. The receiver also needs an `installationStore` whenever you set `clientId`, and throws an `AppInitializationError` without one. `redirectUri`, if you set it, must be a full URL.
+Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty, so a missing environment variable fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full URL.
 
 ### Changed options
 
