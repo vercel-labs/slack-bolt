@@ -15,11 +15,7 @@ const receiver = new VercelReceiver({
   installationStore,
 });
 
-const app = new App({
-  receiver,
-  // Sets up OAuth on the first request instead of at build time.
-  deferInitialization: true,
-});
+const app = new App({ receiver });
 
 registerListeners(app);
 

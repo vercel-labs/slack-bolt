@@ -12,7 +12,7 @@
   "dependencies": {
     "@slack/bolt": "^5.1.0",
     "@upstash/redis": "^1.39.0",
-    "@vercel/slack-bolt": "canary",
+    "@vercel/slack-bolt": "^2.0.0-0",
     "nitro": "3.0.260903-beta"
   },
   "devDependencies": {

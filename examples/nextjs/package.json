@@ -11,7 +11,7 @@
   "dependencies": {
     "@slack/bolt": "^5.1.0",
     "@upstash/redis": "^1.39.0",
-    "@vercel/slack-bolt": "canary",
+    "@vercel/slack-bolt": "^2.0.0-0",
     "next": "16.4.1",
     "react": "19.3.1",
     "react-dom": "19.3.1"

@@ -36,7 +36,7 @@
   "oauth_config": {
     "redirect_urls": ["https://example.com/api/slack/events"],
     "scopes": {
-      "bot": ["channels:history", "chat:write", "commands"]
+      "bot": ["app_mentions:read", "channels:history", "chat:write", "commands"]
     },
     "pkce_enabled": false
   },
@@ -44,6 +44,7 @@
     "event_subscriptions": {
       "bot_events": [
         "app_home_opened",
+        "app_mention",
         "app_uninstalled",
         "message.channels",
         "tokens_revoked"
