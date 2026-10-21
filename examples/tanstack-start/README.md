@@ -10,7 +10,7 @@ Before getting started, make sure you have a development workspace where you hav
 
 ### Clone and install dependencies
 ```bash
-git clone https://github.com/vercel-labs/slack-bolt.git && cd slack-bolt/examples/tanstack-start && pnpm install && pnpm --filter @vercel/slack-bolt build
+git clone https://github.com/vercel-labs/slack-bolt.git && cd slack-bolt/examples/tanstack-start && pnpm install
 ```
 
 ### Create a Slack App
