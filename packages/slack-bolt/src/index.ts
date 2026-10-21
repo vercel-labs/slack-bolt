@@ -36,8 +36,10 @@ export interface VercelReceiverOptions extends Omit<
    */
   signingSecret?: string | undefined;
   /**
-   * Absolute OAuth callback URL with a path, like
-   * `https://example.com/api/slack/oauth`, without a query string or fragment.
+   * Absolute `http` or `https` OAuth callback URL with a percent-encoded,
+   * normalized path, like `https://example.com/api/slack/oauth`, without a
+   * query string, fragment, surrounding whitespace or control characters. An
+   * empty string counts as unset.
    */
   redirectUri?: string;
   /**
@@ -104,6 +106,12 @@ function pathOf(redirectUri: string): string {
       `redirectUri must be an absolute URL, like https://example.com/api/slack, but it's "${redirectUri}".`,
     );
   }
+  // Slack sends the browser back to an http or https URL.
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new AppInitializationError(
+      `redirectUri must be an http or https URL, like https://example.com/api/slack/oauth, but it's "${redirectUri}".`,
+    );
+  }
   // Bolt checks the original URL's suffix, then routes by pathname. Check
   // the delimiters directly: URL.search and URL.hash omit empty "?" and "#".
   if (redirectUri.includes("?") || redirectUri.includes("#")) {
@@ -117,15 +125,33 @@ function pathOf(redirectUri: string): string {
       `redirectUri must not start or end with whitespace, but it's ${JSON.stringify(redirectUri)}.`,
     );
   }
-  // Bolt also checks that redirectUri ends with this path, and blames
-  // installerOptions.redirectUriPath if not. A bare origin's path is "/", and
-  // URL percent-encodes characters like "ü" and resolves "." and ".." in the
-  // path.
-  if (!redirectUri.endsWith(url.pathname)) {
+  // URL also drops tabs and newlines anywhere, and control characters at the
+  // start.
+  if (/\p{Cc}/u.test(redirectUri)) {
     throw new AppInitializationError(
-      url.pathname === "/"
+      `redirectUri must not contain control characters, like tabs or newlines, but it's ${JSON.stringify(redirectUri)}.`,
+    );
+  }
+  // Bolt also checks that redirectUri ends with this path, and blames
+  // installerOptions.redirectUriPath if not, while Slack gets the path as
+  // written. So the path after the host must be the one URL parses: a bare
+  // origin's path is "/", and URL percent-encodes characters like "ü" and
+  // resolves "." and ".." segments anywhere in the path.
+  const authority = redirectUri.indexOf("//");
+  const slash = authority === -1 ? -1 : redirectUri.indexOf("/", authority + 2);
+  const written = slash === -1 ? "" : redirectUri.slice(slash);
+  if (written !== url.pathname) {
+    throw new AppInitializationError(
+      written === "" && url.pathname === "/"
         ? `redirectUri must include a path, like https://example.com/api/slack/oauth, but it's "${redirectUri}".`
         : `redirectUri must be percent-encoded and normalized, like ${url.origin}${url.pathname}, but it's "${redirectUri}".`,
+    );
+  }
+  // Bolt routes with new URL(path, base), which reads "//api/slack" as a
+  // host, so the callback would never reach the installer.
+  if (url.pathname.startsWith("//")) {
+    throw new AppInitializationError(
+      `redirectUri's path must not start with "//", like https://example.com/api/slack/oauth, but it's "${redirectUri}".`,
     );
   }
   return url.pathname;
@@ -205,9 +231,10 @@ export class VercelReceiver extends HTTPReceiver {
    * `signatureVerification` isn't `false`, when `clientId` is set without an
    * `installationStore`, a `clientSecret` or a `stateSecret` (unless
    * `installerOptions` has a `stateStore` or turns off `stateVerification`),
-   * or when `redirectUri` isn't an absolute, percent-encoded and normalized
-   * URL with a path, without a query string, a fragment or whitespace at
-   * either end. An empty `redirectUri` counts as unset.
+   * or when `redirectUri` isn't an absolute `http` or `https` URL with a
+   * percent-encoded, normalized path that doesn't start with `//`, without a
+   * query string, fragment, surrounding whitespace or control characters. An
+   * empty `redirectUri` counts as unset.
    */
   public constructor(options: VercelReceiverOptions = {}) {
     const {

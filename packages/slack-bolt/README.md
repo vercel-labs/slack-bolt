@@ -94,7 +94,7 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
-The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute, percent-encoded URL with a normalized path (no `.` or `..` segments) and without a query string, fragment or surrounding whitespace. An empty `redirectUri` counts as not set. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
+The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute `http` or `https` URL with a percent-encoded, normalized path (no `.` or `..` segments, and not starting with `//`) and without a query string, fragment, surrounding whitespace or control characters. An empty `redirectUri` counts as not set. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
 
 #### Custom properties
 
@@ -117,7 +117,7 @@ app.event("app_mention", async ({ context }) => {
 });
 ```
 
-Bolt calls it before your listeners. If it throws, your listeners don't run, and the receiver passes the error to `processEventErrorHandler` as if a listener had failed: with Bolt's default handler, Slack gets a `500`, so it retries events, and a `processEventErrorHandler` of your own gets the original error. To carry on without the properties instead, catch your own errors and decide what a missing value means.
+Bolt calls it before your listeners. If it throws, your listeners don't run, and the receiver passes the error to `processEventErrorHandler` as if a listener had failed: with Bolt's default handler, Slack gets a `500`, so it retries events, and a `processEventErrorHandler` of your own gets the original error, or an `Error` wrapping it if it isn't an object. To carry on without the properties instead, catch your own errors and decide what a missing value means. Keep the extractor synchronous: Bolt doesn't await it, so an async extractor's properties never reach `context`, your listeners run without them, and a rejection goes unhandled.
 
 #### `receiver.fetch(request)`
 
@@ -127,7 +127,7 @@ Handles a Slack request and resolves with the `Response` once Slack is acknowled
 - With the OAuth options, a `GET` with a `code`, `error` or `state` query parameter is the OAuth callback, and any other `GET` is the install page.
 - Anything else gets a `404`.
 
-Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read. To read it yourself too, clone the request before you read it, read the original and pass the clone to `fetch`. Do it in that order: in Express, Nitro and other frameworks whose `Request` wraps Node.js's request, reading a clone also uses up the original's body.
+Bolt needs the raw body to verify Slack's signature, so `fetch` throws a `TypeError` if the request body has already been read, or something holds a reader on it. To read it yourself too, clone the request before you read it, read the original and pass the clone to `fetch`. Do it in that order: in Express, Nitro and other frameworks whose `Request` wraps Node.js's request, reading a clone also uses up the original's body.
 
 ### `preview`
 
@@ -457,7 +457,7 @@ const receiver = new VercelReceiver({
 });
 ```
 
-Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full, percent-encoded URL with a path and without a query string or fragment, where v1 accepted any string.
+Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full, percent-encoded URL with a normalized path and without a query string or fragment ([Options](#options) lists the exact rules), where v1 accepted any string.
 
 ### Changed options
 
@@ -510,7 +510,7 @@ export async function POST(request: Request) {
 ### Other changes
 
 - The receiver's `toHandler()`, `handleError()` and `getLogger()` methods are removed. Serve it with `fetch`, `POST` and `GET`, and log through the `logger` you pass it.
-- Don't call `receiver.start()` or `app.start()`. In v1, `start()` returned the request handler. In v2 it's Bolt's `HTTPReceiver.start()`, which starts Bolt's own HTTP server, on port 3000 unless you pass one.
+- Don't call `receiver.start()` or `app.start()`. In v1, `start()` returned the request handler. In v2 it's Bolt's `HTTPReceiver.start()`, which starts Bolt's own HTTP server, on port 3000 unless you pass one. Likewise, `stop()` resolved without doing anything in v1, and in v2 it rejects with a `ReceiverInconsistentStateError` because no server was started, so remove any `app.stop()` or `receiver.stop()` call from your shutdown or test teardown code.
 - Error responses are Bolt's, with empty bodies: `401` when a request fails signature verification, `400` for a body Bolt can't parse, `500` when a listener throws before `ack()`, and `404` when no listener calls `ack()` in time. v1 answered with JSON bodies, and with `408` in the last two cases.
 - `context.retryNum` and `context.retryReason` are `undefined` when Slack isn't retrying a request, where v1 set them to `0` and `""`.
 - `logLevel` only sets the level of Bolt's default logger. v1 also applied it to a `logger` you passed, so set your own logger's level yourself.

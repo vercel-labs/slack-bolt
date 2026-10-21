@@ -32,4 +32,4 @@ pnpm dev --filter=@vercel/slack-bolt --filter=slack-bolt-with-next
 
 Swap in another example's name from the table above, and set the environment variables its README lists. Every example's dev server defaults to port 3000, so `pnpm dev` without filters starts all five at once and some of them fail to start.
 
-Before you open a pull request, run `pnpm lint` and `pnpm test`.
+Before you open a pull request, run `pnpm lint`, `pnpm typecheck` and `pnpm test`. `pnpm typecheck` also builds the Next.js example, so first copy `examples/nextjs/.env.example` to `examples/nextjs/.env.local`, as CI does.
