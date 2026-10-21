@@ -94,7 +94,7 @@ Point your Slack app's event subscription, interactivity and slash command URLs 
 
 The OAuth options are described in [OAuth](#oauth-multi-workspace-apps).
 
-The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL without a query string or fragment. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
+The constructor throws Bolt's `AppInitializationError` when the signing secret is missing, when `clientId` is set without an `installationStore`, a `clientSecret` or a `stateSecret`, or when `redirectUri` isn't an absolute URL with a path and without a query string or fragment. You can leave out `stateSecret` if `installerOptions` has a `stateStore` or sets `stateVerification: false`.
 
 #### `receiver.fetch(request)`
 
@@ -243,7 +243,7 @@ const app = new App({ receiver, deferInitialization: true });
 export const { GET, POST } = receiver;
 ```
 
-Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full URL without a query string or fragment, like `https://example.com/api/slack/oauth`. Bolt requires the URL to end with its callback pathname. This restriction applies to the configured URL; Slack still adds `code` and `state` query parameters to the callback request.
+Export `GET` and `POST` from one route, and add its URL as a **Redirect URL** under **OAuth & Permissions** in your Slack app settings. Opening the route in a browser shows the install page, and Slack sends the OAuth callback back to it. Separate install and callback routes also work: export `GET` from each, and the receiver tells them apart by their query parameters. If you set `redirectUri`, it must be a full URL with a path and without a query string or fragment, like `https://example.com/api/slack/oauth`. For a route at the root of your domain, end it with a slash, like `https://example.com/`. Bolt requires the URL to end with its callback pathname. This restriction applies to the configured URL; Slack still adds `code` and `state` query parameters to the callback request.
 
 `installerOptions` takes Bolt's installer options, except `installPath`, `redirectUriPath` and `port`: the receiver serves the install page and callback at whatever path your route has.
 
@@ -428,7 +428,7 @@ const receiver = new VercelReceiver({
 });
 ```
 
-Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full URL without a query string or fragment.
+Without `clientId`, the receiver doesn't set up OAuth: `GET` answers `404`, and Bolt can't initialize an `App` that has neither a token nor OAuth. Whenever you set `clientId`, the receiver also needs `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and an `installationStore`, and throws an `AppInitializationError` if one is missing or empty. So a missing `clientSecret` or `stateSecret` fails at startup instead of turning OAuth off. `redirectUri`, if you set it, must be a full URL with a path and without a query string or fragment.
 
 ### Changed options
 

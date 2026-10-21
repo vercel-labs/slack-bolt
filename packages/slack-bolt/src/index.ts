@@ -33,7 +33,10 @@ export interface VercelReceiverOptions extends Omit<
    * @default process.env.SLACK_SIGNING_SECRET
    */
   signingSecret?: string | undefined;
-  /** Absolute OAuth callback URL, without a query string or fragment. */
+  /**
+   * Absolute OAuth callback URL with a path, like
+   * `https://example.com/api/slack/oauth`, without a query string or fragment.
+   */
   redirectUri?: string;
   /**
    * Bolt's installer options, minus `installPath`, `redirectUriPath` and
@@ -96,6 +99,16 @@ function pathOf(redirectUri: string): string {
   if (redirectUri.includes("?") || redirectUri.includes("#")) {
     throw new AppInitializationError(
       "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
+    );
+  }
+  // Bolt also checks that redirectUri ends with this path, and blames
+  // installerOptions.redirectUriPath if not. A bare origin's path is "/", and
+  // URL percent-encodes characters like "ü" in the path.
+  if (!redirectUri.endsWith(url.pathname)) {
+    throw new AppInitializationError(
+      url.pathname === "/"
+        ? `redirectUri must include a path, like https://example.com/api/slack/oauth, but it's "${redirectUri}".`
+        : `redirectUri must be percent-encoded, like ${url.origin}${url.pathname}, but it's "${redirectUri}".`,
     );
   }
   return url.pathname;
