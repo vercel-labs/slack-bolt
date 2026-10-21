@@ -29,7 +29,7 @@ The [Slack CLI](https://docs.slack.dev/tools/slack-cli/) copies this example int
 
 ### Run locally
 
-Slack sends requests to a public HTTPS URL, so expose your local server with a tunnel such as [ngrok](https://ngrok.com/docs/getting-started/) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/).
+Slack sends requests to a public HTTPS URL, so expose your local server with a tunnel such as [ngrok](https://ngrok.com/docs/getting-started/).
 
 1. Start the app with `npm run dev`. It serves http://localhost:3000
 2. In another terminal, start a tunnel to port 3000, e.g. `ngrok http 3000`, and copy its `https://` URL

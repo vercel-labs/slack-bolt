@@ -15,11 +15,17 @@ Upgrading from v1? See [Migrating from v1](#migrating-from-v1).
 
 ```bash
 npm install @vercel/slack-bolt @slack/bolt
-# or
+```
+
+```bash
 yarn add @vercel/slack-bolt @slack/bolt
-# or
+```
+
+```bash
 pnpm add @vercel/slack-bolt @slack/bolt
-# or
+```
+
+```bash
 bun add @vercel/slack-bolt @slack/bolt
 ```
 
@@ -30,7 +36,7 @@ bun add @vercel/slack-bolt @slack/bolt
 | `@slack/bolt` | `^4.7.3` or `^5.0.0` |
 | Node.js       | `>=22.12`            |
 
-`@slack/bolt` is a peer dependency, so declare it in your own `package.json` alongside this package. Do not install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer, and skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
+Don't install with `--legacy-peer-deps`: Bolt 5's `@slack/socket-mode` declares `undici` as a peer dependency, so skipping peers makes `require('@slack/bolt')` fail with `Cannot find module 'undici'`.
 
 ## API Reference
 
@@ -50,7 +56,6 @@ const receiver = new VercelReceiver();
 const app = new App({
   receiver,
   token: process.env.SLACK_BOT_TOKEN,
-  // Checks the token on the first event, and again if that fails.
   deferInitialization: true,
 });
 
@@ -90,7 +95,7 @@ The constructor throws Bolt's `AppInitializationError` when the signing secret i
 
 #### `receiver.fetch(request)`
 
-Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` are the same function, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`. See [Frameworks](#frameworks) for Hono, Express, Nitro and TanStack Start.
+Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` are the same function, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`. See [Frameworks](#frameworks) for examples.
 
 - `POST` requests are events, slash commands and interactions.
 - With the OAuth options, a `GET` with a `code`, `error` or `state` query parameter is the OAuth callback, and any other `GET` is the install page.
@@ -145,15 +150,17 @@ const result = await preview({
 
 ## Frameworks
 
-Serve the receiver from one route, and point your Slack app's request URLs at it. The route handles `POST` for events, slash commands and interactions, and with the [OAuth options](#oauth-multi-workspace-apps), `GET` for the install page and OAuth callback. In Next.js, export `POST` and `GET` from a route handler, as in [`VercelReceiver`](#vercelreceiver). The snippets below import `receiver` from the file that creates your `App`, so export it there with `export { receiver };`.
+`VercelReceiver` works with any framework that hands your route a Web [`Request`](https://developer.mozilla.org/docs/Web/API/Request) and takes a `Response` back: pass the request to `receiver.fetch` and return what it resolves with. Frameworks that route by exported method names, like Next.js, can export the receiver's `POST` and `GET` directly, as in [`VercelReceiver`](#vercelreceiver). Frameworks built on Node.js's own request and response, like Express, need a small adapter, shown below.
 
-Bolt verifies Slack's signature against the raw request body, so don't add middleware to the Slack route that reads the body first. The [examples](#examples) show each framework in a complete app.
+Serve the receiver from one route, and point your Slack app's request URLs at it. The route handles `POST` for events, slash commands and interactions, and with the [OAuth options](#oauth-multi-workspace-apps), `GET` for the install page and OAuth callback. Bolt verifies Slack's signature against the raw request body, so don't add middleware to the Slack route that reads the body first.
+
+The snippets below show a few common frameworks. Each imports `receiver` from the file that creates your `App`, so export it there with `export { receiver };`. The [examples](#examples) show each one in a complete app.
 
 ### Hono
 
 ```typescript
 import { Hono } from "hono";
-import { receiver } from "./slack";
+import { receiver } from "./lib/slack";
 
 const app = new Hono();
 
@@ -169,7 +176,7 @@ Express hands your route Node.js's request and response, not a Web `Request`, so
 ```typescript
 import express, { type RequestHandler } from "express";
 import { toNodeHandler } from "srvx/node";
-import { receiver } from "./slack";
+import { receiver } from "./lib/slack";
 
 const app = express();
 
@@ -187,7 +194,7 @@ Add the Slack route before any body parser, like `express.json()` or `express.ur
 ```typescript
 // routes/api/slack/events.ts
 import { defineHandler } from "nitro";
-import { receiver } from "../../../slack";
+import { receiver } from "../../../lib/slack";
 
 export default defineHandler((event) => receiver.fetch(event.req));
 ```
@@ -199,7 +206,7 @@ In Nitro 3, `event.req` is the Web `Request`. Put the route under `routes/api`: 
 ```typescript
 // src/routes/api/slack/events.ts
 import { createFileRoute } from "@tanstack/react-router";
-import { receiver } from "../../../slack";
+import { receiver } from "~/lib/slack";
 
 export const Route = createFileRoute("/api/slack/events")({
   server: {
@@ -210,10 +217,6 @@ export const Route = createFileRoute("/api/slack/events")({
   },
 });
 ```
-
-### Other frameworks
-
-Any framework that hands your route a Web `Request` and takes a `Response` back works the same way: pass the request to `receiver.fetch`.
 
 ## OAuth (Multi-Workspace Apps)
 

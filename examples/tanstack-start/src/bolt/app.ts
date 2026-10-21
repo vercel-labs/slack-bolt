@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 import { VercelReceiver } from "@vercel/slack-bolt";
+import { installationStore } from "~/lib/installation-store";
 import manifest from "../../manifest.json";
-import { installationStore } from "../lib/installation-store";
 import registerListeners from "./listeners";
 
 // Each workspace's bot token comes from the installation store once the

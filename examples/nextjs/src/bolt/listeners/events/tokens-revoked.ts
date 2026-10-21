@@ -1,5 +1,5 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs } from "@slack/bolt";
-import { installationStore } from "../../../lib/installation-store";
+import { installationStore } from "@/lib/installation-store";
 
 // Slack sends this when tokens are revoked, e.g. a user removes their
 // authorization. A revoked bot token means the installation can't be used,
