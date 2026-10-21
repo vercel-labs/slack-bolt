@@ -40,8 +40,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/vercel-labs/slack-bolt"
+    "url": "https://github.com/vercel-labs/slack-bolt",
+    "directory": "packages/slack-bolt"
   },
+  "homepage": "https://github.com/vercel-labs/slack-bolt/tree/master/packages/slack-bolt#readme",
   "bugs": {
     "url": "https://github.com/vercel-labs/slack-bolt/issues"
   },
