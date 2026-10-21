@@ -165,7 +165,7 @@ export class VercelReceiver extends HTTPReceiver {
       // don't send it looking for SLACK_SIGNING_SECRET.
       throw new AppInitializationError(
         "signingSecret" in options
-          ? "Missing signing secret. The signingSecret option is empty and SLACK_SIGNING_SECRET isn't set. Check that the environment variable you pass as signingSecret is set."
+          ? "Missing signing secret. The signingSecret option is empty. Check that the environment variable you pass as signingSecret is set."
           : "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.",
       );
     }
