@@ -4,7 +4,7 @@ import { enableFetchDebugLogging, log, startMessage } from "../logger";
 import { executeBuild } from "./build";
 import { ENV_KEYS, envKeyToFlag, resolveEnv } from "./env";
 
-export function run(version: string): void {
+export function run(version: string): Promise<void> {
   const program = new Command()
     .name("vercel-slack")
     .description(
@@ -65,8 +65,14 @@ export function run(version: string): void {
     await executeBuild(params, { cleanup });
   });
 
-  program.parseAsync().catch((error: unknown) => {
-    log.error(error instanceof Error ? error.message : String(error));
-    console.log();
-  });
+  return program.parseAsync().then(
+    () => {},
+    (error: unknown) => {
+      log.error(error instanceof Error ? error.message : String(error));
+      console.log();
+      // Fail the build, so `vercel-slack build && next build` doesn't deploy
+      // a preview whose Slack app wasn't set up.
+      process.exitCode = 1;
+    },
+  );
 }

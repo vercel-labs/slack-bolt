@@ -355,11 +355,13 @@ Options:
   --version, -v    Show version
 ```
 
+`vercel-slack build` exits with code 1 when it can't set up the preview's Slack app, so a build script like `vercel-slack build && next build` stops and the preview deployment fails instead of going live without its Slack credentials. Production, development and local builds skip it and exit with code 0.
+
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
 
 ## Migrating from v1
 
-v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI are unchanged.
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change: what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API is unchanged, and so is the `vercel-slack` CLI, except that `vercel-slack build` now exits with code 1 when it can't set up the preview's Slack app, which stops a `vercel-slack build && next build` script.
 
 ### Replace `createHandler`
 
