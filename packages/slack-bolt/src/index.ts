@@ -234,6 +234,27 @@ export class VercelReceiver extends HTTPReceiver {
     });
     this.#installPath = installPath;
     this.#callbackPath = callbackPath;
+
+    // Bolt doesn't await the installer, and only logs its errors without
+    // answering, so a failing install page or callback (a throwing
+    // beforeRedirection, state store or failure callback) would hold the
+    // request open until the function times out. Answer 500 instead, and
+    // rethrow so Bolt still logs the error.
+    const { installer } = this;
+    if (installer) {
+      for (const method of ["handleInstallPath", "handleCallback"] as const) {
+        const handle = installer[method].bind(installer);
+        installer[method] = async (req, res, ...rest) => {
+          try {
+            await handle(req, res, ...rest);
+          } catch (error) {
+            if (!res.headersSent) res.writeHead(500);
+            if (!res.writableEnded) res.end();
+            throw error;
+          }
+        };
+      }
+    }
   }
 
   /** The Bolt path that handles a request, whatever path it came in on. */

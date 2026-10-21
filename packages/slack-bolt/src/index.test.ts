@@ -30,7 +30,11 @@ vi.mock("@slack/bolt", async (importOriginal) => {
     public constructor(options: HTTPReceiverOptions) {
       superCalls.push(options);
       this.logger = options.logger ?? { error: vi.fn() };
-      if (options.clientId && options.clientSecret) this.installer = {};
+      if (options.clientId && options.clientSecret)
+        this.installer = {
+          handleInstallPath: async () => {},
+          handleCallback: async () => {},
+        };
     }
     public init(app: unknown): void {
       this.app = app;
