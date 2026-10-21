@@ -729,6 +729,32 @@ describe("OAuth", () => {
       "https://example.com/api/./slack",
       'redirectUri must be percent-encoded and normalized, like https://example.com/api/slack, but it\'s "https://example.com/api/./slack".',
     ],
+    // URL resolves this to a suffix of what's written, which Bolt accepts.
+    [
+      "https://example.com/x/../api/slack",
+      'redirectUri must be percent-encoded and normalized, like https://example.com/api/slack, but it\'s "https://example.com/x/../api/slack".',
+    ],
+    [
+      "https://example.com/%2e%2e/api/slack",
+      'redirectUri must be percent-encoded and normalized, like https://example.com/api/slack, but it\'s "https://example.com/%2e%2e/api/slack".',
+    ],
+    [
+      "https://example.com/api/../",
+      'redirectUri must be percent-encoded and normalized, like https://example.com/, but it\'s "https://example.com/api/../".',
+    ],
+    // Bolt would route the callback's "//api/slack" as a host.
+    [
+      "https://example.com//api/slack",
+      'redirectUri\'s path must not start with "//", like https://example.com/api/slack/oauth, but it\'s "https://example.com//api/slack".',
+    ],
+    [
+      "myapp://callback",
+      'redirectUri must be an http or https URL, like https://example.com/api/slack/oauth, but it\'s "myapp://callback".',
+    ],
+    [
+      "https://example.com\n/api/slack",
+      'redirectUri must not contain control characters, like tabs or newlines, but it\'s "https://example.com\\n/api/slack".',
+    ],
   ])(
     "rejects redirectUri %s with a clear initialization error",
     (redirectUri, message) => {
