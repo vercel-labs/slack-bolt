@@ -16,7 +16,9 @@ import { fetchNodeHandler } from "srvx/node";
  * `dispatchErrorHandler`), which don't apply when your route calls `fetch`.
  * Pass `logger` and `logLevel` here: Bolt doesn't apply the App's logger to a
  * custom receiver. Pass the OAuth options (`clientId`, `clientSecret`,
- * `stateSecret`, `scopes`, `installationStore`) here too, not to the App.
+ * `stateSecret`, `scopes`, `installationStore`) here too, not to the App. Bolt
+ * doesn't apply the App's `clientOptions` to the installer either, so pass
+ * them as `installerOptions.clientOptions` as well.
  */
 export interface VercelReceiverOptions extends Omit<
   HTTPReceiverOptions,
