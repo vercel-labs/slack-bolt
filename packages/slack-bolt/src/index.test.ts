@@ -51,6 +51,12 @@ const INIT_FAILED =
 const MISSING_STORE =
   "Missing installationStore. OAuth needs one that saves installations somewhere lasting, like a database, because Bolt's default keeps them in memory.";
 
+const MISSING_CLIENT_SECRET =
+  "Missing clientSecret. OAuth needs it whenever clientId is set.";
+
+const MISSING_STATE_SECRET =
+  "Missing stateSecret. OAuth needs it to sign the state parameter whenever clientId is set, unless you pass installerOptions.stateStore or set installerOptions.stateVerification to false.";
+
 // What the receiver passes Bolt as installerOptions when none are given.
 const BOLT_PATHS = {
   installerOptions: {
@@ -305,6 +311,52 @@ describe("OAuth options", () => {
       () => new VercelReceiver({ ...oauth, installationStore: undefined }),
     ).toThrow(new AppInitializationError(MISSING_STORE));
     expect(superCalls).toEqual([]);
+  });
+
+  it.each<[string, VercelReceiverOptions]>([
+    ["is missing", { clientSecret: undefined }],
+    ["is an empty string", { clientSecret: "" }],
+  ])(
+    "throws before calling HTTPReceiver when clientSecret %s",
+    (_, options) => {
+      expect(() => new VercelReceiver({ ...oauth, ...options })).toThrow(
+        new AppInitializationError(MISSING_CLIENT_SECRET),
+      );
+      expect(superCalls).toEqual([]);
+    },
+  );
+
+  it.each<[string, VercelReceiverOptions]>([
+    ["is missing", { stateSecret: undefined }],
+    ["is an empty string", { stateSecret: "" }],
+  ])("throws before calling HTTPReceiver when stateSecret %s", (_, options) => {
+    expect(() => new VercelReceiver({ ...oauth, ...options })).toThrow(
+      new AppInitializationError(MISSING_STATE_SECRET),
+    );
+    expect(superCalls).toEqual([]);
+  });
+
+  it.each<[string, VercelReceiverOptions["installerOptions"]]>([
+    [
+      "a stateStore",
+      {
+        stateStore: {
+          generateStateParam: async () => "state",
+          verifyStateParam: async () => ({}) as never,
+        },
+      },
+    ],
+    ["stateVerification turned off", { stateVerification: false }],
+  ])("doesn't need stateSecret with %s", (_, installerOptions) => {
+    expect(
+      () =>
+        new VercelReceiver({
+          ...oauth,
+          stateSecret: undefined,
+          installerOptions,
+        }),
+    ).not.toThrow();
+    expect(superCalls).toHaveLength(1);
   });
 
   it("throws before calling HTTPReceiver when redirectUri isn't an absolute URL", () => {

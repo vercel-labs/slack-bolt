@@ -159,8 +159,10 @@ export class VercelReceiver extends HTTPReceiver {
    * `process.env.SLACK_SIGNING_SECRET`.
    * @throws {AppInitializationError} When the signing secret is missing and
    * `signatureVerification` isn't `false`, when `clientId` is set without an
-   * `installationStore`, or when `redirectUri` isn't an absolute URL without
-   * a query string or fragment.
+   * `installationStore`, a `clientSecret` or a `stateSecret` (unless
+   * `installerOptions` has a `stateStore` or turns off `stateVerification`),
+   * or when `redirectUri` isn't an absolute URL without a query string or
+   * fragment.
    */
   public constructor(options: VercelReceiverOptions = {}) {
     const {
@@ -187,6 +189,24 @@ export class VercelReceiver extends HTTPReceiver {
     if (rest.clientId !== undefined && !rest.installationStore) {
       throw new AppInitializationError(
         "Missing installationStore. OAuth needs one that saves installations somewhere lasting, like a database, because Bolt's default keeps them in memory.",
+      );
+    }
+
+    // Without these Bolt quietly skips OAuth, and every GET answers 404. Treat
+    // an empty string, like an unset variable in a .env file, as missing too.
+    if (rest.clientId !== undefined && !rest.clientSecret) {
+      throw new AppInitializationError(
+        "Missing clientSecret. OAuth needs it whenever clientId is set.",
+      );
+    }
+    if (
+      rest.clientId !== undefined &&
+      !rest.stateSecret &&
+      !installerOptions?.stateStore &&
+      installerOptions?.stateVerification !== false
+    ) {
+      throw new AppInitializationError(
+        "Missing stateSecret. OAuth needs it to sign the state parameter whenever clientId is set, unless you pass installerOptions.stateStore or set installerOptions.stateVerification to false.",
       );
     }
 
