@@ -65,7 +65,7 @@
   "author": "Vercel",
   "license": "MIT",
   "dependencies": {
-    "@vercel/functions": "^3.10.1",
+    "@vercel/functions": "^3.10.6",
     "commander": "^14.0.3",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
@@ -74,14 +74,14 @@
     "@arethetypeswrong/cli": "^0.18.5",
     "@slack/bolt": "^5.1.0",
     "@types/node": "catalog:",
-    "@vitest/coverage-v8": "5.0.5",
+    "@vitest/coverage-v8": "5.1.0",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "srvx": "~1.0.6",
-    "tsdown": "^0.23.1",
+    "srvx": "~1.0.8",
+    "tsdown": "^0.23.5",
     "typescript": "catalog:",
-    "vite": "^8.3.4",
-    "vitest": "5.0.5"
+    "vite": "^8.3.5",
+    "vitest": "5.1.0"
   },
   "peerDependencies": {
     "@slack/bolt": "^4.7.3 || ^5.0.0"

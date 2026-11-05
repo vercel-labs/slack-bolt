@@ -2,9 +2,9 @@ packages:
   - packages/*
   - examples/*
 catalog:
-  "@types/node": ^26.6.5
-  oxfmt: 0.73.0
-  oxlint: 1.88.0
+  "@types/node": ^26.6.6
+  oxfmt: 0.76.0
+  oxlint: 1.91.0
   typescript: ~7.0.2
 allowBuilds:
   esbuild: true
