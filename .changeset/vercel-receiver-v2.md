@@ -1,0 +1,17 @@
+---
+"@vercel/slack-bolt": major
+---
+
+Rebuild `VercelReceiver` on Bolt's `HTTPReceiver`, and serve it with `receiver.fetch`, `receiver.POST` and `receiver.GET` from a route at any path. Listeners keep running with `waitUntil` after Slack is acknowledged.
+
+Breaking changes, with upgrade steps in [Migrating from v1](https://github.com/vercel-labs/slack-bolt/tree/master/packages/slack-bolt#migrating-from-v1):
+
+- `createHandler(app, receiver)` is removed. Export `POST` from your route with `export const { POST } = receiver`, or call `receiver.fetch(request)`.
+- The `VercelHandler`, `BeforeProcessFn`, `ScopesResolver` and `VercelInstallerOptions` types are removed.
+- `VercelReceiver` takes Bolt's `HTTPReceiver` options. `beforeProcess`, `ackTimeoutMs` and the `scopes` resolver function are removed, and `customPropertiesExtractor` receives Bolt's request instead of a `Request` and body.
+- OAuth uses Bolt's own installer. `receiver.handleInstall` and `receiver.handleCallback` are replaced by `GET`, which serves the install page and the callback from one route or from separate ones. `clientId`, `clientSecret` and `stateSecret` are no longer read from `process.env`, and `clientSecret`, `stateSecret` (unless `installerOptions` has a `stateStore` or sets `stateVerification: false`) and `installationStore` are required whenever `clientId` is set.
+- `redirectUri` must be an absolute `http` or `https` URL with a percent-encoded, normalized path (no `.` or `..` segments, and not starting with `//`), without a query string, fragment, surrounding whitespace or control characters, like `https://example.com/api/slack/oauth`, or the constructor throws `AppInitializationError`. An empty `redirectUri` counts as not set.
+- The receiver's `toHandler()`, `handleError()` and `getLogger()` methods are removed. `receiver.start()` is now Bolt's and starts Bolt's own HTTP server instead of returning a handler, so don't call it or `app.start()`. `receiver.stop()` and `app.stop()` now reject, because no server was started, where v1 resolved.
+- Error responses are Bolt's, with empty bodies: Slack gets a `500` at once when a listener throws before `ack()`, and a `404` instead of a `408` when no listener calls `ack()` in time. v1 answered both with a `408` after `ackTimeoutMs`. `context.retryNum` and `context.retryReason` are `undefined` when Slack isn't retrying, and `logLevel` no longer sets the level of a `logger` you pass.
+- `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer are required.
+- With Bolt 5, Node.js 22.19 or newer is required: Bolt 5 installs `undici` 8, which needs it.

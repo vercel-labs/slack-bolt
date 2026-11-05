@@ -1,23 +1,107 @@
 {
-  "$schema": "https://turborepo.dev/schema.v2.json",
-  "ui": "tui",
-  "globalEnv": ["CI_NODE_VERSION"],
-  "globalPassThroughEnv": ["SLACK_*", "VERCEL_*"],
+  "$schema": "./node_modules/turbo/schema.json",
+  "agentGuidance": true,
+  "futureFlags": {
+    "globalConfiguration": true,
+    "affectedUsingTaskInputs": true,
+    "watchUsingTaskInputs": true
+  },
+  "global": {
+    "ui": "tui",
+    "env": ["CI_NODE_VERSION"],
+    "cacheMaxAge": "7d"
+  },
   "tasks": {
     "build": {
+      "description": "Builds the library and each example for production",
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "slack-bolt-with-next#build": {
+      "dependsOn": ["@vercel/slack-bolt#build"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"],
+      "env": [
+        "VERCEL_*",
+        "NEXT_SLACK_SIGNING_SECRET",
+        "NEXT_SLACK_CLIENT_ID",
+        "NEXT_SLACK_CLIENT_SECRET",
+        "SLACK_STATE_SECRET",
+        "TOKEN_ENCRYPTION_SECRET",
+        "KV_REST_API_URL",
+        "KV_REST_API_TOKEN",
+        "NEXTJS_SLACK_*"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.production.local"
+      ]
+    },
+    "slack-bolt-with-nitro#build": {
+      "dependsOn": ["@vercel/slack-bolt#build"],
+      "outputs": [".output/**", ".vercel/output/**"],
+      "env": [
+        "VERCEL_*",
+        "NITRO_SLACK_SIGNING_SECRET",
+        "NITRO_SLACK_CLIENT_ID",
+        "NITRO_SLACK_CLIENT_SECRET",
+        "SLACK_STATE_SECRET",
+        "TOKEN_ENCRYPTION_SECRET",
+        "KV_REST_API_URL",
+        "KV_REST_API_TOKEN"
+      ]
+    },
+    "slack-bolt-with-tanstack-start#build": {
+      "dependsOn": ["@vercel/slack-bolt#build"],
+      "outputs": [".output/**", ".vercel/output/**"],
+      "env": [
+        "VERCEL_*",
+        "TANSTACK_START_SLACK_SIGNING_SECRET",
+        "TANSTACK_START_SLACK_CLIENT_ID",
+        "TANSTACK_START_SLACK_CLIENT_SECRET",
+        "SLACK_STATE_SECRET",
+        "TOKEN_ENCRYPTION_SECRET",
+        "KV_REST_API_URL",
+        "KV_REST_API_TOKEN"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.production.local"
+      ]
+    },
     "dev": {
-      "dependsOn": ["^build"],
+      "description": "Rebuilds the library on change and runs each example's dev server",
+      "dependsOn": ["^build", "@vercel/slack-bolt#build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "SLACK_*",
+        "VERCEL_*",
+        "NEXT_SLACK_*",
+        "HONO_SLACK_*",
+        "EXPRESS_SLACK_*",
+        "NITRO_SLACK_*",
+        "TANSTACK_START_SLACK_*"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "description": "Type-checks with tsc against the built @vercel/slack-bolt types",
+      "dependsOn": ["^build", "@vercel/slack-bolt#build"]
+    },
+    "slack-bolt-with-next#typecheck": {
+      "dependsOn": ["@vercel/slack-bolt#build", "build"]
+    },
+    "slack-bolt-with-tanstack-start#typecheck": {
+      "dependsOn": ["@vercel/slack-bolt#build", "build"]
     },
     "lint": {
-      "dependsOn": ["//#lint:root"],
+      "description": "Lints src with oxlint and checks its formatting with oxfmt",
+      "dependsOn": ["//#lint:root", "//#lint:examples"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/.oxlintrc.json",
@@ -25,12 +109,15 @@
       ]
     },
     "lint:fix": {
-      "dependsOn": ["//#lint:fix:root"],
+      "description": "Applies oxlint fixes and oxfmt formatting to src",
+      "dependsOn": ["//#lint:fix:root", "//#lint:fix:examples"],
       "cache": false
     },
     "//#lint:root": {
+      "description": "Checks formatting of config files outside package src directories",
       "inputs": [
         "*.json",
+        "vercel.ts",
         "pnpm-workspace.yaml",
         ".github/**/*.yml",
         ".changeset/*.json",
@@ -41,11 +128,29 @@
       ]
     },
     "//#lint:fix:root": {
+      "description": "Formats config files outside package src directories",
       "cache": false
     },
-    "test": {},
-    "attw": {
-      "dependsOn": ["build"]
+    "//#lint:examples": {
+      "description": "Lints and checks the formatting of each example src directory",
+      "inputs": [
+        "examples/*/src/**",
+        "examples/.oxlintrc.json",
+        ".oxlintrc.json",
+        ".oxfmtrc.json"
+      ]
+    },
+    "//#lint:fix:examples": {
+      "description": "Applies oxlint fixes and oxfmt formatting to each example src directory",
+      "cache": false
+    },
+    "test": {
+      "description": "Runs the Vitest suite once"
+    },
+    "test:watch": {
+      "description": "Runs the Vitest suite in watch mode",
+      "cache": false,
+      "persistent": true
     }
   }
 }

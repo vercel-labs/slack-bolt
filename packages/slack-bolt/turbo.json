@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/turbo/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "attw": {
+      "description": "Checks the packed package's type exports with Are the Types Wrong",
+      "dependsOn": ["build"]
+    }
+  }
+}
