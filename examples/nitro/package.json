@@ -11,13 +11,13 @@
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
-    "@upstash/redis": "^1.39.0",
+    "@upstash/redis": "^1.41.0",
     "@vercel/slack-bolt": "^2.0.0-0",
-    "nitro": "3.0.260903-beta"
+    "nitro": "3.0.261103-rc"
   },
   "devDependencies": {
     "@slack/cli-hooks": "^2.0.0",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "typescript": "~7.0.2"
   }
 }
