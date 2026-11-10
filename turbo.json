@@ -28,8 +28,7 @@
         "SLACK_STATE_SECRET",
         "TOKEN_ENCRYPTION_SECRET",
         "KV_REST_API_URL",
-        "KV_REST_API_TOKEN",
-        "NEXTJS_SLACK_*"
+        "KV_REST_API_TOKEN"
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -86,7 +85,11 @@
         "HONO_SLACK_*",
         "EXPRESS_SLACK_*",
         "NITRO_SLACK_*",
-        "TANSTACK_START_SLACK_*"
+        "TANSTACK_START_SLACK_*",
+        "TOKEN_ENCRYPTION_SECRET",
+        "KV_REST_API_URL",
+        "KV_REST_API_TOKEN",
+        "PORT"
       ]
     },
     "typecheck": {
