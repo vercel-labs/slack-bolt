@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { HTTPError } from "./errors";
+import { HTTPError } from "../http-error";
 import type {
   AddEnvironmentVariablesResult,
   CreateProjectEnv,
@@ -116,7 +116,23 @@ export async function addEnvironmentVariables({
     );
   }
 
-  return response.json();
+  const result: AddEnvironmentVariablesResult = await response.json();
+
+  // Vercel answers 2xx when it saved only some of the variables. Without
+  // them the branch's deployment starts with missing credentials, so fail.
+  // Name the keys and Vercel's error codes, never values or messages, which
+  // can echo what was submitted.
+  if (result.failed?.length) {
+    const refused = result.failed
+      .map(({ error }) => {
+        const key = error.envVarKey ?? error.key ?? "unknown";
+        return `${key} (${error.code})`;
+      })
+      .join(", ");
+    throw new Error(`Failed to create environment variables: ${refused}`);
+  }
+
+  return result;
 }
 
 export async function cancelDeployment({

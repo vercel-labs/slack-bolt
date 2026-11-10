@@ -88,6 +88,16 @@ export function createNewManifest(params: {
     );
   }
 
+  // Slack loads an external select's options from this URL, so leaving it on
+  // the original host would send those requests to production.
+  if (manifest.settings?.interactivity?.message_menu_options_url) {
+    manifest.settings.interactivity.message_menu_options_url = rewriteUrl(
+      manifest.settings.interactivity.message_menu_options_url,
+      params.branchUrl,
+      params.bypassSecret,
+    );
+  }
+
   if (manifest.features?.slash_commands) {
     for (const cmd of manifest.features.slash_commands) {
       if (cmd.url) {

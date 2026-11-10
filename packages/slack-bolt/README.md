@@ -121,7 +121,7 @@ Bolt calls it before your listeners. If it throws, your listeners don't run, and
 
 #### `receiver.fetch(request)`
 
-Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` are the same function, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`. See [Frameworks](#frameworks) for examples.
+Handles a Slack request and resolves with the `Response` once Slack is acknowledged. `receiver.POST` and `receiver.GET` call it, for frameworks that route by exported method names. In any other framework, pass the Web `Request` to `receiver.fetch`. See [Frameworks](#frameworks) for examples.
 
 - `POST` requests are events, slash commands and interactions.
 - With the OAuth options, a `GET` with a `code`, `error` or `state` query parameter is the OAuth callback, and any other `GET` is the install page.
@@ -160,7 +160,8 @@ const result = await preview({
 | `slackAppId`              | `string` | No       | Existing Slack app ID to update instead of creating a new one.   |
 | `slackServiceToken`       | `string` | No       | Service token for auto-installing the app.                       |
 | `teamId`                  | `string` | No       | Vercel team ID.                                                  |
-| `deploymentId`            | `string` | No       | Current deployment ID (used for cancel-and-redeploy).            |
+| `deploymentId`            | `string` | No       | Current deployment ID. Only the CLI uses it, to redeploy.        |
+| `slackConfigRefreshToken` | `string` | No       | Only the CLI uses it, to rotate an expired configuration token.  |
 | `automationBypassSecret`  | `string` | No       | Existing bypass secret. Generated automatically if not provided. |
 | `commitSha`               | `string` | No       | Git commit SHA (displayed in the Slack app description).         |
 | `commitMessage`           | `string` | No       | Git commit message (displayed in the Slack app description).     |
@@ -173,6 +174,8 @@ const result = await preview({
 | `isNew`         | `boolean` | `true` if a new Slack app was created, `false` if updated.        |
 | `installStatus` | `string`  | Installation outcome (e.g. `installed`, `missing_service_token`). |
 | `app`           | `object`  | Slack API response containing `app_id` and credentials.           |
+
+`preview` rewrites the manifest file at `manifestPath` in place, creates or updates the Slack app, and saves a new app's credentials as environment variables for the branch. It doesn't redeploy: the variables reach the branch's next deployment.
 
 ## Frameworks
 
@@ -351,6 +354,36 @@ Add the following to your Vercel project:
 
 You must also enable **Automatically expose System Environment Variables** in your Vercel project settings.
 
+#### 4. Read the preview app's credentials
+
+The CLI saves each preview app's credentials under fixed names, scoped to the branch: `SLACK_APP_ID`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`, and with a `SLACK_SERVICE_TOKEN`, `SLACK_BOT_TOKEN`. Your receiver has to read those names, or the preview answers Slack with `401` because it verifies requests with another app's signing secret.
+
+The receiver reads `SLACK_SIGNING_SECRET` by default. With a `SLACK_SERVICE_TOKEN`, the CLI installs the app and stores its bot token, so a single-workspace app needs nothing else:
+
+```typescript
+const receiver = new VercelReceiver();
+
+const app = new App({
+  receiver,
+  token: process.env.SLACK_BOT_TOKEN,
+  deferInitialization: true,
+});
+```
+
+For an [OAuth](#oauth-multi-workspace-apps) app, pass the client ID and secret under the names the CLI uses, and set `SLACK_STATE_SECRET` for the Preview environment yourself. The CLI rewrites the manifest's redirect URLs to the preview, so the install page and callback work there without a `redirectUri`:
+
+```typescript
+const receiver = new VercelReceiver({
+  clientId: process.env.SLACK_CLIENT_ID,
+  clientSecret: process.env.SLACK_CLIENT_SECRET,
+  stateSecret: process.env.SLACK_STATE_SECRET,
+  scopes: ["chat:write", "commands"],
+  installationStore,
+});
+```
+
+The [examples](#examples) don't use the CLI, and read framework-prefixed names like `NEXT_SLACK_SIGNING_SECRET`. To add previews to an app started from one, switch it to the unprefixed names above.
+
 ### How it works
 
 ```
@@ -362,16 +395,21 @@ git push → Vercel preview build
        │         and persists new tokens to Vercel env vars
        ├─ Cleans up orphaned preview apps (--cleanup)
        ├─ Reads manifest.json
+       ├─ Rewrites manifest URLs → preview deployment URL, and writes the file back
        ├─ Creates or updates Slack app via apps.manifest API
-       ├─ Rewrites manifest URLs → preview deployment URL
        ├─ Stores credentials as branch-scoped env vars
        ├─ Auto-installs app (if SLACK_SERVICE_TOKEN is set)
-       └─ Redeploys to pick up new env vars (only needed on first deploy for branch)
+       └─ Starts a new deployment to pick up the env vars, and cancels this one
+            (only on the first deploy for a branch)
 ```
+
+The request URLs the CLI gives Slack carry your project's [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) secret, so Slack can reach a preview behind Deployment Protection. The CLI generates one if the project has none. Redirect URLs don't carry it, because the browser follows them.
+
+The first build of a branch creates the app, so it ends as **Canceled** in Vercel and the deployment it started is the one that goes live. If a later build can't reach Slack, or Slack is rate limiting, the build fails instead of creating a second app for the branch; redeploy to try again.
 
 #### Cleanup
 
-When `--cleanup` is passed, the CLI removes Slack apps and branch-scoped environment variables for preview branches that are no longer active in the Vercel project. This runs before the main provisioning step and failures are non-fatal.
+When `--cleanup` is passed, the CLI removes Slack apps and branch-scoped environment variables for preview branches that are no longer active in the Vercel project. It deletes every variable the CLI stores for a branch, including `SLACK_APP_LEVEL_TOKEN` and `SLACK_USER_TOKEN`. This runs before the main provisioning step and failures are non-fatal.
 
 ### CLI Reference
 
@@ -383,17 +421,22 @@ Commands:
 
 Options:
   --cleanup        Clean up Slack apps and env vars for inactive preview branches
+  --debug          Log every HTTP request and response, with secrets redacted
   --help, -h       Show help
   --version, -v    Show version
 ```
 
-`vercel-slack build` exits with code 1 when it can't set up the preview's Slack app, so a build script like `vercel-slack build && next build` stops and the preview deployment fails instead of going live without its Slack credentials. Production, development and local builds skip it and exit with code 0.
+`vercel-slack build` exits with code 1 when it fails, so a build script like `vercel-slack build && next build` stops and the preview deployment fails instead of going live without its Slack credentials. Production, development and local builds skip it and exit with code 0.
+
+Previews that can't read `SLACK_CONFIGURATION_TOKEN` or `VERCEL_API_TOKEN`, like those of pull requests from forks, fail too. To build them anyway, without a Slack app, use `vercel-slack build || true` instead.
+
+Pass `--debug`, or set `VERCEL_SLACK_DEBUG=1`, to log every request the CLI makes. Tokens, secrets, environment variable values and the protection bypass secret are redacted, with at most their last four characters shown.
 
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
 
 ## Migrating from v1
 
-v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change, apart from the details in [Other changes](#other-changes): what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API is unchanged, and so is the `vercel-slack` CLI, except that `vercel-slack build` now exits with code 1 when it can't set up the preview's Slack app, which stops a `vercel-slack build && next build` script.
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change, apart from the details in [Other changes](#other-changes): what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI work as before, with stricter failures: `vercel-slack build` now exits with code 1 when it fails, which stops a `vercel-slack build && next build` script (see the [CLI Reference](#cli-reference)), and `preview` rejects when Vercel doesn't save every credential, or when Slack is unreachable or rate limiting while it updates a branch's app, where v1 created a second app. v2 no longer reads `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` itself, so see [Read the preview app's credentials](#4-read-the-preview-apps-credentials) if your previews use OAuth.
 
 With Bolt 5, v2 needs Node.js 22.19 or newer. See [Compatibility](#compatibility).
 
@@ -511,7 +554,7 @@ export async function POST(request: Request) {
 
 - The receiver's `toHandler()`, `handleError()` and `getLogger()` methods are removed. Serve it with `fetch`, `POST` and `GET`, and log through the `logger` you pass it.
 - Don't call `receiver.start()` or `app.start()`. In v1, `start()` returned the request handler. In v2 it's Bolt's `HTTPReceiver.start()`, which starts Bolt's own HTTP server, on port 3000 unless you pass one. Likewise, `stop()` resolved without doing anything in v1, and in v2 it rejects with a `ReceiverInconsistentStateError` because no server was started, so remove any `app.stop()` or `receiver.stop()` call from your shutdown or test teardown code.
-- Error responses are Bolt's, with empty bodies: `401` when a request fails signature verification, `400` for a body Bolt can't parse, `500` when a listener throws before `ack()`, and `404` when no listener calls `ack()` in time. v1 answered with JSON bodies, and with `408` in the last two cases.
+- Error responses are Bolt's, with empty bodies: `401` when a request fails signature verification, `400` for a body Bolt can't parse, `413` for a body over Bolt 5's `bodyLimit`, `500` when a listener throws before `ack()`, and `404` when no listener calls `ack()` in time. v1 answered with JSON bodies, and with `408` in the last two cases.
 - `context.retryNum` and `context.retryReason` are `undefined` when Slack isn't retrying a request, where v1 set them to `0` and `""`.
 - `logLevel` only sets the level of Bolt's default logger. v1 also applied it to a `logger` you passed, so set your own logger's level yourself.
 

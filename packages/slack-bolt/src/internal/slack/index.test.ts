@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HTTPError } from "../vercel/errors";
+import { HTTPError } from "../http-error";
 import {
   SlackManifestCreateError,
   SlackManifestExportError,
@@ -338,23 +338,57 @@ describe("upsertSlackApp", () => {
     expect(mockFetch.mock.calls[1][0]).toContain("apps.manifest.create");
   });
 
-  it("falls back to create when update fails after successful export", async () => {
+  // A second app would orphan the first: its SLACK_APP_ID is overwritten, so
+  // cleanup never finds it again.
+  it("doesn't create a second app when Slack answers the update with a 5xx", async () => {
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ ok: true, manifest: {} }))
-      .mockResolvedValueOnce(jsonResponse({}, 500, "Internal Server Error"))
-      .mockResolvedValueOnce(jsonResponse(createResponse));
+      .mockResolvedValueOnce(jsonResponse({}, 500, "Internal Server Error"));
 
-    const result = await upsertSlackApp({
-      token: "tok",
-      appId: "A_BROKEN",
-      manifest: testManifest,
-    });
+    await expect(
+      upsertSlackApp({
+        token: "tok",
+        appId: "A_EXISTING",
+        manifest: testManifest,
+      }),
+    ).rejects.toThrow("Failed to update Slack app: 500 Internal Server Error");
 
-    expect(result).toEqual({ isNew: true, app: createResponse });
-    expect(mockFetch.mock.calls[0][0]).toContain("apps.manifest.export");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(mockFetch.mock.calls[1][0]).toContain("apps.manifest.update");
-    expect(mockFetch.mock.calls[2][0]).toContain("apps.manifest.create");
   });
+
+  it("doesn't create a second app when Slack rate limits the export", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "ratelimited" }, 429, "Too Many"),
+    );
+
+    await expect(
+      upsertSlackApp({
+        token: "tok",
+        appId: "A_EXISTING",
+        manifest: testManifest,
+      }),
+    ).rejects.toThrow(HTTPError);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["internal_error", "fatal_error", "service_unavailable"])(
+    "doesn't create a second app when Slack reports %s",
+    async (error) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: false, error }));
+
+      await expect(
+        upsertSlackApp({
+          token: "tok",
+          appId: "A_EXISTING",
+          manifest: testManifest,
+        }),
+      ).rejects.toThrow(error);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("propagates the error when fallback create also fails", async () => {
     mockFetch
@@ -368,31 +402,14 @@ describe("upsertSlackApp", () => {
     ).rejects.toThrow(SlackManifestCreateError);
   });
 
-  it("falls back to create on network error during export (catch-all)", async () => {
-    mockFetch
-      .mockRejectedValueOnce(new TypeError("fetch failed"))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          ok: true,
-          app_id: "A_NEW",
-          credentials: {
-            client_id: "c",
-            client_secret: "s",
-            verification_token: "v",
-            signing_secret: "ss",
-          },
-          oauth_authorize_url: "",
-        }),
-      );
+  it("doesn't create a second app when the export never reaches Slack", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    const result = await upsertSlackApp({
-      token: "tok",
-      appId: "A1",
-      manifest: testManifest,
-    });
+    await expect(
+      upsertSlackApp({ token: "tok", appId: "A1", manifest: testManifest }),
+    ).rejects.toThrow("fetch failed");
 
-    expect(result.isNew).toBe(true);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to create on SlackManifestExportError (ok:false from export)", async () => {

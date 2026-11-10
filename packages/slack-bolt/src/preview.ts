@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { log } from "./internal/logger";
 import { createNewManifest } from "./internal/manifest";
 import { parseManifest, stringifyManifest } from "./internal/manifest/parse";
 import { installApp, upsertSlackApp } from "./internal/slack";
 import type {
+  InstallResult,
   SlackManifestCreateResponse,
   SlackManifestUpdateResponse,
 } from "./internal/slack/types";
@@ -12,7 +14,6 @@ import {
   updateProtectionBypass,
 } from "./internal/vercel";
 import type { CreateProjectEnv } from "./internal/vercel/types";
-import { log } from "./logger";
 
 export type PreviewParams = {
   slackConfigRefreshToken?: string;
@@ -35,7 +36,8 @@ export type PreviewParams = {
 
 export type PreviewResult = {
   isNew: boolean;
-  installStatus: string;
+  /** How installing the app went, like `installed` or `missing_service_token`. */
+  installStatus: InstallResult["status"];
   app: SlackManifestCreateResponse | SlackManifestUpdateResponse;
 };
 
@@ -238,7 +240,7 @@ export const preview = async (
         break;
       case "invalid_app_id":
         log.warning(
-          "Invalid app ID. This is a bug in the @vercel/slack-bolt package. Please open an issue at https://github.com/vercel/slack-bolt/issues",
+          "Invalid app ID. This is a bug in the @vercel/slack-bolt package. Please open an issue at https://github.com/vercel-labs/slack-bolt/issues",
         );
         break;
       case "slack_api_error":

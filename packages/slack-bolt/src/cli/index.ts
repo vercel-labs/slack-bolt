@@ -1,8 +1,8 @@
 import { Command } from "commander";
-import { validateAndBuildParams } from "../internal/schemas";
-import { enableFetchDebugLogging, log, startMessage } from "../logger";
+import { enableFetchDebugLogging, log, startMessage } from "../internal/logger";
 import { executeBuild } from "./build";
 import { ENV_KEYS, envKeyToFlag, resolveEnv } from "./env";
+import { validateAndBuildParams } from "./schemas";
 
 export function run(version: string): Promise<void> {
   const program = new Command()
@@ -69,6 +69,25 @@ export function run(version: string): Promise<void> {
     () => {},
     (error: unknown) => {
       log.error(error instanceof Error ? error.message : String(error));
+      // Slack rejects a manifest with one entry per problem and where it is.
+      const problems = (error as { errors?: unknown }).errors;
+      if (Array.isArray(problems)) {
+        for (const problem of problems as {
+          message?: string;
+          pointer?: string;
+        }[]) {
+          log.error(`  ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
+        }
+      }
+      // The message says what to do; the cause says what went wrong, like
+      // the status Vercel or Slack answered with.
+      for (
+        let cause = error instanceof Error ? error.cause : undefined;
+        cause instanceof Error;
+        cause = cause.cause
+      ) {
+        log.error(`  Caused by: ${cause.message}`);
+      }
       console.log();
       // Fail the build, so `vercel-slack build && next build` doesn't deploy
       // a preview whose Slack app wasn't set up.

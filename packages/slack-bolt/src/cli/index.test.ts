@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBuild } from "./build";
 import { run } from "./index";
+import { validateAndBuildParams } from "./schemas";
 
 vi.mock("./build", () => ({ executeBuild: vi.fn() }));
-vi.mock("../internal/schemas", () => ({
+vi.mock("./schemas", () => ({
   validateAndBuildParams: vi.fn(() => ({})),
 }));
 
@@ -39,6 +40,55 @@ describe("vercel-slack build", () => {
         "Slack configuration token is invalid or expired.",
       ),
     );
+  });
+
+  it("prints what caused the failure, down the chain", async () => {
+    vi.mocked(executeBuild).mockRejectedValue(
+      new Error("Vercel API token cannot access this project.", {
+        cause: new Error("Failed to access Vercel project: 403 Forbidden", {
+          cause: new Error("socket hang up"),
+        }),
+      }),
+    );
+
+    await run("0.0.0");
+
+    expect(vi.mocked(console.error).mock.calls.map(([line]) => line)).toEqual([
+      "Vercel API token cannot access this project.",
+      "  Caused by: Failed to access Vercel project: 403 Forbidden",
+      "  Caused by: socket hang up",
+    ]);
+  });
+
+  it("prints each problem Slack found in the manifest", async () => {
+    vi.mocked(executeBuild).mockRejectedValue(
+      Object.assign(new Error("invalid_manifest"), {
+        errors: [
+          {
+            message: "Interactivity requires a Request URL",
+            pointer: "/settings/interactivity",
+          },
+        ],
+      }),
+    );
+
+    await run("0.0.0");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "  /settings/interactivity: Interactivity requires a Request URL",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("exits with code 1 when required env vars are missing", async () => {
+    vi.mocked(validateAndBuildParams).mockImplementationOnce(() => {
+      throw new Error("Missing VERCEL_API_TOKEN");
+    });
+
+    await run("0.0.0");
+
+    expect(executeBuild).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it("exits with code 0 when the build succeeds", async () => {

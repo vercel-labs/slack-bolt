@@ -29,7 +29,15 @@ export const log = {
   },
 };
 
-const REDACTED_HEADERS = new Set(["authorization"]);
+const REDACTED_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "set-cookie",
+  "x-vercel-protection-bypass",
+]);
+
+/** The deployment protection bypass secret, wherever a URL carries it. */
+const BYPASS_PARAM = /(x-vercel-protection-bypass=)[^&"'\s\\]+/gi;
 
 /**
  * Keys whose values should be redacted when logging request/response bodies.
@@ -70,7 +78,25 @@ function redactValue(value: string): string {
   return `****${value.slice(-4)}`;
 }
 
+/**
+ * Redacts secrets inside a string value. Slack's manifest methods take the
+ * manifest as a JSON string, and its request URLs carry the deployment
+ * protection bypass secret, so look inside embedded JSON and URLs too.
+ */
+function redactString(value: string): string {
+  const start = value.trimStart()[0];
+  if (start === "{" || start === "[") {
+    try {
+      return JSON.stringify(redactSensitiveFields(JSON.parse(value)));
+    } catch {
+      // Not JSON after all.
+    }
+  }
+  return value.replace(BYPASS_PARAM, "$1****");
+}
+
 function redactSensitiveFields(obj: unknown): unknown {
+  if (typeof obj === "string") return redactString(obj);
   if (Array.isArray(obj)) {
     return obj.map((item) => redactSensitiveFields(item));
   }
@@ -79,6 +105,19 @@ function redactSensitiveFields(obj: unknown): unknown {
     for (const [key, val] of Object.entries(obj)) {
       if (isSensitiveKey(key) && typeof val === "string") {
         result[key] = redactValue(val);
+      } else if (
+        key.toLowerCase() === "protectionbypass" &&
+        val !== null &&
+        typeof val === "object" &&
+        !Array.isArray(val)
+      ) {
+        // Vercel keys this map by the bypass secrets themselves.
+        result[key] = Object.fromEntries(
+          Object.entries(val).map(([secret, details]) => [
+            redactValue(secret),
+            redactSensitiveFields(details),
+          ]),
+        );
       } else {
         result[key] = redactSensitiveFields(val);
       }
@@ -118,7 +157,7 @@ export function enableFetchDebugLogging(): void {
     const method = init?.method ?? "GET";
     const url = input instanceof Request ? input.url : input.toString();
     const start = performance.now();
-    log.debug(`-> ${method} ${url}`);
+    log.debug(`-> ${method} ${url.replace(BYPASS_PARAM, "$1****")}`);
     log.debug(`   headers: ${formatHeaders(init?.headers)}`);
     if (typeof init?.body === "string")
       log.debug(`   body: ${redactBody(init.body)}`);

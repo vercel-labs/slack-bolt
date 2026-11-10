@@ -1,18 +1,24 @@
-import { deleteSlackApp } from "./internal/slack";
+import { log } from "../internal/logger";
+import { deleteSlackApp } from "../internal/slack";
 import {
   deleteEnvironmentVariable,
   getActiveBranches,
   getEnvironmentVariable,
   getEnvironmentVariables,
-} from "./internal/vercel";
-import { log } from "./logger";
+} from "../internal/vercel";
 
+/**
+ * Every branch-scoped variable `preview` can create for a branch's Slack app.
+ * Cleanup deletes all of them, so a stale branch leaves no credentials behind.
+ */
 const SLACK_ENV_VAR_KEYS = [
   "SLACK_APP_ID",
   "SLACK_CLIENT_ID",
   "SLACK_CLIENT_SECRET",
   "SLACK_SIGNING_SECRET",
   "SLACK_BOT_TOKEN",
+  "SLACK_APP_LEVEL_TOKEN",
+  "SLACK_USER_TOKEN",
 ];
 
 export async function cleanupOrphanedApps({

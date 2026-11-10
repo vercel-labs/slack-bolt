@@ -177,6 +177,37 @@ describe("createNewManifest", () => {
       );
     });
 
+    it("should rewrite the external select options URL with bypass secret", () => {
+      const original = baseManifest();
+      original.settings!.interactivity!.message_menu_options_url =
+        "https://prod.example.com/api/slack/options";
+
+      const result = createNewManifest({
+        originalManifest: original,
+        ...defaultParams,
+      });
+
+      const url = new URL(
+        result.settings!.interactivity!.message_menu_options_url!,
+      );
+      expect(url.hostname).toBe("my-branch.vercel.app");
+      expect(url.pathname).toBe("/api/slack/options");
+      expect(url.searchParams.get("x-vercel-protection-bypass")).toBe(
+        "bypass123",
+      );
+    });
+
+    it("should leave the options URL unset when the manifest has none", () => {
+      const result = createNewManifest({
+        originalManifest: baseManifest(),
+        ...defaultParams,
+      });
+
+      expect(
+        result.settings!.interactivity!.message_menu_options_url,
+      ).toBeUndefined();
+    });
+
     it("should rewrite slash command URLs with bypass secret", () => {
       const result = createNewManifest({
         originalManifest: baseManifest(),
