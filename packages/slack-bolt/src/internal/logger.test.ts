@@ -381,6 +381,39 @@ describe("registered secrets", () => {
     ).toBe("✗ Slack refused ****85a5\n  Generate a new one.");
   });
 
+  // Indenting first would put spaces after the break, and the secret would
+  // no longer match.
+  it("are taken out whole when they have a line break in them", () => {
+    const broken = "first-half-of-a-token\nsecond-half-of-a-token";
+    registerSecret(broken);
+
+    log.info(`Header "Bearer ${broken}" is invalid`);
+    log.failure(`Header "Bearer ${broken}" is invalid`);
+
+    for (const out of [lines(printed), lines(errors)]) {
+      expect(out).not.toContain("first-half");
+      expect(out).not.toContain("second-half");
+      expect(out).toContain('Header "Bearer ****oken" is invalid');
+    }
+  });
+
+  it("keep the body of a failed request clean too, not only its message", () => {
+    const error = new HTTPError(
+      "Failed to create deployment",
+      400,
+      "Bad Request",
+      `{"error":{"code":"bad_request","message":"bad env ${SIGNING}"}}`,
+    );
+
+    expect(error.body).toBe(
+      '{"error":{"code":"bad_request","message":"bad env ****85a5"}}',
+    );
+    expect(error.message).toBe(
+      "Failed to create deployment: 400 Bad Request - bad_request: bad env ****85a5",
+    );
+    expect(JSON.stringify({ ...error })).not.toContain(SIGNING);
+  });
+
   it("keeps every line of a message indented under its step", () => {
     log.info(
       "Slack refused the token. Generate a new one:\nhttps://example.com",

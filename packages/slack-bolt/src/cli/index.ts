@@ -1,8 +1,10 @@
 import { Command } from "commander";
 import {
   enableFetchDebugLogging,
+  indent,
   log,
   registerSecret,
+  scrub,
   startMessage,
 } from "../internal/logger";
 import { executeBuild } from "./build";
@@ -91,9 +93,7 @@ export function run(version: string): Promise<void> {
         failure = failure.cause
       ) {
         if (failure !== error) {
-          log.error(
-            `  Caused by: ${failure.message.replace(/\n(?=.)/g, "\n    ")}`,
-          );
+          log.error(`  Caused by: ${indent(scrub(failure.message), "    ")}`);
         }
         // Slack rejects a manifest with one entry per problem and where it
         // is, on the error for the call that sent it.

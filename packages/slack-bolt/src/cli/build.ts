@@ -269,8 +269,6 @@ export async function executeBuild(
     );
   }
 
-  await ensureConfigToken(params);
-
   if (!params.branch) {
     throw new Error(
       "VERCEL_GIT_COMMIT_REF is not set\nConnect a Git repository to your Vercel project: https://vercel.com/docs/git",
@@ -294,6 +292,10 @@ export async function executeBuild(
   if (!fs.existsSync(manifestFullPath)) {
     throw new Error(noManifest(params.manifestPath));
   }
+
+  // Last of the checks: rotating replaces the stored tokens, and the new ones
+  // can only be saved with a Vercel token that works.
+  await ensureConfigToken(params);
 
   if (options?.cleanup) {
     log.step("Cleaning up Slack apps of inactive branches");

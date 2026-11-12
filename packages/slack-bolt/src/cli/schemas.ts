@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertToken } from "../internal/tokens";
 import type { PreviewParams } from "../preview";
 
 function formatMissingKeys(error: z.ZodError): string {
@@ -30,6 +31,15 @@ const slackEnvSchema = z.object({
 const vercelEnvSchema = z.object({
   VERCEL_API_TOKEN: z.string(),
 });
+
+/**
+ * A token as it was meant: without the space or line break a paste can leave
+ * around it, and refused when it has one inside.
+ */
+function token<T extends string | undefined>(name: string, value: T): T {
+  assertToken(name, value);
+  return value?.trim() as T;
+}
 
 export function validateAndBuildParams(
   env: Record<string, string | undefined>,
@@ -70,12 +80,24 @@ export function validateAndBuildParams(
     deploymentId: systemResult.data.VERCEL_DEPLOYMENT_ID,
     automationBypassSecret: systemResult.data.VERCEL_AUTOMATION_BYPASS_SECRET,
     slackAppId: slackResult.data.SLACK_APP_ID,
-    slackConfigurationToken: slackResult.data.SLACK_CONFIGURATION_TOKEN,
-    slackConfigRefreshToken: slackResult.data.SLACK_CONFIG_REFRESH_TOKEN,
-    slackServiceToken: slackResult.data.SLACK_SERVICE_TOKEN,
+    slackConfigurationToken: token(
+      "SLACK_CONFIGURATION_TOKEN",
+      slackResult.data.SLACK_CONFIGURATION_TOKEN,
+    ),
+    slackConfigRefreshToken: token(
+      "SLACK_CONFIG_REFRESH_TOKEN",
+      slackResult.data.SLACK_CONFIG_REFRESH_TOKEN,
+    ),
+    slackServiceToken: token(
+      "SLACK_SERVICE_TOKEN",
+      slackResult.data.SLACK_SERVICE_TOKEN,
+    ),
     // An empty MANIFEST_PATH, like one left blank in the project's settings,
     // would name the working directory itself.
     manifestPath: slackResult.data.MANIFEST_PATH || "manifest.json",
-    vercelApiToken: vercelResult.data.VERCEL_API_TOKEN,
+    vercelApiToken: token(
+      "VERCEL_API_TOKEN",
+      vercelResult.data.VERCEL_API_TOKEN,
+    ),
   };
 }

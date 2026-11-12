@@ -719,6 +719,61 @@ describe("executeBuild", () => {
     await expect(executeBuild(createParams())).rejects.toBe(down);
   });
 
+  // Rotating replaces the stored tokens, and the new ones can only be saved
+  // with a Vercel token that works. So nothing that can fail for free comes
+  // after it.
+  describe("before rotating an expired configuration token", () => {
+    beforeEach(() => {
+      vi.mocked(authTest).mockRejectedValue(expired());
+      vi.mocked(rotateConfigToken).mockResolvedValue({
+        token: "new-config-token",
+        refreshToken: "new-refresh-token",
+        exp: 0,
+      });
+    });
+    const params = (overrides: Partial<PreviewParams> = {}) =>
+      createParams({
+        slackConfigRefreshToken: "old-refresh-token",
+        ...overrides,
+      });
+
+    it("checks the Vercel token", async () => {
+      vi.mocked(getProject).mockRejectedValue(new Error("403"));
+
+      await expect(executeBuild(params())).rejects.toThrow(
+        "VERCEL_API_TOKEN can't access this project",
+      );
+
+      expect(authTest).not.toHaveBeenCalled();
+      expect(rotateConfigToken).not.toHaveBeenCalled();
+    });
+
+    it("checks the branch", async () => {
+      await expect(executeBuild(params({ branch: "" }))).rejects.toThrow(
+        "VERCEL_GIT_COMMIT_REF is not set",
+      );
+
+      expect(rotateConfigToken).not.toHaveBeenCalled();
+    });
+
+    it("checks the manifest is there", async () => {
+      await expect(
+        executeBuild(params({ manifestPath: "missing.json" })),
+      ).rejects.toThrow("No manifest at missing.json");
+
+      expect(rotateConfigToken).not.toHaveBeenCalled();
+    });
+
+    it("rotates once all of those pass", async () => {
+      await executeBuild(params());
+
+      expect(rotateConfigToken).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(getProject).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(rotateConfigToken).mock.invocationCallOrder[0],
+      );
+    });
+  });
+
   it("fails when the branch isn't known", async () => {
     await expect(executeBuild(createParams({ branch: "" }))).rejects.toThrow(
       "VERCEL_GIT_COMMIT_REF is not set",

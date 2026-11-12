@@ -7,6 +7,7 @@ import { parseManifest, stringifyManifest } from "./manifest/parse";
 import type { Manifest } from "./manifest/types";
 import { installApp, removeSlackApp, upsertSlackApp } from "./slack";
 import type { InstallResult } from "./slack/types";
+import { assertToken } from "./tokens";
 import { addEnvironmentVariables, updateProtectionBypass } from "./vercel";
 import type { CreateProjectEnv } from "./vercel/types";
 
@@ -185,6 +186,12 @@ export async function provisionPreview(
     slackServiceToken,
     vercelApiToken,
   );
+
+  // The CLI checks its variables by name before this. A caller of `preview`
+  // gets the same answer here, in place of fetch's, which quotes the token.
+  assertToken("slackConfigurationToken", slackConfigurationToken);
+  assertToken("slackServiceToken", slackServiceToken);
+  assertToken("vercelApiToken", vercelApiToken);
 
   if (cli) log.step(`Reading manifest from ${manifestPath}`);
   const manifest = readManifest(manifestPath);

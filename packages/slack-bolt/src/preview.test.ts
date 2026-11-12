@@ -463,6 +463,19 @@ describe("a branch's first preview", () => {
     });
   });
 
+  // fetch refuses such a token as a header with an error that quotes it.
+  it("refuses a token with a line break inside it, before any request", async () => {
+    const error = await preview({
+      ...params,
+      slackConfigurationToken: "xoxe.xoxp-first-half\nsecond-half",
+    }).catch((e: Error) => e);
+
+    expect((error as Error).message).toBe(
+      "slackConfigurationToken contains a line break, space or non-ASCII character, so it isn't a valid token\nCopy it again in one piece and save it.",
+    );
+    expect(calls).toEqual([]);
+  });
+
   describe("with a manifest it can't use", () => {
     const write = (content: string) =>
       fs.writeFileSync(path.join(dir, "manifest.json"), content);

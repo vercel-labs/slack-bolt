@@ -74,6 +74,49 @@ describe("validateAndBuildParams", () => {
     ).toBe("manifest.json");
   });
 
+  // A paste can leave a line break after a token, and fetch drops it from a
+  // header anyway.
+  it("takes the space and line breaks from around a token", () => {
+    expect(
+      validateAndBuildParams({
+        ...env,
+        SLACK_CONFIGURATION_TOKEN: " config-token\n",
+        SLACK_CONFIG_REFRESH_TOKEN: "refresh-token\r\n",
+        SLACK_SERVICE_TOKEN: "\tservice-token",
+        VERCEL_API_TOKEN: "vercel-token \n",
+      }),
+    ).toMatchObject({
+      slackConfigurationToken: "config-token",
+      slackConfigRefreshToken: "refresh-token",
+      slackServiceToken: "service-token",
+      vercelApiToken: "vercel-token",
+    });
+  });
+
+  // Like a token copied across a wrapped line. fetch refuses it as a header
+  // with an error that quotes it, before anything reaches Slack.
+  it.each([
+    ["SLACK_CONFIGURATION_TOKEN", "config-\ntoken"],
+    ["SLACK_CONFIG_REFRESH_TOKEN", "refresh token"],
+    ["SLACK_SERVICE_TOKEN", "service—token"],
+    ["VERCEL_API_TOKEN", "vercel\ttoken"],
+  ])(
+    "refuses a %s with a break inside it, without repeating it",
+    (key, value) => {
+      const failure = (() => {
+        try {
+          validateAndBuildParams({ ...env, [key]: value });
+        } catch (error) {
+          return (error as Error).message;
+        }
+      })();
+
+      expect(failure).toBe(
+        `${key} contains a line break, space or non-ASCII character, so it isn't a valid token\nCopy it again in one piece and save it.`,
+      );
+    },
+  );
+
   it("names the missing Vercel system variables", () => {
     expect(() =>
       validateAndBuildParams(without("VERCEL_GIT_COMMIT_REF", "VERCEL_URL")),

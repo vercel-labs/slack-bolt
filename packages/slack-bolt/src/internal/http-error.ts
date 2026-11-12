@@ -18,17 +18,23 @@ function summarize(body: string): string {
 }
 
 export class HTTPError extends Error {
+  /** The response body, with secrets taken out like the message's. */
+  public body?: string;
+
   constructor(
     message: string,
     public status: number,
     public statusText: string,
-    public body?: string,
+    body?: string,
   ) {
+    // The answer is from Slack or Vercel, and ends up in logs: the error's
+    // message in the CLI's, and the whole error in a caller's that prints it.
+    const safe = body === undefined ? undefined : scrub(body);
     // HTTP/2 responses have no status text.
     const parts = [`${message}: ${status} ${statusText}`.trimEnd()];
-    // The answer is from Slack or Vercel, and ends up in build logs.
-    if (body) parts.push(scrub(summarize(body)));
+    if (safe) parts.push(summarize(safe));
     super(parts.join(" - "));
+    this.body = safe;
   }
 
   static async fromResponse(

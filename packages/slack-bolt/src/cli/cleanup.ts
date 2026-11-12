@@ -95,31 +95,42 @@ export async function cleanupOrphanedApps({
       continue;
     }
 
-    if (appId) {
-      const removed = await removeSlackApp({
-        token: slackConfigurationToken,
-        appId,
-      });
-      if (removed.status === "failed") {
-        leftBehind++;
-        log.warning(
-          `Couldn't delete app ${appId} of branch ${branch}: ${message(removed.error)}`,
-        );
-        // An outage or a refused token passes. A refusal for this app gets
-        // the same answer on every build, until someone steps in.
-        log.info(
-          isTransient(removed.error) || isTokenError(removed.error)
-            ? KEPT
-            : `Slack will refuse again. Delete the app (https://api.slack.com/apps/${appId}), or if it isn't yours, the branch's SLACK_ variables in Vercel.`,
-        );
-        continue;
-      }
-      log.info(
-        removed.status === "gone"
-          ? `App ${appId} of branch ${branch} was already deleted`
-          : `Deleted app ${appId} of branch ${branch}`,
+    // Vercel returns no value for a Sensitive variable. Without the ID the
+    // app can't be deleted, and deleting the variables would lose it.
+    if (!appId) {
+      leftBehind++;
+      log.warning(
+        `Couldn't read SLACK_APP_ID of branch ${branch}: Vercel returned no value`,
       );
+      log.info(
+        "Kept the branch's variables. If SLACK_APP_ID is Sensitive, delete the branch's app and SLACK_ variables yourself.",
+      );
+      continue;
     }
+
+    const removed = await removeSlackApp({
+      token: slackConfigurationToken,
+      appId,
+    });
+    if (removed.status === "failed") {
+      leftBehind++;
+      log.warning(
+        `Couldn't delete app ${appId} of branch ${branch}: ${message(removed.error)}`,
+      );
+      // An outage or a refused token passes. A refusal for this app gets
+      // the same answer on every build, until someone steps in.
+      log.info(
+        isTransient(removed.error) || isTokenError(removed.error)
+          ? KEPT
+          : `Slack will refuse again. Delete the app (https://api.slack.com/apps/${appId}), or if it isn't yours, the branch's SLACK_ variables in Vercel.`,
+      );
+      continue;
+    }
+    log.info(
+      removed.status === "gone"
+        ? `App ${appId} of branch ${branch} was already deleted`
+        : `Deleted app ${appId} of branch ${branch}`,
+    );
 
     let deletedAll = true;
     for (const env of envs) {

@@ -69,6 +69,14 @@ export function scrub(text: string): string {
     .replace(VERCEL_TOKEN, redactValue);
 }
 
+/**
+ * Puts the lines after the first under it. Always after `scrub`: a secret
+ * with a line break in it stops matching once the break is followed by
+ * indentation.
+ */
+export const indent = (message: string, by = "  ") =>
+  message.replace(/\n(?=.)/g, `\n${by}`);
+
 const text = (value: unknown) =>
   typeof value === "string" ? value : String(value);
 
@@ -78,14 +86,13 @@ export const log = {
   step: (msg: string) => console.log(scrub(`  ${msg} ...`)),
   success: (msg: string) => console.log(`${GREEN}✓${RESET} ${scrub(msg)}`),
   // Indented under the step it belongs to, each line of it.
-  info: (msg: string) =>
-    console.log(scrub(`  ${msg}`.replace(/\n(?=.)/g, "\n  "))),
+  info: (msg: string) => console.log(`  ${indent(scrub(msg))}`),
   warning: (msg: string) => console.log(`${YELLOW}⚠${RESET} ${scrub(msg)}`),
   error: (...args: unknown[]) =>
     console.error(...args.map((arg) => scrub(text(arg)))),
   /** What stopped the build: a headline, then what to do under it. */
   failure: (msg: string) =>
-    console.error(`${RED}✗${RESET} ${scrub(msg.replace(/\n(?=.)/g, "\n  "))}`),
+    console.error(`${RED}✗${RESET} ${indent(scrub(msg))}`),
   debug: (...args: unknown[]) => {
     if (isDebug()) {
       console.debug(`${DIM}${scrub(args.map(text).join(" "))}${RESET}`);

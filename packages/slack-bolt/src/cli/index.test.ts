@@ -167,6 +167,29 @@ describe("vercel-slack build", () => {
     expect(printed).toContain("Request with ****-env failed");
   });
 
+  // What fetch throws for a token copied across a wrapped line: its message
+  // quotes the header, break included.
+  it("keeps a secret with a line break in it out of a cause", async () => {
+    const broken = "first-half-of-a-token\nsecond-half-of-a-token";
+    vi.stubEnv("SLACK_CONFIGURATION_TOKEN", broken);
+    vi.mocked(executeBuild).mockRejectedValue(
+      new Error("Couldn't reach Slack", {
+        cause: new TypeError(
+          `Headers.append: "Bearer ${broken}" is an invalid header value.`,
+        ),
+      }),
+    );
+
+    await run("0.0.0");
+
+    const printed = printedErrors().join("\n");
+    expect(printed).not.toContain("first-half");
+    expect(printed).not.toContain("second-half");
+    expect(printed).toContain(
+      '  Caused by: Headers.append: "Bearer ****oken" is an invalid header value.',
+    );
+  });
+
   it("exits with code 1 when required env vars are missing", async () => {
     vi.mocked(validateAndBuildParams).mockImplementationOnce(() => {
       throw new Error("Missing VERCEL_API_TOKEN");

@@ -315,6 +315,39 @@ describe("cleanupOrphanedApps", () => {
       );
     });
 
+    // What Vercel answers for a Sensitive variable. Without the ID the app
+    // can't be deleted, and without the variable it can't be found again.
+    it.each([
+      ["no value", {}],
+      ["an empty value", { value: "" }],
+    ])(
+      "should keep the branch's variables when its SLACK_APP_ID has %s",
+      async (_, answer) => {
+        stub({
+          vercel: (envId, method) =>
+            envId === "env_app" && method === "GET"
+              ? jsonResponse(answer)
+              : undefined,
+        });
+
+        await cleanupOrphanedApps(defaultArgs);
+
+        expect(deletedEnvIds()).toEqual([]);
+        expect(
+          mockFetch.mock.calls.filter(([input]) =>
+            input.toString().includes("slack.com"),
+          ),
+        ).toEqual([]);
+        expect(printed()).toContain(
+          "Couldn't read SLACK_APP_ID of branch feature-gone: Vercel returned no value",
+        );
+        expect(printed()).toContain(
+          "Kept the branch's variables. If SLACK_APP_ID is Sensitive, delete the branch's app and SLACK_ variables yourself.",
+        );
+        expect(printed()).not.toContain("Cleaned up");
+      },
+    );
+
     it("should keep SLACK_APP_ID when another of the branch's variables can't be deleted", async () => {
       stub({
         vercel: (envId, method) =>
