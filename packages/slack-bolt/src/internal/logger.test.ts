@@ -368,6 +368,19 @@ describe("registered secrets", () => {
     expect(error.message).toContain("Failed to create deployment: 400");
   });
 
+  it("marks what stopped the build, with the rest of it underneath", () => {
+    log.failure(`Slack refused ${SIGNING}\nGenerate a new one.`);
+
+    expect(
+      lines(errors)
+        .split("\u001b[")
+        .map((part: string, i: number) =>
+          i === 0 ? part : part.slice(part.indexOf("m") + 1),
+        )
+        .join(""),
+    ).toBe("✗ Slack refused ****85a5\n  Generate a new one.");
+  });
+
   it("keeps every line of a message indented under its step", () => {
     log.info(
       "Slack refused the token. Generate a new one:\nhttps://example.com",

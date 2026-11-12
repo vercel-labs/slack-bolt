@@ -20,7 +20,11 @@ import type { PreviewParams } from "../preview";
 import { executeBuild } from "./build";
 import { cleanupOrphanedApps } from "./cleanup";
 
-vi.mock("../internal/provision", () => ({ provisionPreview: vi.fn() }));
+// Keep the real messages; only the work is fake.
+vi.mock("../internal/provision", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../internal/provision")>()),
+  provisionPreview: vi.fn(),
+}));
 vi.mock("./cleanup", () => ({ cleanupOrphanedApps: vi.fn() }));
 // Keep the real error classes and checks; only the calls to Slack are fake.
 vi.mock("../internal/slack", async (importOriginal) => ({
@@ -162,6 +166,16 @@ describe("executeBuild", () => {
         token: "vercel-token",
         teamId: "team_456",
       });
+      // Vercel shows this build as Canceled, so the log says why.
+      expect(printed()).toContain(
+        "Starting a new deployment that has SLACK_APP_ID, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN ...",
+      );
+      expect(printed()).toContain(
+        "New deployment: my-app-next.vercel.app (dpl_next)",
+      );
+      expect(printed()).toContain(
+        "Canceling this deployment, which the new one replaces ...",
+      );
       // Cancelling first would cancel the build that creates the new one.
       expect(
         vi.mocked(createDeployment).mock.invocationCallOrder[0],
@@ -194,7 +208,10 @@ describe("executeBuild", () => {
       expect(createDeployment).not.toHaveBeenCalled();
       expect(cancelDeployment).not.toHaveBeenCalled();
       expect(printed()).toContain(
-        "Saved SLACK_APP_ID, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN for feat/thing, but VERCEL_DEPLOYMENT_ID isn't set, so this deployment can't be replaced. They apply from the branch's next deployment.",
+        "Saved SLACK_APP_ID, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN for feat/thing, but this deployment was built without them",
+      );
+      expect(printed()).toContain(
+        "Redeploy the branch to pick them up. vercel-slack can't: VERCEL_DEPLOYMENT_ID is not set.",
       );
     });
 
@@ -221,7 +238,7 @@ describe("executeBuild", () => {
         vi.mocked(provisionPreview).mockResolvedValue(created);
 
         await expect(executeBuild(createParams())).rejects.toThrow(
-          "didn't get the app's SLACK_APP_ID, and created another app (A1)",
+          "Created Slack app A1, but not redeploying again: vercel-slack already started this deployment\nThe app's variables are saved. Redeploy the branch to use it, and delete the branch's earlier app if one is left: https://api.slack.com/apps",
         );
 
         expect(getDeploymentMeta).toHaveBeenCalledWith({
@@ -241,7 +258,10 @@ describe("executeBuild", () => {
         expect(createDeployment).not.toHaveBeenCalled();
         expect(cancelDeployment).not.toHaveBeenCalled();
         expect(printed()).toContain(
-          "Saved SLACK_BOT_TOKEN for feat/thing, but this deployment already replaced one for the same reason. It applies from the branch's next deployment.",
+          "Saved SLACK_BOT_TOKEN for feat/thing, but this deployment was built without it",
+        );
+        expect(printed()).toContain(
+          "Redeploy the branch to pick it up. vercel-slack already redeployed once, and doesn't again.",
         );
       });
     });
@@ -285,7 +305,7 @@ describe("executeBuild", () => {
     it("fails when it's empty", async () => {
       await expect(
         executeBuild(createParams({ slackConfigurationToken: "" })),
-      ).rejects.toThrow("Slack Configuration Token is not set.");
+      ).rejects.toThrow("Missing SLACK_CONFIGURATION_TOKEN\n");
 
       expect(authTest).not.toHaveBeenCalled();
     });
@@ -296,8 +316,8 @@ describe("executeBuild", () => {
 
       const error = await executeBuild(createParams()).catch((e: Error) => e);
 
-      expect(error?.message).toContain(
-        "Slack configuration token is invalid or expired. Provide SLACK_CONFIG_REFRESH_TOKEN",
+      expect(error?.message).toBe(
+        "Slack refused SLACK_CONFIGURATION_TOKEN\nConfiguration tokens expire after 12 hours. Generate a new one and save it in Vercel, or set SLACK_CONFIG_REFRESH_TOKEN to have builds rotate it: https://api.slack.com/apps",
       );
       expect(error?.cause).toBe(refused);
       expect(rotateConfigToken).not.toHaveBeenCalled();
@@ -321,7 +341,7 @@ describe("executeBuild", () => {
       const error = await executeBuild(withRefresh()).catch((e: Error) => e);
 
       expect(error?.message).toBe(
-        "Couldn't reach Slack to check SLACK_CONFIGURATION_TOKEN. Redeploy to try again.",
+        "Couldn't reach Slack to check SLACK_CONFIGURATION_TOKEN\nRedeploy to try again.",
       );
       expect(error?.cause).toBe(unreachable);
       expect(rotateConfigToken).not.toHaveBeenCalled();
@@ -459,7 +479,7 @@ describe("executeBuild", () => {
       const error = await executeBuild(withRefresh()).catch((e: Error) => e);
 
       expect(error?.message).toContain(
-        "couldn't save the new tokens to your Vercel project",
+        "Rotated SLACK_CONFIGURATION_TOKEN, but couldn't save the new tokens to Vercel\n",
       );
       expect(error?.cause).toBe(down);
       expect(addEnvironmentVariables).toHaveBeenCalledTimes(3);
@@ -479,9 +499,9 @@ describe("executeBuild", () => {
       const error = await executeBuild(withRefresh()).catch((e: Error) => e);
 
       expect(error?.message).toContain(
-        "couldn't save the new tokens to your Vercel project",
+        "Rotated SLACK_CONFIGURATION_TOKEN, but couldn't save the new tokens to Vercel\n",
       );
-      expect(error?.message).not.toContain("refresh token may be invalid");
+      expect(error?.message).not.toContain("Slack refused");
       expect(error?.message).not.toContain("new-config-token");
       expect(error?.cause).toBe(forbidden);
       expect(addEnvironmentVariables).toHaveBeenCalledTimes(1);
@@ -498,8 +518,8 @@ describe("executeBuild", () => {
 
       const error = await executeBuild(withRefresh()).catch((e: Error) => e);
 
-      expect(error?.message).toContain(
-        "Failed to rotate configuration token — refresh token may be invalid.",
+      expect(error?.message).toBe(
+        "Couldn't rotate SLACK_CONFIGURATION_TOKEN: Slack refused SLACK_CONFIG_REFRESH_TOKEN\nGenerate both tokens again and save them in Vercel: https://api.slack.com/apps",
       );
       expect(error?.cause).toBe(refused);
       expect(addEnvironmentVariables).not.toHaveBeenCalled();
@@ -513,7 +533,7 @@ describe("executeBuild", () => {
       const error = await executeBuild(withRefresh()).catch((e: Error) => e);
 
       expect(error?.message).toBe(
-        "Couldn't reach Slack to rotate SLACK_CONFIGURATION_TOKEN. Redeploy to try again.",
+        "Couldn't reach Slack to rotate SLACK_CONFIGURATION_TOKEN\nRedeploy to try again.",
       );
       expect(error?.cause).toBe(down);
       // Only the look before rotating.
@@ -652,7 +672,7 @@ describe("executeBuild", () => {
           );
 
           expect(error?.message).toContain(
-            "Failed to rotate configuration token — refresh token may be invalid.",
+            "Couldn't rotate SLACK_CONFIGURATION_TOKEN: Slack refused SLACK_CONFIG_REFRESH_TOKEN",
           );
           expect(error?.cause).toMatchObject({ code: "invalid_refresh_token" });
           // Once before rotating, then five times after.
@@ -665,16 +685,38 @@ describe("executeBuild", () => {
     });
   });
 
-  it("warns and carries on when the service token is invalid", async () => {
-    vi.mocked(authTest)
-      .mockResolvedValueOnce({ userId: "U1", teamId: "T1" })
-      .mockRejectedValueOnce(new SlackAPIError("auth.test", "invalid_auth"));
-
+  // The install says what's wrong with the service token, once. Checking
+  // it first as well said it twice.
+  it("doesn't check the service token before the install does", async () => {
     await executeBuild(createParams({ slackServiceToken: "bad-service" }));
 
-    expect(authTest).toHaveBeenNthCalledWith(2, { token: "bad-service" });
-    expect(printed()).toContain("SLACK_SERVICE_TOKEN is invalid");
+    expect(authTest).toHaveBeenCalledTimes(1);
+    expect(authTest).toHaveBeenCalledWith({ token: "config-token" });
     expect(provisionPreview).toHaveBeenCalled();
+  });
+
+  // Slack's own error names the API method, not the file to fix.
+  it("names the manifest file when Slack rejects it", async () => {
+    const rejected = new SlackAPIError(
+      "apps.manifest.update",
+      "invalid_manifest",
+      [{ message: "too long", pointer: "/display_information/name" }],
+    );
+    vi.mocked(provisionPreview).mockRejectedValue(rejected);
+
+    const error = await executeBuild(createParams()).catch((e: Error) => e);
+
+    expect(error?.message).toBe(
+      "Slack rejected manifest.json\nFix the problems below, then redeploy.",
+    );
+    expect(error?.cause).toBe(rejected);
+  });
+
+  it("passes on any other failure as it is", async () => {
+    const down = new SlackAPIError("apps.manifest.update", "internal_error");
+    vi.mocked(provisionPreview).mockRejectedValue(down);
+
+    await expect(executeBuild(createParams())).rejects.toBe(down);
   });
 
   it("fails when the branch isn't known", async () => {
@@ -691,8 +733,8 @@ describe("executeBuild", () => {
 
     const error = await executeBuild(createParams()).catch((e: Error) => e);
 
-    expect(error?.message).toContain(
-      "Vercel API token cannot access this project.",
+    expect(error?.message).toBe(
+      "VERCEL_API_TOKEN can't access this project\nCheck that it's valid, hasn't expired, and covers the project's team: https://vercel.com/account/settings/tokens",
     );
     expect(error?.cause).toBe(forbidden);
     expect(provisionPreview).not.toHaveBeenCalled();
@@ -701,7 +743,9 @@ describe("executeBuild", () => {
   it("fails before touching Slack when the manifest is missing", async () => {
     await expect(
       executeBuild(createParams({ manifestPath: "missing.json" })),
-    ).rejects.toThrow("No manifest found at missing.json.");
+    ).rejects.toThrow(
+      "No manifest at missing.json\nCreate one, or set MANIFEST_PATH to where yours is: https://docs.slack.dev/reference/manifests",
+    );
 
     expect(provisionPreview).not.toHaveBeenCalled();
   });
@@ -730,7 +774,7 @@ describe("executeBuild", () => {
       await executeBuild(createParams(), { cleanup: true });
 
       expect(printed()).toContain(
-        "Orphan cleanup failed: Failed to fetch active branches: 500",
+        "Cleanup failed: Failed to fetch active branches: 500",
       );
       expect(provisionPreview).toHaveBeenCalled();
     });

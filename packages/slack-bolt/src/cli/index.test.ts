@@ -26,6 +26,15 @@ afterEach(() => {
   vi.mocked(executeBuild).mockReset();
 });
 
+/** What went to stderr, without colour codes. */
+const printedErrors = () =>
+  vi.mocked(console.error).mock.calls.map(([line]) =>
+    String(line)
+      .split("\u001b[")
+      .map((part, i) => (i === 0 ? part : part.slice(part.indexOf("m") + 1)))
+      .join(""),
+  );
+
 describe("vercel-slack build", () => {
   it("exits with code 1 when the build fails", async () => {
     vi.mocked(executeBuild).mockRejectedValue(
@@ -44,19 +53,20 @@ describe("vercel-slack build", () => {
 
   it("prints what caused the failure, down the chain", async () => {
     vi.mocked(executeBuild).mockRejectedValue(
-      new Error("Vercel API token cannot access this project.", {
+      new Error("VERCEL_API_TOKEN can't access this project\nCheck it.", {
         cause: new Error("Failed to access Vercel project: 403 Forbidden", {
-          cause: new Error("socket hang up"),
+          cause: new Error("socket hang up\nat line 2"),
         }),
       }),
     );
 
     await run("0.0.0");
 
-    expect(vi.mocked(console.error).mock.calls.map(([line]) => line)).toEqual([
-      "Vercel API token cannot access this project.",
+    // The headline is marked, and each further line sits under its first.
+    expect(printedErrors()).toEqual([
+      "✗ VERCEL_API_TOKEN can't access this project\n  Check it.",
       "  Caused by: Failed to access Vercel project: 403 Forbidden",
-      "  Caused by: socket hang up",
+      "  Caused by: socket hang up\n    at line 2",
     ]);
   });
 
@@ -75,7 +85,7 @@ describe("vercel-slack build", () => {
     await run("0.0.0");
 
     expect(console.error).toHaveBeenCalledWith(
-      "  /settings/interactivity: Interactivity requires a Request URL",
+      "    /settings/interactivity: Interactivity requires a Request URL",
     );
     expect(process.exitCode).toBe(1);
   });
@@ -101,10 +111,10 @@ describe("vercel-slack build", () => {
 
     await run("0.0.0");
 
-    expect(vi.mocked(console.error).mock.calls.map(([line]) => line)).toEqual([
-      "Couldn't set up the Slack app.",
+    expect(printedErrors()).toEqual([
+      "✗ Couldn't set up the Slack app.",
       "  Caused by: Slack's apps.manifest.update failed: invalid_manifest",
-      "  /display_information/name: must be less than 36 characters",
+      "    /display_information/name: must be less than 36 characters",
     ]);
   });
 
@@ -178,15 +188,21 @@ describe("vercel-slack build", () => {
   });
 
   it.each([
-    ["local", undefined],
-    ["development", "development"],
-    ["production", "production"],
-  ])("skips without failing on %s builds", async (_, env) => {
-    vi.stubEnv("VERCEL_ENV", env);
+    ["local", undefined, "VERCEL_ENV is not set"],
+    ["development", "development", "VERCEL_ENV is development"],
+    ["production", "production", "VERCEL_ENV is production"],
+  ])(
+    "skips without failing on %s builds, and says why",
+    async (_, env, why) => {
+      vi.stubEnv("VERCEL_ENV", env);
 
-    await run("0.0.0");
+      await run("0.0.0");
 
-    expect(executeBuild).not.toHaveBeenCalled();
-    expect(process.exitCode).toBeUndefined();
-  });
+      expect(executeBuild).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+      expect(console.log).toHaveBeenCalledWith(
+        `  Skipped: only preview deployments get a Slack app (${why})`,
+      );
+    },
+  );
 });

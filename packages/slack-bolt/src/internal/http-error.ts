@@ -1,5 +1,22 @@
 import { scrub } from "./logger";
 
+/** Vercel's `{ error: { code, message } }` as "code: message"; else the body. */
+function summarize(body: string): string {
+  try {
+    const { error } = JSON.parse(body) as {
+      error?: { code?: unknown; message?: unknown };
+    };
+    if (typeof error?.code === "string") {
+      return typeof error.message === "string"
+        ? `${error.code}: ${error.message}`
+        : error.code;
+    }
+  } catch {
+    // Not JSON.
+  }
+  return body;
+}
+
 export class HTTPError extends Error {
   constructor(
     message: string,
@@ -10,7 +27,7 @@ export class HTTPError extends Error {
     // HTTP/2 responses have no status text.
     const parts = [`${message}: ${status} ${statusText}`.trimEnd()];
     // The answer is from Slack or Vercel, and ends up in build logs.
-    if (body) parts.push(scrub(body));
+    if (body) parts.push(scrub(summarize(body)));
     super(parts.join(" - "));
   }
 

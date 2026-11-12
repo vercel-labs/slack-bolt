@@ -411,7 +411,7 @@ git push → Vercel preview build
        ├─ Validates Slack and Vercel tokens
        │    └─ If expired and SLACK_CONFIG_REFRESH_TOKEN is set → auto-rotates
        │         and persists new tokens to Vercel env vars
-       ├─ Cleans up orphaned preview apps (--cleanup)
+       ├─ Cleans up Slack apps of inactive branches (--cleanup)
        ├─ Reads manifest.json
        ├─ Rewrites manifest URLs → preview deployment URL, and writes the file back
        ├─ Creates or updates Slack app via apps.manifest API

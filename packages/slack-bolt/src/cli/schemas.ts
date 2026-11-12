@@ -38,7 +38,7 @@ export function validateAndBuildParams(
   if (!systemResult.success) {
     const missing = formatMissingKeys(systemResult.error);
     throw new Error(
-      `Missing Vercel system environment variables: ${missing}\nEnable 'Automatically expose System Environment Variables' in your Vercel project settings:\nhttps://vercel.com/docs/projects/environment-variables/system-environment-variables`,
+      `Missing system environment variables: ${missing}\nTurn on "Automatically expose System Environment Variables" in your Vercel project: https://vercel.com/docs/projects/environment-variables/system-environment-variables`,
     );
   }
 
@@ -46,7 +46,7 @@ export function validateAndBuildParams(
   if (!slackResult.success) {
     const missing = formatMissingKeys(slackResult.error);
     throw new Error(
-      `Missing Slack environment variables: ${missing}\nAdd them as environment variables in your Vercel project.`,
+      `Missing ${missing}\nGenerate a configuration token and add it to your Vercel project: https://api.slack.com/apps`,
     );
   }
 
@@ -54,7 +54,7 @@ export function validateAndBuildParams(
   if (!vercelResult.success) {
     const missing = formatMissingKeys(vercelResult.error);
     throw new Error(
-      `Missing Vercel environment variables: ${missing}\nCreate a new token and add it as VERCEL_API_TOKEN in your Vercel project:\nhttps://vercel.com/account/settings/tokens`,
+      `Missing ${missing}\nCreate a token and add it to your Vercel project: https://vercel.com/account/settings/tokens`,
     );
   }
 

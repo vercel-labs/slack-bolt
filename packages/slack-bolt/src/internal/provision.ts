@@ -6,6 +6,7 @@ import { createNewManifest } from "./manifest";
 import { parseManifest, stringifyManifest } from "./manifest/parse";
 import type { Manifest } from "./manifest/types";
 import { installApp, removeSlackApp, upsertSlackApp } from "./slack";
+import type { InstallResult } from "./slack/types";
 import { addEnvironmentVariables, updateProtectionBypass } from "./vercel";
 import type { CreateProjectEnv } from "./vercel/types";
 
@@ -36,48 +37,118 @@ export type Provisioned = PreviewResult & {
   changedEnv: string[];
 };
 
+const MANIFEST_DOCS = "https://docs.slack.dev/reference/manifests";
+const SERVICE_TOKEN_DOCS =
+  "https://docs.slack.dev/authentication/tokens/#service";
+
+/** The error for a manifest that isn't where it's expected. */
+export const noManifest = (manifestPath: string) =>
+  `No manifest at ${manifestPath}\nCreate one, or set MANIFEST_PATH to where yours is: ${MANIFEST_DOCS}`;
+
 /** Reads and parses the manifest, with errors that name the file. */
 function readManifest(manifestPath: string): Manifest {
   let raw: string;
   try {
     raw = fs.readFileSync(path.join(process.cwd(), manifestPath), "utf8");
   } catch (error) {
-    throw new Error(
-      `No manifest found at ${manifestPath}. Create a manifest.json (or manifest.yaml) file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
-      { cause: error },
-    );
+    throw new Error(noManifest(manifestPath), { cause: error });
   }
 
   let manifest: Manifest | null;
   try {
     manifest = parseManifest(raw, manifestPath);
   } catch (error) {
-    throw new Error(`Couldn't parse the manifest at ${manifestPath}.`, {
-      cause: error,
-    });
+    throw new Error(`Couldn't parse ${manifestPath}`, { cause: error });
   }
 
   // The app's name is the one field the rewrite needs.
   const name = manifest?.display_information?.name;
   if (typeof name !== "string" || name === "") {
     throw new Error(
-      `The manifest at ${manifestPath} needs a display_information.name:\nhttps://docs.slack.dev/reference/manifests`,
+      `${manifestPath} has no display_information.name\nSlack requires one: ${MANIFEST_DOCS}`,
     );
   }
   return manifest as Manifest;
 }
 
-/** What to tell the user about an install Slack refused, by its error code. */
+const NEW_SERVICE_TOKEN = `Generate a new SLACK_SERVICE_TOKEN: ${SERVICE_TOKEN_DOCS}`;
+
+/** What to do about an install Slack refused, by its error code. */
 const INSTALL_HINTS: Record<string, string> = {
   service_limits_exceeded:
-    "The workspace has reached its app limit, which is 10 on Slack's free plan. Remove an app from the workspace or upgrade it, then redeploy.",
-  invalid_auth:
-    "Slack refused SLACK_SERVICE_TOKEN. Generate a new one:\nhttps://docs.slack.dev/authentication/tokens/#service",
-  token_expired:
-    "SLACK_SERVICE_TOKEN has expired. Generate a new one:\nhttps://docs.slack.dev/authentication/tokens/#service",
-  token_revoked:
-    "SLACK_SERVICE_TOKEN was revoked. Generate a new one:\nhttps://docs.slack.dev/authentication/tokens/#service",
+    "The workspace is at its app limit (10 on Slack's free plan). Remove an app or upgrade, then redeploy.",
+  invalid_auth: NEW_SERVICE_TOKEN,
+  not_authed: NEW_SERVICE_TOKEN,
+  token_expired: NEW_SERVICE_TOKEN,
+  token_revoked: NEW_SERVICE_TOKEN,
+  account_inactive: NEW_SERVICE_TOKEN,
 };
+
+/**
+ * Why this build didn't install the app, and what to do about it. `install`
+ * is the line that says where to install it by hand, when that would help.
+ */
+export function installAdvice(
+  status: Exclude<InstallResult["status"], "installed">,
+  reason: string | undefined,
+  appId: string,
+  install: string | undefined,
+): { headline: string; details: (string | undefined)[] } {
+  switch (status) {
+    case "missing_service_token":
+      return {
+        headline: "Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
+        details: [
+          install,
+          `To have builds install it, add a service token: ${SERVICE_TOKEN_DOCS}`,
+        ],
+      };
+    case "app_approval_request_eligible":
+      return {
+        headline:
+          "Couldn't install the app: a workspace admin has to approve it first",
+        details: ["Ask an admin to approve it, then redeploy."],
+      };
+    case "app_approval_request_pending":
+      return {
+        headline:
+          "Couldn't install the app: it's waiting for a workspace admin's approval",
+        details: ["Redeploy once it's approved."],
+      };
+    case "app_approval_request_denied":
+      return {
+        headline:
+          "Couldn't install the app: a workspace admin denied its approval request",
+        details: [],
+      };
+    case "no_access":
+      return {
+        headline: `Couldn't install the app: SLACK_SERVICE_TOKEN can't access app ${appId}`,
+        details: [
+          `Create the service token and the configuration token as the same Slack user: ${SERVICE_TOKEN_DOCS}`,
+        ],
+      };
+    case "invalid_app_id":
+      return {
+        headline: `Couldn't install the app: Slack doesn't recognize app ${appId}`,
+        details: [
+          "This is likely a bug in @vercel/slack-bolt. Please report it: https://github.com/vercel-labs/slack-bolt/issues",
+        ],
+      };
+    // Slack answered with an HTTP error, which says nothing about the app.
+    case "slack_api_error":
+      return {
+        headline: `Couldn't install the app: Slack answered ${reason ?? "with an error"}`,
+        details: ["Redeploy to try again."],
+      };
+    case "unknown_error":
+      // Say what Slack answered, so the cause can be fixed.
+      return {
+        headline: `Couldn't install the app: Slack answered ${reason ?? "with an unknown error"}`,
+        details: [(reason && INSTALL_HINTS[reason]) || install],
+      };
+  }
+}
 
 /**
  * Creates or updates the branch's Slack app, saves what the branch's
@@ -146,9 +217,13 @@ export async function provisionPreview(
     stringifyManifest(newManifest, manifestPath),
     "utf8",
   );
-  if (cli) log.success(`Manifest updated for ${branchUrl}`);
+  if (cli) log.success(`Rewrote ${manifestPath} for ${branchUrl}`);
 
-  if (cli) log.step("Creating or updating Slack app");
+  if (cli) {
+    log.step(
+      slackAppId ? `Updating Slack app ${slackAppId}` : "Creating Slack app",
+    );
+  }
   const { isNew, app } = await upsertSlackApp({
     token: slackConfigurationToken,
     appId: slackAppId,
@@ -212,8 +287,8 @@ export async function provisionPreview(
       });
       throw new Error(
         removed.status === "failed"
-          ? `Created Slack app ${app.app_id}, but couldn't save its credentials to Vercel or delete it again. Delete it yourself, or it stays behind when the branch's next build creates another:\nhttps://api.slack.com/apps/${app.app_id}`
-          : `Created Slack app ${app.app_id}, but couldn't save its credentials to Vercel, so deleted it again. The branch's next build creates a new one.`,
+          ? `Created Slack app ${app.app_id}, but couldn't save its credentials to Vercel or delete it again\nDelete it yourself, or it's left behind when the branch's next build creates another: https://api.slack.com/apps/${app.app_id}`
+          : `Created Slack app ${app.app_id}, but couldn't save its credentials to Vercel, so deleted it again\nThe branch's next build creates a new one.`,
         { cause: error },
       );
     }
@@ -222,7 +297,7 @@ export async function provisionPreview(
   if (cli) {
     if (isNew && slackAppId) {
       log.info(
-        `Slack no longer has app ${slackAppId}, or this configuration token can't reach it, so the branch gets a new one`,
+        `Slack has no app ${slackAppId} for this configuration token, so the branch gets a new one`,
       );
     }
     log.success(`${isNew ? "Created" : "Updated"} Slack app ${app.app_id}`);
@@ -259,59 +334,29 @@ export async function provisionPreview(
   );
 
   if (cli) {
-    switch (status) {
-      case "missing_service_token":
-        log.warning(
-          "SLACK_SERVICE_TOKEN is not set — app must be installed manually",
-        );
-        log.info("https://docs.slack.dev/authentication/tokens/#service");
-        break;
-      case "installed":
-        log.success(`Installed Slack app ${app.app_id}`);
-        break;
-      case "app_approval_request_eligible":
-        log.warning("App requires approval before it can be installed");
-        break;
-      case "app_approval_request_pending":
-        log.warning("App is pending approval before it can be installed");
-        break;
-      case "app_approval_request_denied":
-        log.warning("App approval request was denied");
-        break;
-      case "no_access":
-        log.warning(
-          `SLACK_SERVICE_TOKEN does not have access to app ${app.app_id}. ` +
-            "This usually means the service token and configuration token were created by different users. " +
-            "Ensure both tokens are generated by the same Slack user.\n" +
-            "https://docs.slack.dev/authentication/tokens/#service",
-        );
-        break;
-      case "invalid_app_id":
-        log.warning(
-          "Invalid app ID. This is a bug in the @vercel/slack-bolt package. Please open an issue at https://github.com/vercel-labs/slack-bolt/issues",
-        );
-        break;
-      case "slack_api_error":
-      case "unknown_error": {
-        // Say what Slack answered, so the app can be installed by hand or
-        // the cause fixed.
-        const reason = installError ?? "unknown error";
-        log.warning(
-          `Slack didn't install the app: ${reason} — app must be installed manually`,
-        );
-        const hint = INSTALL_HINTS[reason];
-        if (hint) log.info(hint);
-        break;
+    const appUrl = `https://api.slack.com/apps/${app.app_id}`;
+    if (status === "installed") {
+      log.success(`Installed Slack app ${app.app_id}`);
+      log.info(`View app: ${appUrl}`);
+    } else {
+      // Slack only gives a new app's install link. A build that has a bot
+      // token belongs to an app that was installed before, so it gets none.
+      const installUrl = (isNew && app.oauth_authorize_url) || appUrl;
+      const install = currentEnv?.SLACK_BOT_TOKEN
+        ? undefined
+        : `Install it yourself: ${installUrl}`;
+      const { headline, details } = installAdvice(
+        status,
+        installError,
+        app.app_id,
+        install,
+      );
+      log.warning(headline);
+      for (const detail of details) if (detail) log.info(detail);
+      if (!details.includes(`Install it yourself: ${appUrl}`)) {
+        log.info(`View app: ${appUrl}`);
       }
     }
-    console.log();
-    if (app.app_id) {
-      log.info(`View app: https://api.slack.com/apps/${app.app_id}`);
-    }
-    if (isNew && app.oauth_authorize_url && status !== "installed") {
-      log.info(`Install URL: ${app.oauth_authorize_url}`);
-    }
-    console.log();
   }
 
   return {

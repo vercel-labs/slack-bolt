@@ -10,6 +10,7 @@ const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
+const RED = "\x1b[31m";
 
 type PatchedFetch = typeof globalThis.fetch & { __debugPatched?: boolean };
 
@@ -82,6 +83,9 @@ export const log = {
   warning: (msg: string) => console.log(`${YELLOW}⚠${RESET} ${scrub(msg)}`),
   error: (...args: unknown[]) =>
     console.error(...args.map((arg) => scrub(text(arg)))),
+  /** What stopped the build: a headline, then what to do under it. */
+  failure: (msg: string) =>
+    console.error(`${RED}✗${RESET} ${scrub(msg.replace(/\n(?=.)/g, "\n  "))}`),
   debug: (...args: unknown[]) => {
     if (isDebug()) {
       console.debug(`${DIM}${scrub(args.map(text).join(" "))}${RESET}`);

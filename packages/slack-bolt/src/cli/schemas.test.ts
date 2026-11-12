@@ -78,19 +78,21 @@ describe("validateAndBuildParams", () => {
     expect(() =>
       validateAndBuildParams(without("VERCEL_GIT_COMMIT_REF", "VERCEL_URL")),
     ).toThrow(
-      "Missing Vercel system environment variables: VERCEL_GIT_COMMIT_REF, VERCEL_URL",
+      'Missing system environment variables: VERCEL_GIT_COMMIT_REF, VERCEL_URL\nTurn on "Automatically expose System Environment Variables" in your Vercel project: https://vercel.com/docs/projects/environment-variables/system-environment-variables',
     );
   });
 
   it("names the missing Slack variable", () => {
     expect(() =>
       validateAndBuildParams(without("SLACK_CONFIGURATION_TOKEN")),
-    ).toThrow("Missing Slack environment variables: SLACK_CONFIGURATION_TOKEN");
+    ).toThrow(
+      "Missing SLACK_CONFIGURATION_TOKEN\nGenerate a configuration token and add it to your Vercel project: https://api.slack.com/apps",
+    );
   });
 
   it("names the missing Vercel API token", () => {
     expect(() => validateAndBuildParams(without("VERCEL_API_TOKEN"))).toThrow(
-      "Missing Vercel environment variables: VERCEL_API_TOKEN",
+      "Missing VERCEL_API_TOKEN\nCreate a token and add it to your Vercel project: https://vercel.com/account/settings/tokens",
     );
   });
 

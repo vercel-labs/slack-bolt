@@ -2,12 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { HTTPError } from "../internal/http-error";
 import { log, registerSecret } from "../internal/logger";
-import { provisionPreview } from "../internal/provision";
+import {
+  noManifest,
+  type Provisioned,
+  provisionPreview,
+} from "../internal/provision";
 import {
   authTest,
   isTransient,
   type RotateTokenResult,
   rotateConfigToken,
+  SlackAPIError,
 } from "../internal/slack";
 import {
   addEnvironmentVariables,
@@ -152,7 +157,7 @@ async function saveRotatedTokens(
   // Slack has issued new tokens by now, so say that saving them failed, not
   // that the refresh token was bad.
   throw new Error(
-    "Rotated the Slack configuration token, but couldn't save the new tokens to your Vercel project, so the stored SLACK_CONFIG_REFRESH_TOKEN may no longer work. Check that VERCEL_API_TOKEN can write environment variables, then generate new tokens and update SLACK_CONFIGURATION_TOKEN and SLACK_CONFIG_REFRESH_TOKEN:\nhttps://api.slack.com/apps",
+    "Rotated SLACK_CONFIGURATION_TOKEN, but couldn't save the new tokens to Vercel\nThe stored SLACK_CONFIG_REFRESH_TOKEN may no longer work. Check that VERCEL_API_TOKEN can write environment variables, then generate both tokens again and save them: https://api.slack.com/apps",
     { cause: failure },
   );
 }
@@ -167,7 +172,7 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
     // refresh token, so don't rotate a token that may be fine.
     if (isTransient(error)) {
       throw new Error(
-        "Couldn't reach Slack to check SLACK_CONFIGURATION_TOKEN. Redeploy to try again.",
+        "Couldn't reach Slack to check SLACK_CONFIGURATION_TOKEN\nRedeploy to try again.",
         { cause: error },
       );
     }
@@ -183,13 +188,13 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
     }
     if (!params.slackConfigRefreshToken) {
       throw new Error(
-        "Slack configuration token is invalid or expired. Provide SLACK_CONFIG_REFRESH_TOKEN for automatic rotation, or generate a new token:\nhttps://api.slack.com/apps",
+        "Slack refused SLACK_CONFIGURATION_TOKEN\nConfiguration tokens expire after 12 hours. Generate a new one and save it in Vercel, or set SLACK_CONFIG_REFRESH_TOKEN to have builds rotate it: https://api.slack.com/apps",
         { cause: error },
       );
     }
   }
 
-  log.step("Refreshing SLACK_CONFIGURATION_TOKEN");
+  log.step("Rotating SLACK_CONFIGURATION_TOKEN");
   let rotated: RotateTokenResult;
   try {
     rotated = await rotateConfigToken({
@@ -198,7 +203,7 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
   } catch (rotateError) {
     if (isTransient(rotateError)) {
       throw new Error(
-        "Couldn't reach Slack to rotate SLACK_CONFIGURATION_TOKEN. Redeploy to try again.",
+        "Couldn't reach Slack to rotate SLACK_CONFIGURATION_TOKEN\nRedeploy to try again.",
         { cause: rotateError },
       );
     }
@@ -208,7 +213,7 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
     const saved = await savedConfigToken(params, SAVED_TOKEN_ATTEMPTS);
     if (!saved) {
       throw new Error(
-        "Failed to rotate configuration token — refresh token may be invalid. Generate new tokens:\nhttps://api.slack.com/apps",
+        "Couldn't rotate SLACK_CONFIGURATION_TOKEN: Slack refused SLACK_CONFIG_REFRESH_TOKEN\nGenerate both tokens again and save them in Vercel: https://api.slack.com/apps",
         { cause: rotateError },
       );
     }
@@ -221,7 +226,7 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
   params.slackConfigRefreshToken = rotated.refreshToken;
 
   await saveRotatedTokens(params, rotated);
-  log.success("Configuration token rotated and persisted");
+  log.success("Rotated SLACK_CONFIGURATION_TOKEN and saved it to Vercel");
 }
 
 /**
@@ -260,27 +265,15 @@ export async function executeBuild(
 ): Promise<void> {
   if (!params.slackConfigurationToken) {
     throw new Error(
-      "Slack Configuration Token is not set. Generate a configuration token and add it as SLACK_CONFIGURATION_TOKEN in your Vercel project:\nhttps://api.slack.com/apps",
+      "Missing SLACK_CONFIGURATION_TOKEN\nGenerate a configuration token and add it to your Vercel project: https://api.slack.com/apps",
     );
   }
 
   await ensureConfigToken(params);
 
-  if (params.slackServiceToken) {
-    try {
-      await authTest({ token: params.slackServiceToken });
-    } catch (error) {
-      log.warning(
-        "SLACK_SERVICE_TOKEN is invalid — app must be installed manually",
-      );
-      log.info("https://docs.slack.dev/authentication/tokens/#service");
-      log.debug(error);
-    }
-  }
-
   if (!params.branch) {
     throw new Error(
-      "VERCEL_GIT_COMMIT_REF is not set — connect your Git repository in your Vercel project settings.\nhttps://vercel.com/docs/git",
+      "VERCEL_GIT_COMMIT_REF is not set\nConnect a Git repository to your Vercel project: https://vercel.com/docs/git",
     );
   }
 
@@ -292,20 +285,18 @@ export async function executeBuild(
     });
   } catch (error) {
     throw new Error(
-      "Vercel API token cannot access this project. Ensure VERCEL_API_TOKEN is valid and has access to this team:\nhttps://vercel.com/account/settings/tokens",
+      "VERCEL_API_TOKEN can't access this project\nCheck that it's valid, hasn't expired, and covers the project's team: https://vercel.com/account/settings/tokens",
       { cause: error },
     );
   }
 
   const manifestFullPath = path.join(process.cwd(), params.manifestPath);
   if (!fs.existsSync(manifestFullPath)) {
-    throw new Error(
-      `No manifest found at ${params.manifestPath}. Create a manifest.json (or manifest.yaml) file with your Slack app configuration:\nhttps://docs.slack.dev/reference/manifests`,
-    );
+    throw new Error(noManifest(params.manifestPath));
   }
 
   if (options?.cleanup) {
-    log.step("Cleaning up orphaned preview apps");
+    log.step("Cleaning up Slack apps of inactive branches");
     try {
       await cleanupOrphanedApps({
         projectId: params.projectId,
@@ -316,26 +307,42 @@ export async function executeBuild(
       });
     } catch (error) {
       log.warning(
-        `Orphan cleanup failed: ${error instanceof Error ? error.message : error}`,
+        `Cleanup failed: ${error instanceof Error ? error.message : error}`,
       );
     }
   }
 
-  const result = await provisionPreview(params, {
-    cli: true,
-    currentEnv: options?.env ?? process.env,
-  });
+  let result: Provisioned;
+  try {
+    result = await provisionPreview(params, {
+      cli: true,
+      currentEnv: options?.env ?? process.env,
+    });
+  } catch (error) {
+    // Slack's own error names the API method. Say which file to fix; the
+    // problems Slack found are printed under it.
+    if (error instanceof SlackAPIError && error.code === "invalid_manifest") {
+      throw new Error(
+        `Slack rejected ${params.manifestPath}\nFix the problems below, then redeploy.`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 
   // This deployment was built without the variables just saved, so it needs
   // replacing: every one for a new app, or a token for an app that only now
   // got installed.
   if (result.changedEnv.length === 0) return;
-  const saved = `Saved ${result.changedEnv.join(", ")} for ${params.branch}`;
-  const applies = `${result.changedEnv.length === 1 ? "It applies" : "They apply"} from the branch's next deployment.`;
+  const names = result.changedEnv.join(", ");
+  const them = result.changedEnv.length === 1 ? "it" : "them";
 
   if (!params.deploymentId) {
     log.warning(
-      `${saved}, but VERCEL_DEPLOYMENT_ID isn't set, so this deployment can't be replaced. ${applies}`,
+      `Saved ${names} for ${params.branch}, but this deployment was built without ${them}`,
+    );
+    log.info(
+      `Redeploy the branch to pick ${them} up. vercel-slack can't: VERCEL_DEPLOYMENT_ID is not set.`,
     );
     return;
   }
@@ -346,16 +353,19 @@ export async function executeBuild(
   if (await startedByBuild(params, params.deploymentId)) {
     if (result.isNew) {
       throw new Error(
-        `vercel-slack started this deployment to pick up the branch's Slack app, but it didn't get the app's SLACK_APP_ID, and created another app (${result.app.app_id}). Stopping here instead of deploying again. Check the branch's SLACK_APP_ID in your Vercel project's environment variables, then redeploy.`,
+        `Created Slack app ${result.app.app_id}, but not redeploying again: vercel-slack already started this deployment\nThe app's variables are saved. Redeploy the branch to use it, and delete the branch's earlier app if one is left: https://api.slack.com/apps`,
       );
     }
     log.warning(
-      `${saved}, but this deployment already replaced one for the same reason. ${applies}`,
+      `Saved ${names} for ${params.branch}, but this deployment was built without ${them}`,
+    );
+    log.info(
+      `Redeploy the branch to pick ${them} up. vercel-slack already redeployed once, and doesn't again.`,
     );
     return;
   }
 
-  log.step("Creating new deployment to pick up new environment variables");
+  log.step(`Starting a new deployment that has ${names}`);
   const { id, url } = await createDeployment({
     deploymentId: params.deploymentId,
     projectId: params.projectId,
@@ -363,9 +373,10 @@ export async function executeBuild(
     teamId: params.teamId,
     meta: { [REDEPLOY_META]: params.deploymentId },
   });
-  log.success(`New deployment created: ${url} (${id})`);
+  log.success(`New deployment: ${url} (${id})`);
 
-  log.step("Cancelling current deployment");
+  // Vercel shows this one as Canceled, which looks like a failure.
+  log.step("Canceling this deployment, which the new one replaces");
   await cancelDeployment({
     deploymentId: params.deploymentId,
     token: params.vercelApiToken,

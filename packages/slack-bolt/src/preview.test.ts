@@ -12,7 +12,7 @@ import { parse as parseYaml } from "yaml";
 import { VercelReceiver } from "./index";
 import { HTTPError } from "./internal/http-error";
 import type { Manifest } from "./internal/manifest/types";
-import { provisionPreview } from "./internal/provision";
+import { installAdvice, provisionPreview } from "./internal/provision";
 import type { CreateProjectEnv } from "./internal/vercel/types";
 import { type PreviewParams, preview } from "./preview";
 
@@ -452,51 +452,6 @@ describe("a branch's first preview", () => {
       expect(savedEnvs().map((e) => e.key)).not.toContain("SLACK_BOT_TOKEN");
     });
 
-    it("tells the CLI's user what to do about a full workspace", async () => {
-      answers["apps.developerInstall"] = () =>
-        json({ ok: false, error: "service_limits_exceeded" });
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-
-      await preview({ ...params, automationBypassSecret: BYPASS }, "cli");
-
-      const printed = log.mock.calls.map((args) => args.join(" ")).join("\n");
-      expect(printed).toContain(
-        "Slack didn't install the app: service_limits_exceeded",
-      );
-      expect(printed).toContain("The workspace has reached its app limit");
-    });
-
-    it("prints the install URL only when the app still needs installing", async () => {
-      answers["apps.manifest.create"] = () =>
-        json({
-          ok: true,
-          app_id: "A_NEW",
-          credentials: {
-            client_id: "111.222",
-            client_secret: "client-secret-from-slack",
-            verification_token: "v",
-            signing_secret: SIGNING_SECRET,
-          },
-          oauth_authorize_url:
-            "https://slack.com/oauth/v2/authorize?client_id=111.222",
-        });
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      const printed = () =>
-        log.mock.calls.map((args) => args.join(" ")).join("\n");
-
-      await preview({ ...params, automationBypassSecret: BYPASS }, "cli");
-      expect(printed()).toContain("Installed Slack app A_NEW");
-      expect(printed()).not.toContain("Install URL");
-
-      log.mockClear();
-      answers["apps.developerInstall"] = () =>
-        json({ ok: false, error: "service_limits_exceeded" });
-      await preview({ ...params, automationBypassSecret: BYPASS }, "cli");
-      expect(printed()).toContain(
-        "Install URL: https://slack.com/oauth/v2/authorize?client_id=111.222",
-      );
-    });
-
     it("leaves installError out when the app was installed", async () => {
       const result = await preview({
         ...params,
@@ -517,9 +472,7 @@ describe("a branch's first preview", () => {
 
       const error = await preview(params).catch((e: Error) => e);
 
-      expect((error as Error).message).toBe(
-        "Couldn't parse the manifest at manifest.json.",
-      );
+      expect((error as Error).message).toBe("Couldn't parse manifest.json");
       expect((error as Error).cause).toBeInstanceOf(SyntaxError);
       expect(calls).toEqual([]);
     });
@@ -535,7 +488,7 @@ describe("a branch's first preview", () => {
         write(content);
 
         await expect(preview(params)).rejects.toThrow(
-          "The manifest at manifest.json needs a display_information.name",
+          "manifest.json has no display_information.name\nSlack requires one: https://docs.slack.dev/reference/manifests",
         );
         expect(calls).toEqual([]);
       },
@@ -544,7 +497,9 @@ describe("a branch's first preview", () => {
     it("fails before creating anything when the manifest is missing", async () => {
       await expect(
         preview({ ...params, manifestPath: "missing.json" }),
-      ).rejects.toThrow("No manifest found at missing.json.");
+      ).rejects.toThrow(
+        "No manifest at missing.json\nCreate one, or set MANIFEST_PATH to where yours is: https://docs.slack.dev/reference/manifests",
+      );
       expect(calls).toEqual([]);
     });
   });
@@ -582,7 +537,7 @@ describe("a branch's later previews", () => {
 
     expect(result.isNew).toBe(true);
     expect(log.mock.calls.map((args) => args.join(" ")).join("\n")).toContain(
-      "Slack no longer has app A_OLD, or this configuration token can't reach it, so the branch gets a new one",
+      "Slack has no app A_OLD for this configuration token, so the branch gets a new one",
     );
   });
 
@@ -684,6 +639,189 @@ describe("a branch's later previews", () => {
 
     expect(callsTo("apps.manifest.create")).toEqual([]);
     expect(savedEnvs()).toEqual([]);
+  });
+});
+
+describe("what the CLI prints", () => {
+  const SERVICE_DOCS = "https://docs.slack.dev/authentication/tokens/#service";
+  const OAUTH = "https://slack.com/oauth/v2/authorize?client_id=111";
+  let log: ReturnType<typeof vi.spyOn>;
+  /** Each line printed, without colour codes. */
+  const printed = () =>
+    log.mock.calls
+      .flatMap((args: unknown[]) => args.join(" ").split("\n"))
+      .map((line: string) =>
+        line
+          .split("\u001b[")
+          .map((part, i) =>
+            i === 0 ? part : part.slice(part.indexOf("m") + 1),
+          )
+          .join(""),
+      );
+  const run = (
+    overrides: Partial<PreviewParams> = {},
+    currentEnv: Record<string, string | undefined> = {},
+  ) =>
+    provisionPreview(
+      { ...params, automationBypassSecret: BYPASS, ...overrides },
+      { cli: true, currentEnv },
+    );
+
+  beforeEach(() => {
+    log = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  it("for a new app that gets installed", async () => {
+    await run();
+
+    expect(printed()).toEqual([
+      "  Reading manifest from manifest.json ...",
+      "✓ Rewrote manifest.json for my-app-git-feat-thing.vercel.app",
+      "  Creating Slack app ...",
+      "✓ Created Slack app A_NEW",
+      "  Installing Slack app ...",
+      "✓ Installed Slack app A_NEW",
+      "  View app: https://api.slack.com/apps/A_NEW",
+    ]);
+  });
+
+  it("for an existing app", async () => {
+    await run({ slackAppId: "A_OLD" }, { SLACK_BOT_TOKEN: "xoxb-1" });
+
+    expect(printed().slice(2)).toEqual([
+      "  Updating Slack app A_OLD ...",
+      "✓ Updated Slack app A_OLD",
+      "  Installing Slack app ...",
+      "✓ Installed Slack app A_OLD",
+      "  View app: https://api.slack.com/apps/A_OLD",
+    ]);
+  });
+
+  // The link to install it by hand is Slack's, which only a new app has.
+  it("for a new app without a service token: where to install it", async () => {
+    await run({ slackServiceToken: undefined });
+
+    expect(printed().slice(4)).toEqual([
+      "  Installing Slack app ...",
+      "⚠ Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
+      `  Install it yourself: ${OAUTH}`,
+      `  To have builds install it, add a service token: ${SERVICE_DOCS}`,
+      "  View app: https://api.slack.com/apps/A_NEW",
+    ]);
+  });
+
+  it("for an existing app without a service token or a bot token: its settings page", async () => {
+    await run({ slackServiceToken: undefined, slackAppId: "A_OLD" });
+
+    expect(printed().slice(5)).toEqual([
+      "⚠ Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
+      "  Install it yourself: https://api.slack.com/apps/A_OLD",
+      `  To have builds install it, add a service token: ${SERVICE_DOCS}`,
+    ]);
+  });
+
+  // A build with a bot token belongs to an app that was installed before.
+  it("for an app installed before: nothing about installing it by hand", async () => {
+    await run(
+      { slackServiceToken: undefined, slackAppId: "A_OLD" },
+      { SLACK_BOT_TOKEN: "xoxb-1" },
+    );
+
+    expect(printed().slice(5)).toEqual([
+      "⚠ Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
+      `  To have builds install it, add a service token: ${SERVICE_DOCS}`,
+      "  View app: https://api.slack.com/apps/A_OLD",
+    ]);
+  });
+
+  // What a free workspace that already has 10 apps answers.
+  it("for a full workspace", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({ ok: false, error: "service_limits_exceeded" });
+
+    await run();
+
+    expect(printed().slice(5)).toEqual([
+      "⚠ Couldn't install the app: Slack answered service_limits_exceeded",
+      "  The workspace is at its app limit (10 on Slack's free plan). Remove an app or upgrade, then redeploy.",
+      "  View app: https://api.slack.com/apps/A_NEW",
+    ]);
+  });
+
+  it("for a service token Slack refuses", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({ ok: false, error: "invalid_auth" });
+
+    await run({ slackAppId: "A_OLD" }, { SLACK_BOT_TOKEN: "xoxb-1" });
+
+    expect(printed().slice(5)).toEqual([
+      "⚠ Couldn't install the app: Slack answered invalid_auth",
+      `  Generate a new SLACK_SERVICE_TOKEN: ${SERVICE_DOCS}`,
+      "  View app: https://api.slack.com/apps/A_OLD",
+    ]);
+  });
+
+  it("for an outage", async () => {
+    answers["apps.developerInstall"] = () =>
+      new Response(null, { status: 503, statusText: "Service Unavailable" });
+
+    await run();
+
+    expect(printed().slice(5)).toEqual([
+      "⚠ Couldn't install the app: Slack answered 503 Service Unavailable",
+      "  Redeploy to try again.",
+      "  View app: https://api.slack.com/apps/A_NEW",
+    ]);
+  });
+
+  it("for a code it has no advice for: where to install it by hand", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({ ok: false, error: "something_new" });
+
+    await run();
+
+    expect(printed().slice(5)).toEqual([
+      "⚠ Couldn't install the app: Slack answered something_new",
+      `  Install it yourself: ${OAUTH}`,
+      "  View app: https://api.slack.com/apps/A_NEW",
+    ]);
+  });
+
+  it.each([
+    [
+      "app_approval_request_eligible",
+      "Couldn't install the app: a workspace admin has to approve it first",
+      ["Ask an admin to approve it, then redeploy."],
+    ],
+    [
+      "app_approval_request_pending",
+      "Couldn't install the app: it's waiting for a workspace admin's approval",
+      ["Redeploy once it's approved."],
+    ],
+    [
+      "app_approval_request_denied",
+      "Couldn't install the app: a workspace admin denied its approval request",
+      [],
+    ],
+    [
+      "no_access",
+      "Couldn't install the app: SLACK_SERVICE_TOKEN can't access app A1",
+      [
+        `Create the service token and the configuration token as the same Slack user: ${SERVICE_DOCS}`,
+      ],
+    ],
+    [
+      "invalid_app_id",
+      "Couldn't install the app: Slack doesn't recognize app A1",
+      [
+        "This is likely a bug in @vercel/slack-bolt. Please report it: https://github.com/vercel-labs/slack-bolt/issues",
+      ],
+    ],
+  ] as const)("for %s", (status, headline, details) => {
+    // Installing by hand wouldn't get past any of these.
+    expect(
+      installAdvice(status, undefined, "A1", "Install it yourself"),
+    ).toEqual({ headline, details });
   });
 });
 

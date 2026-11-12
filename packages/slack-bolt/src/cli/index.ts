@@ -64,8 +64,14 @@ export function run(version: string): Promise<void> {
     const isProd = env.VERCEL_ENV === "production";
 
     if (isLocal || isDev || isProd) {
-      const reason = isLocal ? "local" : isDev ? "development" : "production";
-      log.info(`Environment: ${reason} (skipped)\n`);
+      const reason = isLocal
+        ? "VERCEL_ENV is not set"
+        : isProd
+          ? "VERCEL_ENV is production"
+          : env.VERCEL_ENV === "development"
+            ? "VERCEL_ENV is development"
+            : "NODE_ENV is development";
+      log.info(`Skipped: only preview deployments get a Slack app (${reason})`);
       return;
     }
 
@@ -76,7 +82,7 @@ export function run(version: string): Promise<void> {
   return program.parseAsync().then(
     () => {},
     (error: unknown) => {
-      log.error(error instanceof Error ? error.message : String(error));
+      log.failure(error instanceof Error ? error.message : String(error));
       // The message says what to do; each cause says what went wrong, like
       // the status Vercel or Slack answered with.
       for (
@@ -84,7 +90,11 @@ export function run(version: string): Promise<void> {
         failure instanceof Error;
         failure = failure.cause
       ) {
-        if (failure !== error) log.error(`  Caused by: ${failure.message}`);
+        if (failure !== error) {
+          log.error(
+            `  Caused by: ${failure.message.replace(/\n(?=.)/g, "\n    ")}`,
+          );
+        }
         // Slack rejects a manifest with one entry per problem and where it
         // is, on the error for the call that sent it.
         const problems = (failure as { errors?: unknown }).errors;
@@ -93,11 +103,10 @@ export function run(version: string): Promise<void> {
             message?: string;
             pointer?: string;
           }[]) {
-            log.error(`  ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
+            log.error(`    ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
           }
         }
       }
-      console.log();
       // Fail the build, so `vercel-slack build && next build` doesn't deploy
       // a preview whose Slack app wasn't set up.
       process.exitCode = 1;

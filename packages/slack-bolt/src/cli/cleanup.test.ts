@@ -214,7 +214,9 @@ describe("cleanupOrphanedApps", () => {
       await cleanupOrphanedApps(defaultArgs);
 
       expect(deletedEnvIds()).toHaveLength(7);
-      expect(printed()).toContain("A_STALE already deleted");
+      expect(printed()).toContain(
+        "App A_STALE of branch feature-gone was already deleted",
+      );
     });
 
     // Slack answers the delete of an app that was already deleted with
@@ -228,7 +230,9 @@ describe("cleanupOrphanedApps", () => {
       await cleanupOrphanedApps(defaultArgs);
 
       expect(deletedEnvIds()).toHaveLength(7);
-      expect(printed()).toContain("A_STALE already deleted");
+      expect(printed()).toContain(
+        "App A_STALE of branch feature-gone was already deleted",
+      );
     });
 
     // SLACK_APP_ID is the only record of the app. Deleting it while the app
@@ -250,9 +254,11 @@ describe("cleanupOrphanedApps", () => {
       await cleanupOrphanedApps(defaultArgs);
 
       expect(deletedEnvIds()).toEqual([]);
-      expect(printed()).toContain("Failed to delete app A_STALE");
-      expect(printed()).toContain("left 1 of 1 branch for the next build");
-      expect(printed()).not.toContain("Orphan cleanup completed");
+      expect(printed()).toContain(
+        "Couldn't delete app A_STALE of branch feature-gone: ",
+      );
+      expect(printed()).toContain("Left 1 of 1 branch for the next build");
+      expect(printed()).not.toContain("Cleaned up");
     });
 
     // Like an app created with another user's configuration token.
@@ -264,8 +270,9 @@ describe("cleanupOrphanedApps", () => {
       await cleanupOrphanedApps(defaultArgs);
 
       expect(printed()).toContain(
-        "Delete the app at https://api.slack.com/apps/A_STALE",
+        "Slack will refuse again. Delete the app (https://api.slack.com/apps/A_STALE), or if it isn't yours, the branch's SLACK_ variables in Vercel.",
       );
+      expect(printed()).not.toContain("the next build tries again");
     });
 
     it.each([
@@ -280,6 +287,9 @@ describe("cleanupOrphanedApps", () => {
       await cleanupOrphanedApps(defaultArgs);
 
       expect(printed()).not.toContain("Slack will refuse again");
+      expect(printed()).toContain(
+        "Kept its app and variables; the next build tries again.",
+      );
     });
 
     it("should keep the branch's app and variables when its SLACK_APP_ID can't be read", async () => {
@@ -299,7 +309,10 @@ describe("cleanupOrphanedApps", () => {
       ).toEqual([]);
       expect(deletedEnvIds()).toEqual([]);
       expect(printed()).toContain(
-        "Failed to read SLACK_APP_ID for branch feature-gone",
+        "Couldn't read SLACK_APP_ID of branch feature-gone: ",
+      );
+      expect(printed()).toContain(
+        "Kept its app and variables; the next build tries again.",
       );
     });
 
@@ -319,7 +332,7 @@ describe("cleanupOrphanedApps", () => {
         expect.arrayContaining(["env_client", "env_secret", "env_signing"]),
       );
       expect(printed()).toContain(
-        "Failed to delete env var SLACK_BOT_TOKEN for branch feature-gone",
+        "Couldn't delete SLACK_BOT_TOKEN of branch feature-gone: ",
       );
     });
 
@@ -328,7 +341,8 @@ describe("cleanupOrphanedApps", () => {
 
       await cleanupOrphanedApps(defaultArgs);
 
-      expect(printed()).toContain("Orphan cleanup completed");
+      expect(printed()).toContain("Deleted app A_STALE of branch feature-gone");
+      expect(printed()).toContain("Cleaned up 1 branch");
     });
   });
 

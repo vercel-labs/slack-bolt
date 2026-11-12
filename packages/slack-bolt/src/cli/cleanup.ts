@@ -24,6 +24,12 @@ const SLACK_ENV_VAR_KEYS = [
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+const plural = (count: number) =>
+  `${count} ${count === 1 ? "branch" : "branches"}`;
+
+/** What a branch is left with when its cleanup can't finish. */
+const KEPT = "Kept its app and variables; the next build tries again.";
+
 export async function cleanupOrphanedApps({
   projectId,
   currentBranch,
@@ -62,13 +68,9 @@ export async function cleanupOrphanedApps({
   }
 
   if (staleBranches.size === 0) {
-    log.info("No orphaned preview apps found");
+    log.info("Nothing to clean up");
     return;
   }
-
-  log.step(
-    `Found ${staleBranches.size} orphaned ${staleBranches.size === 1 ? "branch" : "branches"}`,
-  );
 
   let leftBehind = 0;
   for (const [branch, appIdEnvId] of staleBranches) {
@@ -87,8 +89,9 @@ export async function cleanupOrphanedApps({
     } catch (error) {
       leftBehind++;
       log.warning(
-        `Failed to read SLACK_APP_ID for branch ${branch}, so its app and variables stay for now: ${message(error)}`,
+        `Couldn't read SLACK_APP_ID of branch ${branch}: ${message(error)}`,
       );
+      log.info(KEPT);
       continue;
     }
 
@@ -100,19 +103,21 @@ export async function cleanupOrphanedApps({
       if (removed.status === "failed") {
         leftBehind++;
         log.warning(
-          `Failed to delete app ${appId} (branch: ${branch}), so it and the branch's variables stay for now: ${message(removed.error)}`,
+          `Couldn't delete app ${appId} of branch ${branch}: ${message(removed.error)}`,
         );
         // An outage or a refused token passes. A refusal for this app gets
         // the same answer on every build, until someone steps in.
-        if (!isTransient(removed.error) && !isTokenError(removed.error)) {
-          log.info(
-            `Slack will refuse again on the next build. Delete the app at https://api.slack.com/apps/${appId}, or if it isn't yours to delete, the branch's Slack variables in your Vercel project.`,
-          );
-        }
+        log.info(
+          isTransient(removed.error) || isTokenError(removed.error)
+            ? KEPT
+            : `Slack will refuse again. Delete the app (https://api.slack.com/apps/${appId}), or if it isn't yours, the branch's SLACK_ variables in Vercel.`,
+        );
         continue;
       }
       log.info(
-        `${appId} ${removed.status === "gone" ? "already deleted" : "deleted"} (branch: ${branch})`,
+        removed.status === "gone"
+          ? `App ${appId} of branch ${branch} was already deleted`
+          : `Deleted app ${appId} of branch ${branch}`,
       );
     }
 
@@ -134,7 +139,7 @@ export async function cleanupOrphanedApps({
         } catch (error) {
           deletedAll = false;
           log.warning(
-            `Failed to delete env var ${env.key} for branch ${branch}: ${message(error)}`,
+            `Couldn't delete ${env.key} of branch ${branch}: ${message(error)}`,
           );
         }
       }
@@ -154,16 +159,16 @@ export async function cleanupOrphanedApps({
     } catch (error) {
       leftBehind++;
       log.warning(
-        `Failed to delete env var SLACK_APP_ID for branch ${branch}: ${message(error)}`,
+        `Couldn't delete SLACK_APP_ID of branch ${branch}: ${message(error)}`,
       );
     }
   }
 
   if (leftBehind > 0) {
     log.warning(
-      `Orphan cleanup left ${leftBehind} of ${staleBranches.size} ${staleBranches.size === 1 ? "branch" : "branches"} for the next build`,
+      `Left ${leftBehind} of ${plural(staleBranches.size)} for the next build`,
     );
     return;
   }
-  log.success("Orphan cleanup completed");
+  log.success(`Cleaned up ${plural(staleBranches.size)}`);
 }

@@ -271,7 +271,7 @@ describe("getProject", () => {
     expect(err.statusText).toBe("Forbidden");
   });
 
-  it("should include response body in error message when present", async () => {
+  it("should say Vercel's error code and message, not its raw JSON", async () => {
     mockFetch.mockResolvedValueOnce(
       errorResponse(403, "Forbidden", {
         error: { code: "forbidden", message: "Not authorized" },
@@ -282,7 +282,20 @@ describe("getProject", () => {
 
     expect(err).toBeInstanceOf(HTTPError);
     expect(err.message).toBe(
-      'Failed to access Vercel project: 403 Forbidden - {"error":{"code":"forbidden","message":"Not authorized"}}',
+      "Failed to access Vercel project: 403 Forbidden - forbidden: Not authorized",
+    );
+  });
+
+  it.each([
+    ["a code alone", { error: { code: "forbidden" } }, "forbidden"],
+    ["JSON of another shape", { message: "nope" }, '{"message":"nope"}'],
+  ])("should include %s as it is", async (_, body, text) => {
+    mockFetch.mockResolvedValueOnce(errorResponse(403, "Forbidden", body));
+
+    const err = await getProject(defaultArgs).catch((e) => e);
+
+    expect(err.message).toBe(
+      `Failed to access Vercel project: 403 Forbidden - ${text}`,
     );
   });
 
