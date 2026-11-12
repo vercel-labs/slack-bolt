@@ -164,11 +164,7 @@ export async function cleanupOrphanedApps({
     }
   }
 
-  if (leftBehind > 0) {
-    log.warning(
-      `Left ${leftBehind} of ${plural(staleBranches.size)} for the next build`,
-    );
-    return;
-  }
+  // Each branch that was left has said why, and what happens to it next.
+  if (leftBehind > 0) return;
   log.success(`Cleaned up ${plural(staleBranches.size)}`);
 }

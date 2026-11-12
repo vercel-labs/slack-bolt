@@ -704,7 +704,7 @@ describe("what the CLI prints", () => {
     expect(printed().slice(4)).toEqual([
       "  Installing Slack app ...",
       "⚠ Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
-      `  Install it yourself: ${OAUTH}`,
+      `  Install it yourself if you haven't: ${OAUTH}`,
       `  To have builds install it, add a service token: ${SERVICE_DOCS}`,
       "  View app: https://api.slack.com/apps/A_NEW",
     ]);
@@ -715,7 +715,7 @@ describe("what the CLI prints", () => {
 
     expect(printed().slice(5)).toEqual([
       "⚠ Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
-      "  Install it yourself: https://api.slack.com/apps/A_OLD",
+      "  Install it yourself if you haven't: https://api.slack.com/apps/A_OLD",
       `  To have builds install it, add a service token: ${SERVICE_DOCS}`,
     ]);
   });
@@ -782,7 +782,7 @@ describe("what the CLI prints", () => {
 
     expect(printed().slice(5)).toEqual([
       "⚠ Couldn't install the app: Slack answered something_new",
-      `  Install it yourself: ${OAUTH}`,
+      `  Install it yourself if you haven't: ${OAUTH}`,
       "  View app: https://api.slack.com/apps/A_NEW",
     ]);
   });

@@ -257,7 +257,6 @@ describe("cleanupOrphanedApps", () => {
       expect(printed()).toContain(
         "Couldn't delete app A_STALE of branch feature-gone: ",
       );
-      expect(printed()).toContain("Left 1 of 1 branch for the next build");
       expect(printed()).not.toContain("Cleaned up");
     });
 

@@ -341,10 +341,11 @@ export async function provisionPreview(
     } else {
       // Slack only gives a new app's install link. A build that has a bot
       // token belongs to an app that was installed before, so it gets none.
+      // Without one there's no telling: the app may be installed by hand.
       const installUrl = (isNew && app.oauth_authorize_url) || appUrl;
       const install = currentEnv?.SLACK_BOT_TOKEN
         ? undefined
-        : `Install it yourself: ${installUrl}`;
+        : `Install it yourself if you haven't: ${installUrl}`;
       const { headline, details } = installAdvice(
         status,
         installError,
@@ -353,7 +354,7 @@ export async function provisionPreview(
       );
       log.warning(headline);
       for (const detail of details) if (detail) log.info(detail);
-      if (!details.includes(`Install it yourself: ${appUrl}`)) {
+      if (!details.some((detail) => detail?.endsWith(`: ${appUrl}`))) {
         log.info(`View app: ${appUrl}`);
       }
     }
