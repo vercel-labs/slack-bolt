@@ -433,7 +433,7 @@ When Slack doesn't install the app, the build carries on and prints Slack's reas
 
 Slack's configuration tokens expire after 12 hours. With `SLACK_CONFIG_REFRESH_TOKEN` set, the CLI rotates an expired token and saves both new tokens to your Vercel project, in the environments and with the type (Sensitive or not) the old ones had.
 
-A build gets its variables when its deployment is created, so a build that waited in the queue can still have the expired token after an earlier build rotated it. Slack only accepts a used refresh token for a short grace period, and each rotation revokes older tokens, so such a build first looks for a newer token in your Vercel project and uses that instead of rotating again. It reads the token through the Vercel API, which can't read a Sensitive variable: with a Sensitive `SLACK_CONFIGURATION_TOKEN` the build rotates the token itself, and fails if Slack no longer accepts its refresh token; redeploy it.
+A build gets its variables when its deployment is created, so a build that waited in the queue can still have the expired token after an earlier build rotated it. Its refresh token has been used by then: rotating with it again may fail, and when it works it saves an older refresh token over the newer one. So such a build first looks for a newer token in your Vercel project and uses that instead of rotating again. It reads the token through the Vercel API, which can't read a Sensitive variable: with a Sensitive `SLACK_CONFIGURATION_TOKEN` the build rotates the token itself, and fails if Slack no longer accepts its refresh token; redeploy it.
 
 The CLI doesn't rotate the token when it couldn't reach Slack to check it. The build fails instead, and the next one tries again.
 

@@ -434,7 +434,8 @@ describe("executeBuild", () => {
       ]);
     });
 
-    // Slack's refresh tokens are single-use, so the stored one is spent.
+    // Rotating revoked the stored configuration token, and its refresh token
+    // is used, so the new ones have to reach the project.
     it("tries again when Vercel doesn't save the new tokens at first", async () => {
       vi.mocked(authTest).mockRejectedValueOnce(expired());
       vi.mocked(rotateConfigToken).mockResolvedValue(rotated);
@@ -618,8 +619,8 @@ describe("executeBuild", () => {
         });
       });
 
-      // Slack stops accepting a refresh token soon after it's used, and the
-      // build that used it saves the new token right after.
+      // If that's because another build just used it, that build saves its
+      // new token right after.
       describe("and Slack refuses the refresh token", () => {
         beforeEach(() => {
           vi.mocked(rotateConfigToken).mockRejectedValue(

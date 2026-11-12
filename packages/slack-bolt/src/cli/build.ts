@@ -87,9 +87,10 @@ async function savedConfigToken(
 }
 
 /**
- * Saves rotated tokens where the old ones were stored. Slack stops accepting
- * the stored refresh token soon after it's used, so without the new one the
- * project is left with tokens that don't work: try a few times.
+ * Saves rotated tokens where the old ones were stored. Rotating revoked the
+ * stored configuration token, and Slack may not accept its used refresh
+ * token again, so without the new ones the project can be left with tokens
+ * that don't work: try a few times.
  */
 async function saveRotatedTokens(
   params: PreviewParams,
@@ -169,9 +170,10 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
         { cause: error },
       );
     }
-    // Each rotation revokes older tokens, and Slack keeps a used refresh
-    // token working only for a short grace period. So use a token another
-    // build already rotated before rotating again.
+    // Another build may have rotated the token since this one got its
+    // variables. Rotating again with this build's refresh token, which that
+    // build already used, can fail, and when it works it saves an older
+    // refresh token over the newer one. So use the token that build saved.
     const saved = await savedConfigToken(params, 1);
     if (saved) {
       params.slackConfigurationToken = saved;
@@ -199,9 +201,9 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
         { cause: rotateError },
       );
     }
-    // Slack refused the refresh token, as it does once another build has
-    // used it and the grace period is over. That build saves its new token
-    // right after rotating, so give it a moment.
+    // Slack refused the refresh token. If that's because another build just
+    // used it, that build saves its new token right after rotating, so give
+    // it a moment.
     const saved = await savedConfigToken(params, SAVED_TOKEN_ATTEMPTS);
     if (!saved) {
       throw new Error(
