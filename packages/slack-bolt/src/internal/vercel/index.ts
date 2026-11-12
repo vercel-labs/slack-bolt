@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { HTTPError } from "./errors";
+import { HTTPError } from "../http-error";
 import type {
   AddEnvironmentVariablesResult,
   CreateProjectEnv,
@@ -110,13 +110,47 @@ export async function addEnvironmentVariables({
   if (!response.ok) {
     // Redacted: the request body contains env var values (potentially
     // secrets), which the error response could echo back.
-    throw await HTTPError.fromResponseRedacted(
+    const body = response.clone();
+    const error = await HTTPError.fromResponseRedacted(
       "Failed to create environment variables",
       response,
     );
+    // Vercel also says which variables it refused, like every one of them
+    // when the branch isn't in the connected Git repository.
+    const refused = await body.json().then(
+      (data: AddEnvironmentVariablesResult) => refusedVariables(data),
+      () => "",
+    );
+    if (refused) error.message += `: ${refused}`;
+    throw error;
   }
 
-  return response.json();
+  const result: AddEnvironmentVariablesResult = await response.json();
+
+  // Vercel answers 2xx when it saved only some of the variables. Without
+  // them the branch's deployment starts with missing credentials, so fail.
+  const refused = refusedVariables(result);
+  if (refused) {
+    throw new Error(`Failed to create environment variables: ${refused}`);
+  }
+
+  return result;
+}
+
+/**
+ * The variables Vercel refused, with its error code and the field at fault,
+ * like `SLACK_APP_ID (BAD_REQUEST: gitBranch)`. Never values or messages,
+ * which can echo what was submitted.
+ */
+function refusedVariables(result: AddEnvironmentVariablesResult): string {
+  if (!Array.isArray(result?.failed)) return "";
+  return result.failed
+    .map(({ error }) => {
+      const key = error.envVarKey ?? error.key ?? "unknown";
+      const field = error.envVarKey && error.key ? `: ${error.key}` : "";
+      return `${key} (${error.code}${field})`;
+    })
+    .join(", ");
 }
 
 export async function cancelDeployment({
@@ -148,11 +182,14 @@ export async function createDeployment({
   projectId,
   token,
   teamId,
+  meta,
 }: {
   deploymentId: string;
   projectId: string;
   token: string;
   teamId?: string;
+  /** Added to the metadata the new deployment copies from `deploymentId`. */
+  meta?: Record<string, string>;
 }): Promise<{ id: string; url: string }> {
   const url = new URL("https://api.vercel.com/v13/deployments");
   if (teamId) url.searchParams.set("teamId", teamId);
@@ -168,6 +205,7 @@ export async function createDeployment({
       deploymentId,
       name: projectId,
       project: projectId,
+      ...(meta && { meta }),
     }),
   });
 
@@ -177,6 +215,33 @@ export async function createDeployment({
 
   const data = await response.json();
   return { id: data.id, url: data.url };
+}
+
+/** A deployment's metadata: what Vercel recorded, plus any `meta` it was created with. */
+export async function getDeploymentMeta({
+  deploymentId,
+  token,
+  teamId,
+}: {
+  deploymentId: string;
+  token: string;
+  teamId?: string;
+}): Promise<Record<string, string>> {
+  const url = new URL(
+    `https://api.vercel.com/v13/deployments/${encodeURIComponent(deploymentId)}`,
+  );
+  if (teamId) url.searchParams.set("teamId", teamId);
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw await HTTPError.fromResponse("Failed to fetch deployment", response);
+  }
+
+  const data: { meta?: Record<string, string> } = await response.json();
+  return data.meta ?? {};
 }
 
 /**

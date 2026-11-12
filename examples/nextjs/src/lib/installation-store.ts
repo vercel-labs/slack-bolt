@@ -11,185 +11,140 @@ import type {
 } from "@slack/bolt";
 import { redis } from "./redis";
 
-type StoredInstallation = Installation<"v1" | "v2", boolean>;
+// Each workspace (or Enterprise Grid org) is one Redis hash: the `workspace`
+// field holds the installation with its bot token, and a `user:<id>` field
+// holds the user token of each user who authorized user scopes. Both are
+// encrypted with TOKEN_ENCRYPTION_SECRET and bound to their key and field, so
+// one copied to another workspace or user doesn't decrypt. Keys include the
+// Slack app's client ID, so apps sharing one Redis, like a development and a
+// production app, don't overwrite each other's installations.
 
-const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 12;
-const TAG_LENGTH = 16;
+let key: Buffer | undefined;
+function encryptionKey(): Buffer {
+  const secret = process.env.TOKEN_ENCRYPTION_SECRET;
+  if (!secret) {
+    throw new Error(
+      "TOKEN_ENCRYPTION_SECRET is required for secure token storage",
+    );
+  }
+  key ??= scryptSync(secret, "slack-token-encryption", 32);
+  return key;
+}
 
-function encrypt(text: string, secret: string): string {
-  const key = scryptSync(secret, "slack-token-encryption", 32);
-  const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, key, iv, {
-    authTagLength: TAG_LENGTH,
+function encrypt(value: unknown, hashKey: string, field: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv, {
+    authTagLength: 16,
   });
-  const encrypted = Buffer.concat([
-    cipher.update(text, "utf8"),
+  cipher.setAAD(Buffer.from(`${hashKey}\n${field}`));
+  const data = Buffer.concat([
+    cipher.update(JSON.stringify(value), "utf8"),
     cipher.final(),
   ]);
-  const tag = cipher.getAuthTag();
-  return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
+  return [iv, cipher.getAuthTag(), data]
+    .map((b) => b.toString("hex"))
+    .join(":");
 }
 
-function decrypt(encrypted: string, secret: string): string {
-  const key = scryptSync(secret, "slack-token-encryption", 32);
-  const [ivHex, tagHex, dataHex] = encrypted.split(":");
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, "hex"), {
-    authTagLength: TAG_LENGTH,
+function decrypt<T>(value: string, hashKey: string, field: string): T {
+  const [iv, tag, data] = value
+    .split(":")
+    .map((hex) => Buffer.from(hex, "hex"));
+  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), iv, {
+    authTagLength: 16,
   });
-  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-  return decipher.update(dataHex, "hex", "utf8") + decipher.final("utf8");
+  decipher.setAAD(Buffer.from(`${hashKey}\n${field}`));
+  decipher.setAuthTag(tag);
+  return JSON.parse(
+    Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8"),
+  );
 }
 
-function encryptTokens(installation: StoredInstallation): StoredInstallation {
-  const secret = process.env.TOKEN_ENCRYPTION_SECRET;
-  if (!secret) {
-    throw new Error(
-      "TOKEN_ENCRYPTION_SECRET is required for secure token storage",
-    );
-  }
-
-  const copy = structuredClone(installation);
-  if (copy.bot?.token) copy.bot.token = encrypt(copy.bot.token, secret);
-  if (copy.bot?.refreshToken)
-    copy.bot.refreshToken = encrypt(copy.bot.refreshToken, secret);
-  if (copy.user.token) copy.user.token = encrypt(copy.user.token, secret);
-  if (copy.user.refreshToken)
-    copy.user.refreshToken = encrypt(copy.user.refreshToken, secret);
-  return copy;
-}
-
-function decryptTokens(installation: StoredInstallation): StoredInstallation {
-  const secret = process.env.TOKEN_ENCRYPTION_SECRET;
-  if (!secret) {
-    throw new Error(
-      "TOKEN_ENCRYPTION_SECRET is required for secure token storage",
-    );
-  }
-
-  const copy = structuredClone(installation);
-  if (copy.bot?.token) copy.bot.token = decrypt(copy.bot.token, secret);
-  if (copy.bot?.refreshToken)
-    copy.bot.refreshToken = decrypt(copy.bot.refreshToken, secret);
-  if (copy.user.token) copy.user.token = decrypt(copy.user.token, secret);
-  if (copy.user.refreshToken)
-    copy.user.refreshToken = decrypt(copy.user.refreshToken, secret);
-  return copy;
-}
-
-function teamKey(query: {
+function workspaceKey(query: {
   teamId?: string;
   enterpriseId?: string;
   isEnterpriseInstall?: boolean;
 }): string {
+  const prefix = `slack:${process.env.NEXT_SLACK_CLIENT_ID}:workspace`;
   if (query.isEnterpriseInstall && query.enterpriseId) {
-    return `slack:installation:enterprise:${query.enterpriseId}`;
+    return `${prefix}:enterprise:${query.enterpriseId}`;
   }
-  if (query.teamId) {
-    return `slack:installation:${query.teamId}`;
-  }
+  if (query.teamId) return `${prefix}:${query.teamId}`;
   throw new Error("Either teamId or enterpriseId is required");
 }
 
-function userKey(base: string, userId: string): string {
-  return `${base}:${userId}`;
-}
+type User = Installation["user"];
 
-async function upsert(key: string, incoming: StoredInstallation) {
-  try {
-    const existing = await redis.get<StoredInstallation>(key);
-    const merged = existing ? { ...existing, ...incoming } : incoming;
-    await redis.set(key, merged);
-  } catch (error) {
-    throw new Error(
-      `Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
+// fetchInstallation puts the requesting user in `user` so Bolt gets their
+// token, and tags the result with the workspace's installer. Bolt saves a
+// refresh as a copy of that result, tag included, so storeInstallation keeps
+// the installer instead of recording whoever triggered the refresh.
+const INSTALLER = Symbol("installer");
+type Fetched = Installation & { [INSTALLER]?: string };
 
 export const installationStore: InstallationStore = {
+  // Bolt also calls this to save refreshed tokens, with what
+  // fetchInstallation returned.
   storeInstallation: async (installation) => {
-    const tk = teamKey({
+    const key = workspaceKey({
       teamId: installation.team?.id,
       enterpriseId: installation.enterprise?.id,
       isEnterpriseInstall: installation.isEnterpriseInstall,
     });
-
-    const encrypted = encryptTokens(
-      installation as unknown as StoredInstallation,
+    const { user } = installation;
+    const installer = (installation as Fetched)[INSTALLER] ?? user.id;
+    const workspace = encrypt(
+      { ...installation, user: { id: installer } },
+      key,
+      "workspace",
     );
-
-    await upsert(tk, encrypted);
-
-    if (installation.user?.id) {
-      await upsert(userKey(tk, installation.user.id), encrypted);
+    // One atomic request, so the workspace and user token are saved together.
+    const tx = redis.multi();
+    if (installation.bot) {
+      tx.hset(key, { workspace });
+    } else {
+      // A user-only authorization has no bot, so don't replace a workspace
+      // that has one; only save it if it's the first.
+      tx.hsetnx(key, "workspace", workspace);
     }
+    if (user.token) {
+      const field = `user:${user.id}`;
+      tx.hset(key, { [field]: encrypt(user, key, field) });
+    }
+    await tx.exec();
   },
 
   fetchInstallation: async (query: InstallationQuery<boolean>) => {
-    try {
-      const tk = teamKey(query);
-
-      if (query.userId) {
-        const data = await redis.get<StoredInstallation>(
-          userKey(tk, query.userId),
-        );
-        if (data) return decryptTokens(data);
-      }
-
-      const data = await redis.get<StoredInstallation>(tk);
-      if (!data) {
-        const teamIdentifier =
-          query.teamId || `enterprise:${query.enterpriseId}`;
-        throw new Error(`No installation found for team ${teamIdentifier}`);
-      }
-      const installation = decryptTokens(data);
-      if (query.userId) {
-        // The team-level installation stores the installer's user token. When a
-        // different user (without their own stored installation) triggers this
-        // fallback, returning that token would leak the installer's credentials
-        // and cause cross-user authorization confusion. Strip user token fields
-        // so the fallback only provides bot-level data.
-        installation.user = {
-          ...installation.user,
-          token: undefined,
-          refreshToken: undefined,
-          expiresAt: undefined,
-          scopes: undefined,
-        };
-      }
-      return installation;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("No installation found")
-      ) {
-        throw error;
-      }
-      throw new Error(
-        `Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    const key = workspaceKey(query);
+    const userField = query.userId ? `user:${query.userId}` : undefined;
+    const fields = await redis.hmget<Record<string, string | null>>(
+      key,
+      "workspace",
+      ...(userField ? [userField] : []),
+    );
+    const workspace = fields?.workspace;
+    const user = userField ? fields?.[userField] : undefined;
+    if (!workspace) throw new Error(`No installation found for ${key}`);
+    const installation = decrypt<Installation<"v1" | "v2", boolean>>(
+      workspace,
+      key,
+      "workspace",
+    );
+    // Only the user who authorized gets a user token. Unlike Slack's
+    // FileInstallationStore, a lookup with no user, like a bot message event,
+    // doesn't get the installer's token, so no event acts as someone it isn't.
+    if (!userField || !user) return installation;
+    const fetched: Fetched = {
+      ...installation,
+      user: decrypt<User>(user, key, userField),
+      [INSTALLER]: installation.user.id,
+    };
+    return fetched;
   },
 
   deleteInstallation: async (query: InstallationQuery<boolean>) => {
-    try {
-      const tk = teamKey(query);
-
-      if (query.userId) {
-        await redis.del(userKey(tk, query.userId));
-        return;
-      }
-
-      const userKeys = await redis.keys(`${tk}:*`);
-      if (userKeys.length > 0) {
-        await redis.del(...userKeys);
-      }
-      await redis.del(tk);
-    } catch (error) {
-      throw new Error(
-        `Failed to access installation store: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    const key = workspaceKey(query);
+    if (query.userId) await redis.hdel(key, `user:${query.userId}`);
+    else await redis.del(key);
   },
 };

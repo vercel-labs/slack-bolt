@@ -177,6 +177,37 @@ describe("createNewManifest", () => {
       );
     });
 
+    it("should rewrite the external select options URL with bypass secret", () => {
+      const original = baseManifest();
+      original.settings!.interactivity!.message_menu_options_url =
+        "https://prod.example.com/api/slack/options";
+
+      const result = createNewManifest({
+        originalManifest: original,
+        ...defaultParams,
+      });
+
+      const url = new URL(
+        result.settings!.interactivity!.message_menu_options_url!,
+      );
+      expect(url.hostname).toBe("my-branch.vercel.app");
+      expect(url.pathname).toBe("/api/slack/options");
+      expect(url.searchParams.get("x-vercel-protection-bypass")).toBe(
+        "bypass123",
+      );
+    });
+
+    it("should leave the options URL unset when the manifest has none", () => {
+      const result = createNewManifest({
+        originalManifest: baseManifest(),
+        ...defaultParams,
+      });
+
+      expect(
+        result.settings!.interactivity!.message_menu_options_url,
+      ).toBeUndefined();
+    });
+
     it("should rewrite slash command URLs with bypass secret", () => {
       const result = createNewManifest({
         originalManifest: baseManifest(),
@@ -357,6 +388,23 @@ describe("createNewManifest", () => {
       );
     });
 
+    it("should not leave a separator dangling where the branch was cut", () => {
+      const manifest = baseManifest();
+      (manifest.features!.bot_user as { display_name: string }).display_name =
+        "Bolt Preview E2E";
+
+      const result = createNewManifest({
+        originalManifest: manifest,
+        ...defaultParams,
+        branch: "e2e/a-very-long-branch-name-that-cannot-fit",
+      });
+
+      // Cut to fit, "e2e-a-very-long-" would end on its hyphen.
+      expect(result.display_information.name).toBe(
+        "Bolt Preview E2E (e2e-a-very-long)",
+      );
+    });
+
     it("should hard-truncate when app name alone leaves no room for branch", () => {
       const manifest = baseManifest();
       const longName = "A".repeat(33);
@@ -402,14 +450,48 @@ describe("createNewManifest", () => {
       expect(result.display_information.name).toMatch(/^App \(.+\)$/);
     });
 
-    it("should handle branch name with special characters (dots, underscores, @)", () => {
+    it("should keep the dots, underscores and hyphens of a branch name", () => {
       const result = createNewManifest({
         originalManifest: baseManifest(),
         ...defaultParams,
-        branch: "user@fix_bug.v2",
+        branch: "fix_bug.v2-rc",
       });
 
-      expect(result.display_information.name).toContain("user@fix_bug.v2");
+      expect(result.display_information.name).toBe("TestBot (fix_bug.v2-rc)");
+    });
+
+    // Slack rejects an app or bot name with any of these, and a bot name
+    // with letters outside ASCII.
+    it.each([
+      ["user@fix_bug.v2", "user-fix_bug.v2"],
+      ["feat/a+b", "feat-a-b"],
+      ["fix#123", "fix-123"],
+      ["a~b=c,d&e%f!g", "a-b-c-d-e-f-g"],
+      ["feat/añadir", "feat-a-adir"],
+      ["日本語/fix", "fix"],
+      ["feat/🚀-launch", "feat-launch"],
+      ["release/(beta)", "release-beta"],
+    ])("should replace what Slack rejects in branch %s", (branch, clean) => {
+      const result = createNewManifest({
+        originalManifest: baseManifest(),
+        ...defaultParams,
+        branch,
+      });
+
+      expect(result.display_information.name).toBe(`TestBot (${clean})`);
+      expect(result.features?.bot_user?.display_name).toBe(
+        `TestBot (${clean})`,
+      );
+    });
+
+    it("should still name the app when nothing in the branch name is usable", () => {
+      const result = createNewManifest({
+        originalManifest: baseManifest(),
+        ...defaultParams,
+        branch: "日本語",
+      });
+
+      expect(result.display_information.name).toBe("TestBot (preview)");
     });
 
     it("should keep display_information.name and bot_user.display_name in sync", () => {

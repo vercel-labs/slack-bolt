@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HTTPError } from "../vercel/errors";
+import { HTTPError } from "../http-error";
 import {
   SlackManifestCreateError,
   SlackManifestExportError,
@@ -10,7 +10,9 @@ import {
   createSlackApp,
   exportSlackApp,
   installApp,
+  removeSlackApp,
   rotateConfigToken,
+  SlackAPIError,
   updateSlackApp,
   upsertSlackApp,
   verifyServiceTokenAccess,
@@ -19,7 +21,7 @@ import {
 const mockFetch = vi.fn();
 
 beforeEach(() => {
-  mockFetch.mockClear();
+  mockFetch.mockReset();
   vi.stubGlobal("fetch", mockFetch);
 });
 
@@ -119,8 +121,10 @@ describe("createSlackApp", () => {
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(SlackManifestCreateError);
+      expect((err as SlackManifestCreateError).code).toBe("invalid_manifest");
+      // The message names the call, for a build log that only shows it.
       expect((err as SlackManifestCreateError).message).toBe(
-        "invalid_manifest",
+        "Slack's apps.manifest.create failed: invalid_manifest",
       );
       expect((err as SlackManifestCreateError).errors).toEqual(apiErrors);
     }
@@ -338,23 +342,57 @@ describe("upsertSlackApp", () => {
     expect(mockFetch.mock.calls[1][0]).toContain("apps.manifest.create");
   });
 
-  it("falls back to create when update fails after successful export", async () => {
+  // A second app would orphan the first: its SLACK_APP_ID is overwritten, so
+  // cleanup never finds it again.
+  it("doesn't create a second app when Slack answers the update with a 5xx", async () => {
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ ok: true, manifest: {} }))
-      .mockResolvedValueOnce(jsonResponse({}, 500, "Internal Server Error"))
-      .mockResolvedValueOnce(jsonResponse(createResponse));
+      .mockResolvedValueOnce(jsonResponse({}, 500, "Internal Server Error"));
 
-    const result = await upsertSlackApp({
-      token: "tok",
-      appId: "A_BROKEN",
-      manifest: testManifest,
-    });
+    await expect(
+      upsertSlackApp({
+        token: "tok",
+        appId: "A_EXISTING",
+        manifest: testManifest,
+      }),
+    ).rejects.toThrow("Failed to update Slack app: 500 Internal Server Error");
 
-    expect(result).toEqual({ isNew: true, app: createResponse });
-    expect(mockFetch.mock.calls[0][0]).toContain("apps.manifest.export");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(mockFetch.mock.calls[1][0]).toContain("apps.manifest.update");
-    expect(mockFetch.mock.calls[2][0]).toContain("apps.manifest.create");
   });
+
+  it("doesn't create a second app when Slack rate limits the export", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "ratelimited" }, 429, "Too Many"),
+    );
+
+    await expect(
+      upsertSlackApp({
+        token: "tok",
+        appId: "A_EXISTING",
+        manifest: testManifest,
+      }),
+    ).rejects.toThrow(HTTPError);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["internal_error", "fatal_error", "service_unavailable"])(
+    "doesn't create a second app when Slack reports %s",
+    async (error) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: false, error }));
+
+      await expect(
+        upsertSlackApp({
+          token: "tok",
+          appId: "A_EXISTING",
+          manifest: testManifest,
+        }),
+      ).rejects.toThrow(error);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("propagates the error when fallback create also fails", async () => {
     mockFetch
@@ -368,31 +406,14 @@ describe("upsertSlackApp", () => {
     ).rejects.toThrow(SlackManifestCreateError);
   });
 
-  it("falls back to create on network error during export (catch-all)", async () => {
-    mockFetch
-      .mockRejectedValueOnce(new TypeError("fetch failed"))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          ok: true,
-          app_id: "A_NEW",
-          credentials: {
-            client_id: "c",
-            client_secret: "s",
-            verification_token: "v",
-            signing_secret: "ss",
-          },
-          oauth_authorize_url: "",
-        }),
-      );
+  it("doesn't create a second app when the export never reaches Slack", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
 
-    const result = await upsertSlackApp({
-      token: "tok",
-      appId: "A1",
-      manifest: testManifest,
-    });
+    await expect(
+      upsertSlackApp({ token: "tok", appId: "A1", manifest: testManifest }),
+    ).rejects.toThrow("fetch failed");
 
-    expect(result.isNew).toBe(true);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to create on SlackManifestExportError (ok:false from export)", async () => {
@@ -423,35 +444,84 @@ describe("upsertSlackApp", () => {
     expect(result.isNew).toBe(true);
   });
 
-  it("falls back to create on SlackManifestUpdateError (ok:false from update)", async () => {
+  // The app is there, so a second one wouldn't fix what stopped the update.
+  it.each(["invalid_manifest", "no_permission", "something_new"])(
+    "doesn't create a second app when Slack answers the update with %s",
+    async (error) => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ ok: true, manifest: {} }))
+        .mockResolvedValueOnce(jsonResponse({ ok: false, error }));
+
+      const failure = await upsertSlackApp({
+        token: "tok",
+        appId: "A_EXISTING",
+        manifest: testManifest,
+      }).catch((e: unknown) => e);
+
+      expect(failure).toBeInstanceOf(SlackManifestUpdateError);
+      expect((failure as SlackManifestUpdateError).code).toBe(error);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("creates a new app when the stored one was deleted between the export and the update", async () => {
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ ok: true, manifest: {} }))
       .mockResolvedValueOnce(
-        jsonResponse({ ok: false, error: "invalid_manifest" }),
+        jsonResponse({ ok: false, error: "app_not_found" }),
       )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          ok: true,
-          app_id: "A_NEW",
-          credentials: {
-            client_id: "c",
-            client_secret: "s",
-            verification_token: "v",
-            signing_secret: "ss",
-          },
-          oauth_authorize_url: "",
-        }),
-      );
+      .mockResolvedValueOnce(jsonResponse(createResponse));
 
     const result = await upsertSlackApp({
       token: "tok",
-      appId: "A1",
+      appId: "A_DELETED",
+      manifest: testManifest,
+    });
+
+    expect(result).toEqual({ isNew: true, app: createResponse });
+    expect(mockFetch.mock.calls[2][0]).toContain("apps.manifest.create");
+  });
+
+  // What Slack answers the export of an ID it never issued.
+  it("creates a new app when Slack doesn't know the stored app ID", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: "invalid_app_id" }),
+      )
+      .mockResolvedValueOnce(jsonResponse(createResponse));
+
+    const result = await upsertSlackApp({
+      token: "tok",
+      appId: "A_UNKNOWN",
       manifest: testManifest,
     });
 
     expect(result.isNew).toBe(true);
-    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
+
+  // The same token couldn't create an app either, so say what's wrong with it.
+  it.each([
+    "invalid_auth",
+    "not_authed",
+    "token_expired",
+    "token_revoked",
+    "account_inactive",
+  ])(
+    "doesn't try to create an app when Slack refuses the token with %s",
+    async (error) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: false, error }));
+
+      const failure = await upsertSlackApp({
+        token: "tok",
+        appId: "A_EXISTING",
+        manifest: testManifest,
+      }).catch((e: unknown) => e);
+
+      expect(failure).toBeInstanceOf(SlackManifestExportError);
+      expect((failure as SlackManifestExportError).code).toBe(error);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -515,7 +585,7 @@ describe("installApp", () => {
 
     expect(result).toEqual({
       status: "slack_api_error",
-      error: "Service Unavailable",
+      error: "503 Service Unavailable",
     });
   });
 
@@ -585,7 +655,133 @@ describe("installApp", () => {
       botScopes: [],
     });
 
+    expect(result).toEqual({
+      status: "unknown_error",
+      error: "something_unexpected",
+    });
+  });
+
+  // What a free workspace that already has 10 apps answers.
+  it("keeps Slack's error code when the workspace has reached its app limit", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "service_limits_exceeded" }),
+    );
+
+    const result = await installApp({
+      serviceToken: "tok",
+      appId: "A1",
+      botScopes: [],
+    });
+
+    expect(result).toEqual({
+      status: "unknown_error",
+      error: "service_limits_exceeded",
+    });
+  });
+
+  it("doesn't report an install Slack didn't confirm", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: false }));
+
+    const result = await installApp({
+      serviceToken: "tok",
+      appId: "A1",
+      botScopes: [],
+    });
+
     expect(result.status).toBe("unknown_error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removeSlackApp
+// ---------------------------------------------------------------------------
+
+describe("removeSlackApp", () => {
+  const remove = () => removeSlackApp({ token: "tok", appId: "A1" });
+  const calledMethods = () =>
+    mockFetch.mock.calls.map(([url]) => String(url).split("/api/")[1]);
+
+  it("deletes the app", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    expect(await remove()).toEqual({ status: "deleted" });
+    expect(calledMethods()).toEqual(["apps.manifest.delete"]);
+  });
+
+  // What Slack answers the delete of an ID it never issued.
+  it("counts an app Slack doesn't know as gone", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: false, error: "invalid_app_id" }),
+    );
+
+    expect(await remove()).toEqual({ status: "gone" });
+  });
+
+  // Slack answers the delete of an app that was already deleted with
+  // no_permission, and only the export says it's gone.
+  it("counts an app as gone when the delete is refused and the export can't find it", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: "no_permission" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: "app_not_found" }),
+      );
+
+    expect(await remove()).toEqual({ status: "gone" });
+    expect(calledMethods()).toEqual([
+      "apps.manifest.delete",
+      "apps.manifest.export",
+    ]);
+  });
+
+  it("fails when the delete is refused and the app is still there", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: "no_permission" }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, manifest: {} }));
+
+    const outcome = await remove();
+
+    expect(outcome.status).toBe("failed");
+    expect((outcome as { error: SlackAPIError }).error.code).toBe(
+      "no_permission",
+    );
+  });
+
+  it("fails when the delete is refused and the export can't say", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: "no_permission" }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 503, "Service Unavailable"));
+
+    expect((await remove()).status).toBe("failed");
+  });
+
+  it.each([
+    ["Slack is rate limiting", () => jsonResponse({}, 429, "Too Many")],
+    ["Slack is down", () => jsonResponse({}, 502, "Bad Gateway")],
+    [
+      "Slack reports an internal error",
+      () => jsonResponse({ ok: false, error: "internal_error" }),
+    ],
+    [
+      "Slack refuses the token",
+      () => jsonResponse({ ok: false, error: "token_expired" }),
+    ],
+  ])("fails without asking for the app when %s", async (_, answer) => {
+    mockFetch.mockResolvedValueOnce(answer());
+
+    expect((await remove()).status).toBe("failed");
+    expect(calledMethods()).toEqual(["apps.manifest.delete"]);
+  });
+
+  it("fails when the delete never reaches Slack", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    expect((await remove()).status).toBe("failed");
   });
 });
 

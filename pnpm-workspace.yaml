@@ -9,3 +9,7 @@ catalog:
 allowBuilds:
   esbuild: true
   sharp: true
+# The examples depend on the published @vercel/slack-bolt, so a copied example
+# installs from npm. Inside this repo, link them to packages/slack-bolt instead.
+overrides:
+  "@vercel/slack-bolt": "workspace:*"
