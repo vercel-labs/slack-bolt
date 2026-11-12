@@ -310,7 +310,7 @@ Your store must implement `storeInstallation` and `fetchInstallation`, and optio
 1. Create a new Slack app (or update the existing one) from your `manifest.json`
 2. Rewrite manifest URLs to point to the preview deployment
 3. Store the app credentials (`SLACK_APP_ID`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`) as branch-scoped environment variables, with the two secrets as [Sensitive](https://vercel.com/docs/environment-variables/sensitive-environment-variables) ones
-4. Optionally auto-install the app and persist `SLACK_BOT_TOKEN`
+4. Optionally auto-install the app and persist `SLACK_BOT_TOKEN`, also as Sensitive
 5. Cancel and redeploy when it saved variables the build didn't have, so they take effect
 
 On production and local/development builds, the preview step is skipped automatically.
@@ -462,7 +462,7 @@ Options:
 
 Previews that can't read `SLACK_CONFIGURATION_TOKEN` or `VERCEL_API_TOKEN`, like those of pull requests from forks, fail too. To build them anyway, without a Slack app, use `vercel-slack build || true` instead.
 
-Pass `--debug`, or set `VERCEL_SLACK_DEBUG=1`, to log every request the CLI makes. Tokens, secrets, environment variable values and the protection bypass secret are redacted, with at most their last four characters shown.
+Pass `--debug`, or set `VERCEL_SLACK_DEBUG=1`, to log every request the CLI makes. Tokens, secrets, credentials, environment variable values, deploy hook URLs and the protection bypass secret are redacted, with at most the last four characters of a long one left to tell them apart. The CLI also takes every secret it was given or received, and anything shaped like a Slack or Vercel token, out of all it prints, error messages included.
 
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
 

@@ -13,31 +13,98 @@ const YELLOW = "\x1b[33m";
 
 type PatchedFetch = typeof globalThis.fetch & { __debugPatched?: boolean };
 
+/** The deployment protection bypass secret, wherever a URL carries it. */
+const BYPASS_PARAM = /(x-vercel-protection-bypass=)[^&"'\s\\]+/gi;
+
+/**
+ * Slack tokens, by their prefix: bot (`xoxb-`), user (`xoxp-`), app-level
+ * (`xapp-`), configuration (`xoxe.xoxp-`), refresh (`xoxe-`) and the rest of
+ * the `xox` family.
+ */
+const SLACK_TOKEN = /\b(?:xox[a-z]\.xox[a-z]|xox[a-z]|xapp)-[A-Za-z0-9-]+/g;
+
+/** Vercel access tokens with a typed prefix, like `vcp_`. */
+const VERCEL_TOKEN = /\bvc[a-z]_[A-Za-z0-9]{16,}/g;
+
+/** Shorter than this, the last characters are too much of a value to show. */
+const MIN_LENGTH_TO_SHOW_END = 16;
+
+function redactValue(value: string): string {
+  if (value.length < MIN_LENGTH_TO_SHOW_END) return "****";
+  return `****${value.slice(-4)}`;
+}
+
+/** Values that must not be printed, wherever they turn up. */
+const secrets = new Set<string>();
+
+/**
+ * Marks values as secret, so `scrub` takes them out of anything printed: a
+ * signing or client secret has no shape to recognise it by, and an error
+ * message or a field with an innocent name can still carry one.
+ */
+export function registerSecret(...values: (string | null | undefined)[]): void {
+  for (const value of values) {
+    // A value this short would match ordinary words.
+    if (value && value.length >= 8) secrets.add(value);
+  }
+}
+
+/**
+ * Takes secrets out of text on its way to the logs: the values registered as
+ * secret, anything shaped like a Slack or Vercel token, and the bypass secret
+ * in a URL.
+ */
+export function scrub(text: string): string {
+  let result = text;
+  // Longest first, so a secret that contains another goes as a whole.
+  for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
+    if (result.includes(secret)) {
+      result = result.split(secret).join(redactValue(secret));
+    }
+  }
+  return result
+    .replace(BYPASS_PARAM, "$1****")
+    .replace(SLACK_TOKEN, redactValue)
+    .replace(VERCEL_TOKEN, redactValue);
+}
+
+const text = (value: unknown) =>
+  typeof value === "string" ? value : String(value);
+
+// Everything printed goes through `scrub`: messages are built from errors and
+// from what Slack and Vercel answer, which the code doesn't control.
 export const log = {
-  step: (msg: string) => console.log(`  ${msg} ...`),
-  success: (msg: string) => console.log(`${GREEN}✓${RESET} ${msg}`),
-  info: (msg: string) => console.log(`  ${msg}`),
-  warning: (msg: string) => console.log(`${YELLOW}⚠${RESET} ${msg}`),
-  error: (...args: unknown[]) => console.error(...args),
+  step: (msg: string) => console.log(scrub(`  ${msg} ...`)),
+  success: (msg: string) => console.log(`${GREEN}✓${RESET} ${scrub(msg)}`),
+  info: (msg: string) => console.log(scrub(`  ${msg}`)),
+  warning: (msg: string) => console.log(`${YELLOW}⚠${RESET} ${scrub(msg)}`),
+  error: (...args: unknown[]) =>
+    console.error(...args.map((arg) => scrub(text(arg)))),
   debug: (...args: unknown[]) => {
     if (isDebug()) {
-      const msg = args
-        .map((a) => (typeof a === "string" ? a : String(a)))
-        .join(" ");
-      console.debug(`${DIM}${msg}${RESET}`);
+      console.debug(`${DIM}${scrub(args.map(text).join(" "))}${RESET}`);
     }
   },
 };
 
 const REDACTED_HEADERS = new Set([
   "authorization",
+  "proxy-authorization",
   "cookie",
   "set-cookie",
   "x-vercel-protection-bypass",
 ]);
 
-/** The deployment protection bypass secret, wherever a URL carries it. */
-const BYPASS_PARAM = /(x-vercel-protection-bypass=)[^&"'\s\\]+/gi;
+/** Header name fragments that mark its value as a credential. */
+const SENSITIVE_HEADER_PATTERNS = ["token", "secret", "api-key", "apikey"];
+
+function isSensitiveHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    REDACTED_HEADERS.has(lower) ||
+    SENSITIVE_HEADER_PATTERNS.some((pattern) => lower.includes(pattern))
+  );
+}
 
 /**
  * Keys whose values should be redacted when logging request/response bodies.
@@ -67,15 +134,33 @@ const SENSITIVE_BODY_KEYS = new Set([
  */
 const SENSITIVE_KEY_PATTERNS = ["token", "secret", "password", "credential"];
 
-function isSensitiveKey(key: string): boolean {
+/**
+ * Keys whose whole value is redacted, however it's nested. Vercel returns a
+ * project's deploy hooks with their URLs, and anyone who has one can deploy.
+ */
+const SENSITIVE_CONTAINER_KEYS = new Set(["deployhooks"]);
+
+function matchesSensitivePattern(key: string): boolean {
   const lower = key.toLowerCase();
-  if (SENSITIVE_BODY_KEYS.has(lower)) return true;
   return SENSITIVE_KEY_PATTERNS.some((pattern) => lower.includes(pattern));
 }
 
-function redactValue(value: string): string {
-  if (value.length <= 4) return "****";
-  return `****${value.slice(-4)}`;
+function isSensitiveKey(key: string): boolean {
+  return (
+    SENSITIVE_BODY_KEYS.has(key.toLowerCase()) || matchesSensitivePattern(key)
+  );
+}
+
+/** Redacts every string in a value, whatever the keys around it are called. */
+function redactDeep(value: unknown): unknown {
+  if (typeof value === "string") return redactValue(value);
+  if (Array.isArray(value)) return value.map(redactDeep);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactDeep(item)]),
+    );
+  }
+  return value;
 }
 
 /**
@@ -92,7 +177,7 @@ function redactString(value: string): string {
       // Not JSON after all.
     }
   }
-  return value.replace(BYPASS_PARAM, "$1****");
+  return scrub(value);
 }
 
 function redactSensitiveFields(obj: unknown): unknown {
@@ -105,6 +190,16 @@ function redactSensitiveFields(obj: unknown): unknown {
     for (const [key, val] of Object.entries(obj)) {
       if (isSensitiveKey(key) && typeof val === "string") {
         result[key] = redactValue(val);
+      } else if (
+        SENSITIVE_CONTAINER_KEYS.has(key.toLowerCase()) ||
+        (matchesSensitivePattern(key) &&
+          val !== null &&
+          typeof val === "object")
+      ) {
+        // A key named for secrets, like `api_access_tokens` or `credentials`,
+        // can hold them under names this file doesn't know. Short names like
+        // `bot` and `user` don't count: a manifest lists scopes under them.
+        result[key] = redactDeep(val);
       } else if (
         key.toLowerCase() === "protectionbypass" &&
         val !== null &&
@@ -139,13 +234,17 @@ function redactBody(body: string): string {
 }
 
 function formatHeaders(headers?: HeadersInit): string {
-  const entries =
-    headers instanceof Headers
-      ? [...headers.entries()]
-      : Object.entries(headers ?? {});
-  const redacted = entries.map(([k, v]) =>
-    REDACTED_HEADERS.has(k.toLowerCase()) ? [k, `****${v.slice(-4)}`] : [k, v],
-  );
+  // Headers can also be a list of pairs; read every form the same way.
+  let entries: [string, string][];
+  try {
+    entries = [...new Headers(headers).entries()];
+  } catch {
+    return "<unreadable headers>";
+  }
+  const redacted = entries.map(([name, value]) => [
+    name,
+    isSensitiveHeader(name) ? redactValue(value) : scrub(value),
+  ]);
   return JSON.stringify(Object.fromEntries(redacted));
 }
 
@@ -157,7 +256,7 @@ export function enableFetchDebugLogging(): void {
     const method = init?.method ?? "GET";
     const url = input instanceof Request ? input.url : input.toString();
     const start = performance.now();
-    log.debug(`-> ${method} ${url.replace(BYPASS_PARAM, "$1****")}`);
+    log.debug(`-> ${method} ${url}`);
     log.debug(`   headers: ${formatHeaders(init?.headers)}`);
     if (typeof init?.body === "string")
       log.debug(`   body: ${redactBody(init.body)}`);

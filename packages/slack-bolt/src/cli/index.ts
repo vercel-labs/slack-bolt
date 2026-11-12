@@ -1,7 +1,12 @@
 import { Command } from "commander";
-import { enableFetchDebugLogging, log, startMessage } from "../internal/logger";
+import {
+  enableFetchDebugLogging,
+  log,
+  registerSecret,
+  startMessage,
+} from "../internal/logger";
 import { executeBuild } from "./build";
-import { ENV_KEYS, envKeyToFlag, resolveEnv } from "./env";
+import { ENV_KEYS, envKeyToFlag, resolveEnv, SECRET_ENV_KEYS } from "./env";
 import { validateAndBuildParams } from "./schemas";
 
 export function run(version: string): Promise<void> {
@@ -40,6 +45,9 @@ export function run(version: string): Promise<void> {
 
     const cleanup = options.cleanup === true;
     const env = resolveEnv(options as Record<string, string | undefined>);
+    // Before anything is printed: nothing this build is given may reach its
+    // log, whatever error or answer carries it.
+    registerSecret(...SECRET_ENV_KEYS.map((key) => env[key]));
 
     console.log(
       startMessage(

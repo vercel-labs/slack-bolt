@@ -124,6 +124,39 @@ describe("vercel-slack build", () => {
     });
   });
 
+  // An error can repeat what the build was given: Vercel's and Slack's
+  // answers end up in messages.
+  it("keeps the secrets the build was given out of the errors it prints", async () => {
+    // Put together here, so a secret scanner doesn't take it for a real one.
+    const botToken = ["xoxb", "123456789012", "abcdefghijkl"].join("-");
+    vi.stubEnv("SLACK_CONFIGURATION_TOKEN", "config-token-from-env");
+    vi.stubEnv("SLACK_SIGNING_SECRET", "0123456789abcdef0123456789abcdef");
+    process.argv.push("--vercel-api-token", "vercel-token-from-flag");
+    vi.mocked(executeBuild).mockRejectedValue(
+      new Error("Request with config-token-from-env failed", {
+        cause: new Error(
+          `Vercel answered: vercel-token-from-flag 0123456789abcdef0123456789abcdef ${botToken}`,
+        ),
+      }),
+    );
+
+    await run("0.0.0");
+
+    const printed = vi
+      .mocked(console.error)
+      .mock.calls.map(([line]) => line)
+      .join("\n");
+    for (const secret of [
+      "config-token-from-env",
+      "vercel-token-from-flag",
+      "0123456789abcdef0123456789abcdef",
+      botToken.slice(0, 17),
+    ]) {
+      expect(printed).not.toContain(secret);
+    }
+    expect(printed).toContain("Request with ****-env failed");
+  });
+
   it("exits with code 1 when required env vars are missing", async () => {
     vi.mocked(validateAndBuildParams).mockImplementationOnce(() => {
       throw new Error("Missing VERCEL_API_TOKEN");

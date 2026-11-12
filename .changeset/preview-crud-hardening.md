@@ -4,7 +4,8 @@
 
 Keep track of every Slack app the preview flow creates, found by running `vercel-slack build` against Slack and Vercel:
 
-- `SLACK_CLIENT_SECRET` and `SLACK_SIGNING_SECRET` are saved as Sensitive environment variables, so Vercel never shows their values again.
+- `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `SLACK_APP_LEVEL_TOKEN` and `SLACK_USER_TOKEN` are saved as Sensitive environment variables, so Vercel never shows their values again.
+- The CLI takes every secret it was given or received, and anything shaped like a Slack or Vercel token, out of all it prints: progress, warnings, errors and `--debug` output. `--debug` also redacts everything under keys like `api_access_tokens` and `credentials` whatever the names inside, a project's deploy hook URLs, and credentials in headers however they are passed, and shows nothing of a secret shorter than 16 characters.
 - `--cleanup` deletes a stale branch's variables only once its app is deleted or Slack says it's gone, and `SLACK_APP_ID` last. It used to delete them when Slack couldn't be reached or refused, which left an app nothing could find again. It also recognises an app that was already deleted, which Slack answers with `no_permission`, and says what to do about an app Slack keeps refusing to delete.
 - `vercel-slack build` and `preview` save an app's tokens on any run that installs it, not only the run that created it, so a branch whose first install didn't go through gets its `SLACK_BOT_TOKEN` once it does. The CLI then replaces the deployment, as it does for a new app, and a deployment it started doesn't start another.
 - When Vercel doesn't save a new app's credentials, the app is deleted again, so the next build doesn't create a second one next to it.

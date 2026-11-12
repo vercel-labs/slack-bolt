@@ -1,3 +1,5 @@
+import { scrub } from "./logger";
+
 export class HTTPError extends Error {
   constructor(
     message: string,
@@ -7,7 +9,8 @@ export class HTTPError extends Error {
   ) {
     // HTTP/2 responses have no status text.
     const parts = [`${message}: ${status} ${statusText}`.trimEnd()];
-    if (body) parts.push(body);
+    // The answer is from Slack or Vercel, and ends up in build logs.
+    if (body) parts.push(scrub(body));
     super(parts.join(" - "));
   }
 

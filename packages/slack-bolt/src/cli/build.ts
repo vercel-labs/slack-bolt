@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { HTTPError } from "../internal/http-error";
-import { log } from "../internal/logger";
+import { log, registerSecret } from "../internal/logger";
 import { provisionPreview } from "../internal/provision";
 import {
   authTest,
@@ -76,6 +76,7 @@ async function savedConfigToken(
           envId: env.id,
         });
         if (!value || value === params.slackConfigurationToken) continue;
+        registerSecret(value);
         await authTest({ token: value });
         return value;
       }
@@ -215,6 +216,7 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
     log.success("Using the configuration token another build rotated");
     return;
   }
+  registerSecret(rotated.token, rotated.refreshToken);
   params.slackConfigurationToken = rotated.token;
   params.slackConfigRefreshToken = rotated.refreshToken;
 

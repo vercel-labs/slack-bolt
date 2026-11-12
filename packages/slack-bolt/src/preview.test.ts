@@ -10,6 +10,7 @@ import { waitUntil } from "@vercel/functions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { VercelReceiver } from "./index";
+import { HTTPError } from "./internal/http-error";
 import type { Manifest } from "./internal/manifest/types";
 import { provisionPreview } from "./internal/provision";
 import type { CreateProjectEnv } from "./internal/vercel/types";
@@ -198,7 +199,17 @@ describe("a branch's first preview", () => {
 
   // Vercel never shows a Sensitive variable's value again. Cleanup reads
   // SLACK_APP_ID back to find the app, so that one can't be.
-  it("saves the app's secrets as Sensitive, and the rest readable", async () => {
+  it("saves the app's secrets and tokens as Sensitive, and its IDs readable", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({
+        ok: true,
+        api_access_tokens: {
+          bot: "xoxb-1",
+          app_level: "xapp-1",
+          user: "xoxp-1",
+        },
+      });
+
     await preview({ ...params, automationBypassSecret: BYPASS });
 
     expect(Object.fromEntries(savedEnvs().map((e) => [e.key, e.type]))).toEqual(
@@ -207,9 +218,36 @@ describe("a branch's first preview", () => {
         SLACK_CLIENT_ID: "encrypted",
         SLACK_CLIENT_SECRET: "sensitive",
         SLACK_SIGNING_SECRET: "sensitive",
-        SLACK_BOT_TOKEN: "encrypted",
+        SLACK_BOT_TOKEN: "sensitive",
+        SLACK_APP_LEVEL_TOKEN: "sensitive",
+        SLACK_USER_TOKEN: "sensitive",
       },
     );
+  });
+
+  // The CLI prints what failed, and Vercel's or Slack's answer can repeat
+  // what it was sent.
+  it("keeps the secrets it handles out of the errors it throws", async () => {
+    await preview({ ...params, automationBypassSecret: BYPASS });
+
+    // A later call fails, with an answer that repeats them.
+    const error = await HTTPError.fromResponse(
+      "Failed to create deployment",
+      new Response(
+        `echo ${SIGNING_SECRET} client-secret-from-slack ${BYPASS} ${params.slackConfigurationToken} ${params.vercelApiToken}`,
+        { status: 400 },
+      ),
+    );
+
+    for (const secret of [
+      SIGNING_SECRET,
+      "client-secret-from-slack",
+      BYPASS,
+      params.slackConfigurationToken,
+      params.vercelApiToken,
+    ]) {
+      expect(error.message).not.toContain(secret);
+    }
   });
 
   it("saves the app-level and user tokens when Slack issues them", async () => {

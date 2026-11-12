@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { PreviewParams, PreviewResult } from "../preview";
-import { log } from "./logger";
+import { log, registerSecret } from "./logger";
 import { createNewManifest } from "./manifest";
 import { parseManifest, stringifyManifest } from "./manifest/parse";
 import type { Manifest } from "./manifest/types";
@@ -10,7 +10,13 @@ import { addEnvironmentVariables, updateProtectionBypass } from "./vercel";
 import type { CreateProjectEnv } from "./vercel/types";
 
 /** The variables saved as Sensitive in Vercel. */
-const SENSITIVE_KEYS = new Set(["SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET"]);
+const SENSITIVE_KEYS = new Set([
+  "SLACK_CLIENT_SECRET",
+  "SLACK_SIGNING_SECRET",
+  "SLACK_BOT_TOKEN",
+  "SLACK_APP_LEVEL_TOKEN",
+  "SLACK_USER_TOKEN",
+]);
 
 export type ProvisionOptions = {
   /** Print progress, as the `vercel-slack` CLI does. */
@@ -101,6 +107,14 @@ export async function provisionPreview(
 
   // Read the manifest first, so one that can't be used fails before anything
   // is created.
+  // Keep every secret this run handles out of what it prints and throws.
+  registerSecret(
+    params.automationBypassSecret,
+    slackConfigurationToken,
+    slackServiceToken,
+    vercelApiToken,
+  );
+
   if (cli) log.step(`Reading manifest from ${manifestPath}`);
   const manifest = readManifest(manifestPath);
 
@@ -114,6 +128,7 @@ export async function provisionPreview(
     });
     if (cli) log.success("Automation bypass secret generated");
   }
+  registerSecret(bypassSecret);
 
   const newManifest = createNewManifest({
     originalManifest: manifest,
@@ -139,14 +154,21 @@ export async function provisionPreview(
     appId: slackAppId,
     manifest: newManifest,
   });
+  if (isNew) {
+    registerSecret(
+      app.credentials?.client_secret,
+      app.credentials?.signing_secret,
+      app.credentials?.verification_token,
+    );
+  }
 
   const branchEnv = (key: string, value: string): CreateProjectEnv => ({
     key,
     value,
     // Sensitive variables can't be read back from Vercel, in the dashboard or
-    // through the API. Nothing here reads the app's secrets again, so they
-    // are stored that way. SLACK_APP_ID stays readable: cleanup needs it to
-    // find the app.
+    // through the API. Nothing here reads the app's secrets or tokens again,
+    // so they are stored that way. SLACK_APP_ID stays readable: cleanup needs
+    // it to find the app.
     type: SENSITIVE_KEYS.has(key) ? "sensitive" : "encrypted",
     target: ["preview"],
     gitBranch: branch,
@@ -218,6 +240,7 @@ export async function provisionPreview(
     appId: app.app_id,
     botScopes: manifest.oauth_config?.scopes?.bot ?? [],
   });
+  registerSecret(botToken, appLevelToken, userToken);
 
   // Save the tokens on later builds too: a branch whose first install didn't
   // go through, like one waiting for approval, gets them once it does. Skip
