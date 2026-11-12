@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertToken } from "../internal/tokens";
 import type { PreviewParams } from "../preview";
 
 function formatMissingKeys(error: z.ZodError): string {
@@ -31,6 +32,15 @@ const vercelEnvSchema = z.object({
   VERCEL_API_TOKEN: z.string(),
 });
 
+/**
+ * A token as it was meant: without the space or line break a paste can leave
+ * around it, and refused when it has one inside.
+ */
+function token<T extends string | undefined>(name: string, value: T): T {
+  assertToken(name, value);
+  return value?.trim() as T;
+}
+
 export function validateAndBuildParams(
   env: Record<string, string | undefined>,
 ): PreviewParams {
@@ -38,7 +48,7 @@ export function validateAndBuildParams(
   if (!systemResult.success) {
     const missing = formatMissingKeys(systemResult.error);
     throw new Error(
-      `Missing Vercel system environment variables: ${missing}\nEnable 'Automatically expose System Environment Variables' in your Vercel project settings:\nhttps://vercel.com/docs/projects/environment-variables/system-environment-variables`,
+      `Missing system environment variables: ${missing}\nTurn on "Automatically expose System Environment Variables" in your Vercel project: https://vercel.com/docs/projects/environment-variables/system-environment-variables`,
     );
   }
 
@@ -46,7 +56,7 @@ export function validateAndBuildParams(
   if (!slackResult.success) {
     const missing = formatMissingKeys(slackResult.error);
     throw new Error(
-      `Missing Slack environment variables: ${missing}\nAdd them as environment variables in your Vercel project.`,
+      `Missing ${missing}\nGenerate a configuration token and add it to your Vercel project: https://api.slack.com/apps`,
     );
   }
 
@@ -54,7 +64,7 @@ export function validateAndBuildParams(
   if (!vercelResult.success) {
     const missing = formatMissingKeys(vercelResult.error);
     throw new Error(
-      `Missing Vercel environment variables: ${missing}\nCreate a new token and add it as VERCEL_API_TOKEN in your Vercel project:\nhttps://vercel.com/account/settings/tokens`,
+      `Missing ${missing}\nCreate a token and add it to your Vercel project: https://vercel.com/account/settings/tokens`,
     );
   }
 
@@ -70,10 +80,24 @@ export function validateAndBuildParams(
     deploymentId: systemResult.data.VERCEL_DEPLOYMENT_ID,
     automationBypassSecret: systemResult.data.VERCEL_AUTOMATION_BYPASS_SECRET,
     slackAppId: slackResult.data.SLACK_APP_ID,
-    slackConfigurationToken: slackResult.data.SLACK_CONFIGURATION_TOKEN,
-    slackConfigRefreshToken: slackResult.data.SLACK_CONFIG_REFRESH_TOKEN,
-    slackServiceToken: slackResult.data.SLACK_SERVICE_TOKEN,
-    manifestPath: slackResult.data.MANIFEST_PATH,
-    vercelApiToken: vercelResult.data.VERCEL_API_TOKEN,
+    slackConfigurationToken: token(
+      "SLACK_CONFIGURATION_TOKEN",
+      slackResult.data.SLACK_CONFIGURATION_TOKEN,
+    ),
+    slackConfigRefreshToken: token(
+      "SLACK_CONFIG_REFRESH_TOKEN",
+      slackResult.data.SLACK_CONFIG_REFRESH_TOKEN,
+    ),
+    slackServiceToken: token(
+      "SLACK_SERVICE_TOKEN",
+      slackResult.data.SLACK_SERVICE_TOKEN,
+    ),
+    // An empty MANIFEST_PATH, like one left blank in the project's settings,
+    // would name the working directory itself.
+    manifestPath: slackResult.data.MANIFEST_PATH || "manifest.json",
+    vercelApiToken: token(
+      "VERCEL_API_TOKEN",
+      vercelResult.data.VERCEL_API_TOKEN,
+    ),
   };
 }

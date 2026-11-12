@@ -1,7 +1,14 @@
 import { Command } from "commander";
-import { enableFetchDebugLogging, log, startMessage } from "../internal/logger";
+import {
+  enableFetchDebugLogging,
+  indent,
+  log,
+  registerSecret,
+  scrub,
+  startMessage,
+} from "../internal/logger";
 import { executeBuild } from "./build";
-import { ENV_KEYS, envKeyToFlag, resolveEnv } from "./env";
+import { ENV_KEYS, envKeyToFlag, resolveEnv, SECRET_ENV_KEYS } from "./env";
 import { validateAndBuildParams } from "./schemas";
 
 export function run(version: string): Promise<void> {
@@ -40,6 +47,9 @@ export function run(version: string): Promise<void> {
 
     const cleanup = options.cleanup === true;
     const env = resolveEnv(options as Record<string, string | undefined>);
+    // Before anything is printed: nothing this build is given may reach its
+    // log, whatever error or answer carries it.
+    registerSecret(...SECRET_ENV_KEYS.map((key) => env[key]));
 
     console.log(
       startMessage(
@@ -56,39 +66,47 @@ export function run(version: string): Promise<void> {
     const isProd = env.VERCEL_ENV === "production";
 
     if (isLocal || isDev || isProd) {
-      const reason = isLocal ? "local" : isDev ? "development" : "production";
-      log.info(`Environment: ${reason} (skipped)\n`);
+      const reason = isLocal
+        ? "VERCEL_ENV is not set"
+        : isProd
+          ? "VERCEL_ENV is production"
+          : env.VERCEL_ENV === "development"
+            ? "VERCEL_ENV is development"
+            : "NODE_ENV is development";
+      log.info(`Skipped: only preview deployments get a Slack app (${reason})`);
       return;
     }
 
     const params = validateAndBuildParams(env);
-    await executeBuild(params, { cleanup });
+    await executeBuild(params, { cleanup, env });
   });
 
   return program.parseAsync().then(
     () => {},
     (error: unknown) => {
-      log.error(error instanceof Error ? error.message : String(error));
-      // Slack rejects a manifest with one entry per problem and where it is.
-      const problems = (error as { errors?: unknown }).errors;
-      if (Array.isArray(problems)) {
-        for (const problem of problems as {
-          message?: string;
-          pointer?: string;
-        }[]) {
-          log.error(`  ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
-        }
-      }
-      // The message says what to do; the cause says what went wrong, like
+      log.failure(error instanceof Error ? error.message : String(error));
+      // The message says what to do; each cause says what went wrong, like
       // the status Vercel or Slack answered with.
       for (
-        let cause = error instanceof Error ? error.cause : undefined;
-        cause instanceof Error;
-        cause = cause.cause
+        let failure: unknown = error;
+        failure instanceof Error;
+        failure = failure.cause
       ) {
-        log.error(`  Caused by: ${cause.message}`);
+        if (failure !== error) {
+          log.error(`  Caused by: ${indent(scrub(failure.message), "    ")}`);
+        }
+        // Slack rejects a manifest with one entry per problem and where it
+        // is, on the error for the call that sent it.
+        const problems = (failure as { errors?: unknown }).errors;
+        if (Array.isArray(problems)) {
+          for (const problem of problems as {
+            message?: string;
+            pointer?: string;
+          }[]) {
+            log.error(`    ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
+          }
+        }
       }
-      console.log();
       // Fail the build, so `vercel-slack build && next build` doesn't deploy
       // a preview whose Slack app wasn't set up.
       process.exitCode = 1;

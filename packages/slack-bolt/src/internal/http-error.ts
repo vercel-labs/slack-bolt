@@ -1,13 +1,40 @@
+import { scrub } from "./logger";
+
+/** Vercel's `{ error: { code, message } }` as "code: message"; else the body. */
+function summarize(body: string): string {
+  try {
+    const { error } = JSON.parse(body) as {
+      error?: { code?: unknown; message?: unknown };
+    };
+    if (typeof error?.code === "string") {
+      return typeof error.message === "string"
+        ? `${error.code}: ${error.message}`
+        : error.code;
+    }
+  } catch {
+    // Not JSON.
+  }
+  return body;
+}
+
 export class HTTPError extends Error {
+  /** The response body, with secrets taken out like the message's. */
+  public body?: string;
+
   constructor(
     message: string,
     public status: number,
     public statusText: string,
-    public body?: string,
+    body?: string,
   ) {
-    const parts = [`${message}: ${status} ${statusText}`];
-    if (body) parts.push(body);
+    // The answer is from Slack or Vercel, and ends up in logs: the error's
+    // message in the CLI's, and the whole error in a caller's that prints it.
+    const safe = body === undefined ? undefined : scrub(body);
+    // HTTP/2 responses have no status text.
+    const parts = [`${message}: ${status} ${statusText}`.trimEnd()];
+    if (safe) parts.push(summarize(safe));
     super(parts.join(" - "));
+    this.body = safe;
   }
 
   static async fromResponse(

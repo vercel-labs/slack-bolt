@@ -1,5 +1,5 @@
 import { log } from "../internal/logger";
-import { deleteSlackApp } from "../internal/slack";
+import { isTokenError, isTransient, removeSlackApp } from "../internal/slack";
 import {
   deleteEnvironmentVariable,
   getActiveBranches,
@@ -20,6 +20,15 @@ const SLACK_ENV_VAR_KEYS = [
   "SLACK_APP_LEVEL_TOKEN",
   "SLACK_USER_TOKEN",
 ];
+
+const message = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+const plural = (count: number) =>
+  `${count} ${count === 1 ? "branch" : "branches"}`;
+
+/** What a branch is left with when its cleanup can't finish. */
+const KEPT = "Kept its app and variables; the next build tries again.";
 
 export async function cleanupOrphanedApps({
   projectId,
@@ -59,47 +68,75 @@ export async function cleanupOrphanedApps({
   }
 
   if (staleBranches.size === 0) {
-    log.info("No orphaned preview apps found");
+    log.info("Nothing to clean up");
     return;
   }
 
-  log.step(
-    `Found ${staleBranches.size} orphaned ${staleBranches.size === 1 ? "branch" : "branches"}`,
-  );
-
-  for (const [branch, envId] of staleBranches) {
-    let appId: string | null = null;
+  let leftBehind = 0;
+  for (const [branch, appIdEnvId] of staleBranches) {
+    // SLACK_APP_ID is the only record of the branch's app, and how the next
+    // cleanup finds the branch. So the branch's variables are only deleted
+    // once its app is gone, and SLACK_APP_ID last of all: whatever fails
+    // here is tried again on the next build, not left behind for good.
+    let appId: string | null;
     try {
       appId = await getEnvironmentVariable({
         projectId,
-        envId,
+        envId: appIdEnvId,
         token: vercelApiToken,
         teamId,
       });
-    } catch {
-      log.warning(`Failed to decrypt SLACK_APP_ID for branch ${branch}`);
+    } catch (error) {
+      leftBehind++;
+      log.warning(
+        `Couldn't read SLACK_APP_ID of branch ${branch}: ${message(error)}`,
+      );
+      log.info(KEPT);
+      continue;
     }
 
-    if (appId) {
-      try {
-        await deleteSlackApp({
-          token: slackConfigurationToken,
-          appId,
-        });
-        log.info(`${appId} deleted (branch: ${branch})`);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (msg.includes("app_not_found")) {
-          log.info(`${appId} already deleted (branch: ${branch})`);
-        } else {
-          log.warning(`Failed to delete app ${appId}: ${msg}`);
-        }
-      }
+    // Vercel returns no value for a Sensitive variable. Without the ID the
+    // app can't be deleted, and deleting the variables would lose it.
+    if (!appId) {
+      leftBehind++;
+      log.warning(
+        `Couldn't read SLACK_APP_ID of branch ${branch}: Vercel returned no value`,
+      );
+      log.info(
+        "Kept the branch's variables. If SLACK_APP_ID is Sensitive, delete the branch's app and SLACK_ variables yourself.",
+      );
+      continue;
     }
 
+    const removed = await removeSlackApp({
+      token: slackConfigurationToken,
+      appId,
+    });
+    if (removed.status === "failed") {
+      leftBehind++;
+      log.warning(
+        `Couldn't delete app ${appId} of branch ${branch}: ${message(removed.error)}`,
+      );
+      // An outage or a refused token passes. A refusal for this app gets
+      // the same answer on every build, until someone steps in.
+      log.info(
+        isTransient(removed.error) || isTokenError(removed.error)
+          ? KEPT
+          : `Slack will refuse again. Delete the app (https://api.slack.com/apps/${appId}), or if it isn't yours, the branch's SLACK_ variables in Vercel.`,
+      );
+      continue;
+    }
+    log.info(
+      removed.status === "gone"
+        ? `App ${appId} of branch ${branch} was already deleted`
+        : `Deleted app ${appId} of branch ${branch}`,
+    );
+
+    let deletedAll = true;
     for (const env of envs) {
       if (
         env.id &&
+        env.id !== appIdEnvId &&
         env.gitBranch === branch &&
         SLACK_ENV_VAR_KEYS.includes(env.key)
       ) {
@@ -111,13 +148,34 @@ export async function cleanupOrphanedApps({
             teamId,
           });
         } catch (error) {
+          deletedAll = false;
           log.warning(
-            `Failed to delete env var ${env.key} for branch ${branch}: ${error instanceof Error ? error.message : error}`,
+            `Couldn't delete ${env.key} of branch ${branch}: ${message(error)}`,
           );
         }
       }
     }
+
+    if (!deletedAll) {
+      leftBehind++;
+      continue;
+    }
+    try {
+      await deleteEnvironmentVariable({
+        projectId,
+        envId: appIdEnvId,
+        token: vercelApiToken,
+        teamId,
+      });
+    } catch (error) {
+      leftBehind++;
+      log.warning(
+        `Couldn't delete SLACK_APP_ID of branch ${branch}: ${message(error)}`,
+      );
+    }
   }
 
-  log.success("Orphan cleanup completed");
+  // Each branch that was left has said why, and what happens to it next.
+  if (leftBehind > 0) return;
+  log.success(`Cleaned up ${plural(staleBranches.size)}`);
 }

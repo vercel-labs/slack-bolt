@@ -43,9 +43,14 @@ function createManifestDescription(params: {
   }
 
   const maxDisplayName = 35;
-  const cleanBranch = params.branch
-    .replace(/^refs\/heads\//, "")
-    .replace(/\//g, "-");
+  // Slack rejects an app or bot name with characters like "+", "@" or "#",
+  // and a bot name with letters outside ASCII, so keep what it accepts from
+  // the branch and turn each run of the rest, slashes included, into "-".
+  const cleanBranch =
+    params.branch
+      .replace(/^refs\/heads\//, "")
+      .replace(/[^A-Za-z0-9._]+/g, "-")
+      .replace(/^-|-$/g, "") || "preview";
 
   let displayName = `${params.existingName} (${cleanBranch})`;
   if (displayName.length > maxDisplayName) {
@@ -54,7 +59,8 @@ function createManifestDescription(params: {
     const availableForBranch = maxDisplayName - prefix.length - suffix.length;
     displayName =
       availableForBranch > 0
-        ? `${prefix}${cleanBranch.slice(0, availableForBranch)}${suffix}`
+        ? // Cut at the limit, then drop a separator left dangling at the cut.
+          `${prefix}${cleanBranch.slice(0, availableForBranch).replace(/[-._]+$/, "")}${suffix}`
         : displayName.slice(0, maxDisplayName);
   }
 

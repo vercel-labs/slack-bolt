@@ -173,9 +173,14 @@ const result = await preview({
 | --------------- | --------- | ----------------------------------------------------------------- |
 | `isNew`         | `boolean` | `true` if a new Slack app was created, `false` if updated.        |
 | `installStatus` | `string`  | Installation outcome (e.g. `installed`, `missing_service_token`). |
+| `installError`  | `string`  | Why Slack didn't install the app, when it gave a reason.          |
 | `app`           | `object`  | Slack API response containing `app_id` and credentials.           |
 
-`preview` rewrites the manifest file at `manifestPath` in place, creates or updates the Slack app, and saves a new app's credentials as environment variables for the branch. It doesn't redeploy: the variables reach the branch's next deployment.
+`installStatus` is one of `installed`, `missing_service_token`, `no_access`, `app_approval_request_eligible`, `app_approval_request_pending`, `app_approval_request_denied`, `invalid_app_id`, `slack_api_error` and `unknown_error`. With the last two, `installError` has Slack's error code, like `service_limits_exceeded` for a workspace that has reached its app limit, or the HTTP status Slack answered with.
+
+`preview` rewrites the manifest file at `manifestPath` in place, creates or updates the Slack app, and saves a new app's credentials as environment variables for the branch. Whenever Slack installs the app, it saves the app's tokens too. It doesn't redeploy: the variables reach the branch's next deployment.
+
+If Vercel doesn't save a new app's credentials, `preview` deletes the app again and rejects, so the branch's next run starts over instead of creating a second app.
 
 ## Frameworks
 
@@ -304,9 +309,9 @@ Your store must implement `storeInstallation` and `fetchInstallation`, and optio
 
 1. Create a new Slack app (or update the existing one) from your `manifest.json`
 2. Rewrite manifest URLs to point to the preview deployment
-3. Store the app credentials (`SLACK_APP_ID`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`) as branch-scoped environment variables
-4. Optionally auto-install the app and persist `SLACK_BOT_TOKEN`
-5. Cancel and redeploy so the new environment variables take effect
+3. Store the app credentials (`SLACK_APP_ID`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`) as branch-scoped environment variables, with the two secrets as [Sensitive](https://vercel.com/docs/environment-variables/sensitive-environment-variables) ones
+4. Optionally auto-install the app and persist `SLACK_BOT_TOKEN`, also as Sensitive
+5. Cancel and redeploy when it saved variables the build didn't have, so they take effect
 
 On production and local/development builds, the preview step is skipped automatically.
 
@@ -333,13 +338,26 @@ Place a [Slack app manifest](https://api.slack.com/reference/manifests) in your 
   "display_information": {
     "name": "My Slack App"
   },
+  "features": {
+    "bot_user": {
+      "display_name": "My Slack App"
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["app_mentions:read", "chat:write"]
+    }
+  },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://example.com/api/slack/events"
+      "request_url": "https://example.com/api/slack/events",
+      "bot_events": ["app_mention"]
     }
   }
 }
 ```
+
+The CLI names each preview app after its branch, like `My Slack App (feat-thing)`. Slack limits app names to 35 characters and to letters, digits, spaces and a few symbols, so the CLI shortens the branch name to fit and replaces anything else in it, like `/`, `+`, `@` or accented letters, with `-`.
 
 #### 3. Configure environment variables
 
@@ -393,23 +411,37 @@ git push → Vercel preview build
        ├─ Validates Slack and Vercel tokens
        │    └─ If expired and SLACK_CONFIG_REFRESH_TOKEN is set → auto-rotates
        │         and persists new tokens to Vercel env vars
-       ├─ Cleans up orphaned preview apps (--cleanup)
+       ├─ Cleans up Slack apps of inactive branches (--cleanup)
        ├─ Reads manifest.json
        ├─ Rewrites manifest URLs → preview deployment URL, and writes the file back
        ├─ Creates or updates Slack app via apps.manifest API
        ├─ Stores credentials as branch-scoped env vars
-       ├─ Auto-installs app (if SLACK_SERVICE_TOKEN is set)
+       ├─ Auto-installs app (if SLACK_SERVICE_TOKEN is set), and stores its tokens
        └─ Starts a new deployment to pick up the env vars, and cancels this one
-            (only on the first deploy for a branch)
+            (when it saved variables this build didn't have)
 ```
 
 The request URLs the CLI gives Slack carry your project's [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) secret, so Slack can reach a preview behind Deployment Protection. The CLI generates one if the project has none. Redirect URLs don't carry it, because the browser follows them.
 
-The first build of a branch creates the app, so it ends as **Canceled** in Vercel and the deployment it started is the one that goes live. If a later build can't reach Slack, or Slack is rate limiting, the build fails instead of creating a second app for the branch; redeploy to try again.
+The first build of a branch creates the app, so it ends as **Canceled** in Vercel and the deployment it started is the one that goes live. The same happens on a later build that saves a token for the first time: when the app only now got installed, because it was waiting for approval, the workspace had no room for another app, or you added `SLACK_SERVICE_TOKEN` since. The CLI replaces a deployment once: a deployment it started doesn't start another, and fails if it had to create the app again.
+
+The CLI only creates an app for a branch that has none, or whose app is out of reach: deleted, or created with a different user's configuration token. If a later build can't reach Slack, Slack is rate limiting, or Slack rejects the manifest, the build fails instead of creating a second app for the branch; fix the manifest or redeploy to try again. If Vercel doesn't save a new app's credentials, the CLI deletes the app again and fails, so the next build starts over.
+
+When Slack doesn't install the app, the build carries on and prints Slack's reason, like `service_limits_exceeded` for a workspace that has reached its app limit (10 on Slack's free plan). Install the app yourself from the URL the build prints, or fix the cause and redeploy.
+
+#### Token rotation
+
+Slack's configuration tokens expire after 12 hours. With `SLACK_CONFIG_REFRESH_TOKEN` set, the CLI rotates an expired token and saves both new tokens to your Vercel project, in the environments and with the type (Sensitive or not) the old ones had.
+
+A build gets its variables when its deployment is created, so a build that waited in the queue can still have the expired token after an earlier build rotated it. Its refresh token has been used by then: rotating with it again may fail, and when it works it saves an older refresh token over the newer one. So such a build first looks for a newer token in your Vercel project and uses that instead of rotating again. It reads the token through the Vercel API, which can't read a Sensitive variable: with a Sensitive `SLACK_CONFIGURATION_TOKEN` the build rotates the token itself, and fails if Slack no longer accepts its refresh token; redeploy it.
+
+The CLI doesn't rotate the token when it couldn't reach Slack to check it. The build fails instead, and the next one tries again.
 
 #### Cleanup
 
-When `--cleanup` is passed, the CLI removes Slack apps and branch-scoped environment variables for preview branches that are no longer active in the Vercel project. It deletes every variable the CLI stores for a branch, including `SLACK_APP_LEVEL_TOKEN` and `SLACK_USER_TOKEN`. This runs before the main provisioning step and failures are non-fatal.
+When `--cleanup` is passed, the CLI removes Slack apps and branch-scoped environment variables for preview branches that are no longer active in the Vercel project. Vercel lists a branch as active while it exists in the Git repository and has a deployment in the project, so a branch stops being active once it's deleted from the repository. A branch the project never deployed isn't active either: if you call `preview` for one yourself, outside its build, the next cleanup removes its app. It deletes every variable the CLI stores for a branch, including `SLACK_APP_LEVEL_TOKEN` and `SLACK_USER_TOKEN`. This runs before the main provisioning step and failures are non-fatal.
+
+A branch's `SLACK_APP_ID` is the only record of its app, so the CLI deletes the branch's variables only once the app is deleted, or Slack says it's already gone, and `SLACK_APP_ID` last. If Slack can't be reached, is rate limiting or refuses to delete the app, the app and the branch's variables stay, and the next build with `--cleanup` tries again. Slack refuses with `no_permission` when the app belongs to a different user than the configuration token does, and keeps refusing: delete the app at [api.slack.com/apps](https://api.slack.com/apps), or the branch's Slack variables in your Vercel project.
 
 ### CLI Reference
 
@@ -423,20 +455,20 @@ Options:
   --cleanup        Clean up Slack apps and env vars for inactive preview branches
   --debug          Log every HTTP request and response, with secrets redacted
   --help, -h       Show help
-  --version, -v    Show version
+  --version, -V    Show version
 ```
 
 `vercel-slack build` exits with code 1 when it fails, so a build script like `vercel-slack build && next build` stops and the preview deployment fails instead of going live without its Slack credentials. Production, development and local builds skip it and exit with code 0.
 
 Previews that can't read `SLACK_CONFIGURATION_TOKEN` or `VERCEL_API_TOKEN`, like those of pull requests from forks, fail too. To build them anyway, without a Slack app, use `vercel-slack build || true` instead.
 
-Pass `--debug`, or set `VERCEL_SLACK_DEBUG=1`, to log every request the CLI makes. Tokens, secrets, environment variable values and the protection bypass secret are redacted, with at most their last four characters shown.
+Pass `--debug`, or set `VERCEL_SLACK_DEBUG=1`, to log every request the CLI makes. Tokens, secrets, credentials, environment variable values, deploy hook URLs and the protection bypass secret are redacted, with at most the last four characters of a long one left to tell them apart. The CLI also takes every secret it was given or received, and anything shaped like a Slack or Vercel token, out of all it prints, error messages included.
 
 All Vercel and Slack environment variables are read automatically. You can override any of them via CLI flags (e.g. `--vercel-env`, `--slack-app-id`).
 
 ## Migrating from v1
 
-v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change, apart from the details in [Other changes](#other-changes): what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI work as before, with stricter failures: `vercel-slack build` now exits with code 1 when it fails, which stops a `vercel-slack build && next build` script (see the [CLI Reference](#cli-reference)), and `preview` rejects when Vercel doesn't save every credential, or when Slack is unreachable or rate limiting while it updates a branch's app, where v1 created a second app. v2 no longer reads `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` itself, so see [Read the preview app's credentials](#4-read-the-preview-apps-credentials) if your previews use OAuth.
+v2 rebuilds `VercelReceiver` on Bolt's `HTTPReceiver`. Your listeners don't change, apart from the details in [Other changes](#other-changes): what changes is how you create the receiver and serve it. v2 needs `@slack/bolt` 4.7.3 or newer and Node.js 22.12 or newer. The `preview` API and the `vercel-slack` CLI work as before, with stricter failures: `vercel-slack build` now exits with code 1 when it fails, which stops a `vercel-slack build && next build` script (see the [CLI Reference](#cli-reference)), and `preview` rejects when Vercel doesn't save every credential, or when Slack is unreachable, rate limiting or rejects the manifest while it updates a branch's app, where v1 created a second app. Both also save an app's tokens on any run that installs it, where v1 only saved them on the run that created the app, and the CLI then replaces the deployment as it does for a new app (see [How it works](#how-it-works)). v2 no longer reads `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` itself, so see [Read the preview app's credentials](#4-read-the-preview-apps-credentials) if your previews use OAuth.
 
 With Bolt 5, v2 needs Node.js 22.19 or newer. See [Compatibility](#compatibility).
 
