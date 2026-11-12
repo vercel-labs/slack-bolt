@@ -425,7 +425,7 @@ The request URLs the CLI gives Slack carry your project's [Protection Bypass for
 
 The first build of a branch creates the app, so it ends as **Canceled** in Vercel and the deployment it started is the one that goes live. The same happens on a later build that saves a token for the first time: when the app only now got installed, because it was waiting for approval, the workspace had no room for another app, or you added `SLACK_SERVICE_TOKEN` since. The CLI replaces a deployment once: a deployment it started doesn't start another, and fails if it had to create the app again.
 
-The CLI only creates an app for a branch that has none, or whose app Slack no longer knows. If a later build can't reach Slack, Slack is rate limiting, or Slack rejects the manifest, the build fails instead of creating a second app for the branch; fix the manifest or redeploy to try again. If Vercel doesn't save a new app's credentials, the CLI deletes the app again and fails, so the next build starts over.
+The CLI only creates an app for a branch that has none, or whose app is out of reach: deleted, or created with a different user's configuration token. If a later build can't reach Slack, Slack is rate limiting, or Slack rejects the manifest, the build fails instead of creating a second app for the branch; fix the manifest or redeploy to try again. If Vercel doesn't save a new app's credentials, the CLI deletes the app again and fails, so the next build starts over.
 
 When Slack doesn't install the app, the build carries on and prints Slack's reason, like `service_limits_exceeded` for a workspace that has reached its app limit (10 on Slack's free plan). Install the app yourself from the URL the build prints, or fix the cause and redeploy.
 
@@ -441,7 +441,7 @@ The CLI doesn't rotate the token when it couldn't reach Slack to check it. The b
 
 When `--cleanup` is passed, the CLI removes Slack apps and branch-scoped environment variables for preview branches that are no longer active in the Vercel project, which is the case once the branch is deleted from the Git repository. It deletes every variable the CLI stores for a branch, including `SLACK_APP_LEVEL_TOKEN` and `SLACK_USER_TOKEN`. This runs before the main provisioning step and failures are non-fatal.
 
-A branch's `SLACK_APP_ID` is the only record of its app, so the CLI deletes the branch's variables only once the app is deleted, or Slack says it's already gone, and `SLACK_APP_ID` last. If Slack can't be reached, is rate limiting or refuses to delete the app, the app and the branch's variables stay, and the next build with `--cleanup` tries again.
+A branch's `SLACK_APP_ID` is the only record of its app, so the CLI deletes the branch's variables only once the app is deleted, or Slack says it's already gone, and `SLACK_APP_ID` last. If Slack can't be reached, is rate limiting or refuses to delete the app, the app and the branch's variables stay, and the next build with `--cleanup` tries again. Slack refuses with `no_permission` when the app belongs to a different user than the configuration token does, and keeps refusing: delete the app at [api.slack.com/apps](https://api.slack.com/apps), or the branch's Slack variables in your Vercel project.
 
 ### CLI Reference
 

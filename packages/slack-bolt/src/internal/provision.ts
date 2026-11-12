@@ -197,8 +197,14 @@ export async function provisionPreview(
     }
   }
 
-  if (cli)
+  if (cli) {
+    if (isNew && slackAppId) {
+      log.info(
+        `Slack no longer has app ${slackAppId}, or this configuration token can't reach it, so the branch gets a new one`,
+      );
+    }
     log.success(`${isNew ? "Created" : "Updated"} Slack app ${app.app_id}`);
+  }
 
   if (cli) log.step("Installing Slack app");
   const {

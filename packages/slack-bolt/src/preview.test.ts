@@ -530,6 +530,24 @@ describe("a branch's later previews", () => {
     expect(savedEnvs().map((e) => e.key)).not.toContain("SLACK_SIGNING_SECRET");
   });
 
+  // Like an app deleted by hand, or created with another user's
+  // configuration token.
+  it("says why the branch gets a new app when its stored one is out of reach", async () => {
+    answers["apps.manifest.export"] = () =>
+      json({ ok: false, error: "no_permission" });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const result = await preview(
+      { ...params, automationBypassSecret: BYPASS, slackAppId: "A_OLD" },
+      "cli",
+    );
+
+    expect(result.isNew).toBe(true);
+    expect(log.mock.calls.map((args) => args.join(" ")).join("\n")).toContain(
+      "Slack no longer has app A_OLD, or this configuration token can't reach it, so the branch gets a new one",
+    );
+  });
+
   // The first build's install may not go through: the app can be waiting
   // for approval, the workspace full, or the service token added later.
   it("saves the tokens of an app that only now got installed", async () => {
