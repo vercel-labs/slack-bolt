@@ -428,6 +428,37 @@ describe("a branch's first preview", () => {
       expect(printed).toContain("The workspace has reached its app limit");
     });
 
+    it("prints the install URL only when the app still needs installing", async () => {
+      answers["apps.manifest.create"] = () =>
+        json({
+          ok: true,
+          app_id: "A_NEW",
+          credentials: {
+            client_id: "111.222",
+            client_secret: "client-secret-from-slack",
+            verification_token: "v",
+            signing_secret: SIGNING_SECRET,
+          },
+          oauth_authorize_url:
+            "https://slack.com/oauth/v2/authorize?client_id=111.222",
+        });
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const printed = () =>
+        log.mock.calls.map((args) => args.join(" ")).join("\n");
+
+      await preview({ ...params, automationBypassSecret: BYPASS }, "cli");
+      expect(printed()).toContain("Installed Slack app A_NEW");
+      expect(printed()).not.toContain("Install URL");
+
+      log.mockClear();
+      answers["apps.developerInstall"] = () =>
+        json({ ok: false, error: "service_limits_exceeded" });
+      await preview({ ...params, automationBypassSecret: BYPASS }, "cli");
+      expect(printed()).toContain(
+        "Install URL: https://slack.com/oauth/v2/authorize?client_id=111.222",
+      );
+    });
+
     it("leaves installError out when the app was installed", async () => {
       const result = await preview({
         ...params,

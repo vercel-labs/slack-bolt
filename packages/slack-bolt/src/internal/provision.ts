@@ -279,7 +279,7 @@ export async function provisionPreview(
     if (app.app_id) {
       log.info(`View app: https://api.slack.com/apps/${app.app_id}`);
     }
-    if (isNew && app.oauth_authorize_url) {
+    if (isNew && app.oauth_authorize_url && status !== "installed") {
       log.info(`Install URL: ${app.oauth_authorize_url}`);
     }
     console.log();

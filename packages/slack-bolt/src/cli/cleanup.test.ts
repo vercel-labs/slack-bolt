@@ -255,6 +255,33 @@ describe("cleanupOrphanedApps", () => {
       expect(printed()).not.toContain("Orphan cleanup completed");
     });
 
+    // Like an app created with another user's configuration token.
+    it("should say what to do when Slack refuses to delete an app that's still there", async () => {
+      stub({
+        slack: () => jsonResponse({ ok: false, error: "no_permission" }),
+      });
+
+      await cleanupOrphanedApps(defaultArgs);
+
+      expect(printed()).toContain(
+        "Delete the app at https://api.slack.com/apps/A_STALE",
+      );
+    });
+
+    it.each([
+      ["Slack is down", () => new Response(null, { status: 503 })],
+      [
+        "Slack refuses the configuration token",
+        () => jsonResponse({ ok: false, error: "token_expired" }),
+      ],
+    ])("should leave that out when %s, which passes", async (_, slack) => {
+      stub({ slack });
+
+      await cleanupOrphanedApps(defaultArgs);
+
+      expect(printed()).not.toContain("Slack will refuse again");
+    });
+
     it("should keep the branch's app and variables when its SLACK_APP_ID can't be read", async () => {
       stub({
         vercel: (envId, method) =>

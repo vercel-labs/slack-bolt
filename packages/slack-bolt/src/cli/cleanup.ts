@@ -1,5 +1,5 @@
 import { log } from "../internal/logger";
-import { removeSlackApp } from "../internal/slack";
+import { isTokenError, isTransient, removeSlackApp } from "../internal/slack";
 import {
   deleteEnvironmentVariable,
   getActiveBranches,
@@ -102,6 +102,13 @@ export async function cleanupOrphanedApps({
         log.warning(
           `Failed to delete app ${appId} (branch: ${branch}), so it and the branch's variables stay for now: ${message(removed.error)}`,
         );
+        // An outage or a refused token passes. A refusal for this app gets
+        // the same answer on every build, until someone steps in.
+        if (!isTransient(removed.error) && !isTokenError(removed.error)) {
+          log.info(
+            `Slack will refuse again on the next build. Delete the app at https://api.slack.com/apps/${appId}, or if it isn't yours to delete, the branch's Slack variables in your Vercel project.`,
+          );
+        }
         continue;
       }
       log.info(
