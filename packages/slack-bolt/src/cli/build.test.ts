@@ -487,7 +487,24 @@ describe("executeBuild", () => {
       expect(provisionPreview).not.toHaveBeenCalled();
     });
 
-    it("fails without spending the refresh token again when Slack can't be reached to rotate", async () => {
+    it("says the refresh token may be invalid when Slack refuses to rotate", async () => {
+      const refused = new SlackAPIError(
+        "tooling.tokens.rotate",
+        "invalid_refresh_token",
+      );
+      vi.mocked(authTest).mockRejectedValue(expired());
+      vi.mocked(rotateConfigToken).mockRejectedValue(refused);
+
+      const error = await executeBuild(withRefresh()).catch((e: Error) => e);
+
+      expect(error?.message).toContain(
+        "Failed to rotate configuration token — refresh token may be invalid.",
+      );
+      expect(error?.cause).toBe(refused);
+      expect(addEnvironmentVariables).not.toHaveBeenCalled();
+    });
+
+    it("fails without looking for another token when Slack can't be reached to rotate", async () => {
       const down = new HTTPError("Failed to rotate", 503, "Unavailable");
       vi.mocked(authTest).mockRejectedValue(expired());
       vi.mocked(rotateConfigToken).mockRejectedValue(down);
@@ -498,15 +515,15 @@ describe("executeBuild", () => {
         "Couldn't reach Slack to rotate SLACK_CONFIGURATION_TOKEN. Redeploy to try again.",
       );
       expect(error?.cause).toBe(down);
-      expect(getEnvironmentVariables).not.toHaveBeenCalled();
+      // Only the look before rotating.
+      expect(getEnvironmentVariables).toHaveBeenCalledTimes(1);
+      expect(wait).not.toHaveBeenCalled();
     });
 
-    // Builds that start together with an expired token, like one per
-    // Dependabot pull request, all try to rotate it with the same single-use
-    // refresh token. Only the first can.
+    // A build gets its variables when its deployment is created. One that
+    // waited in the queue, like the last of a batch of Dependabot pull
+    // requests, still has the expired token after an earlier build rotated it.
     describe("when another build rotated it first", () => {
-      const refused = () =>
-        new SlackAPIError("tooling.tokens.rotate", "invalid_refresh_token");
       const stored = {
         id: "env_config",
         key: "SLACK_CONFIGURATION_TOKEN",
@@ -520,11 +537,12 @@ describe("executeBuild", () => {
           if (token === "config-token") throw expired();
           return { userId: "U1", teamId: "T1" };
         });
-        vi.mocked(rotateConfigToken).mockRejectedValue(refused());
+        vi.mocked(rotateConfigToken).mockResolvedValue(rotated);
         vi.mocked(getEnvironmentVariables).mockResolvedValue([stored]);
       });
 
-      it("uses the token the other build saved", async () => {
+      // Rotating again would revoke the token the other build is using.
+      it("uses the token the other build saved, without rotating again", async () => {
         vi.mocked(getEnvironmentVariable).mockResolvedValue("rotated-by-other");
 
         await executeBuild(withRefresh());
@@ -538,24 +556,41 @@ describe("executeBuild", () => {
         expect(vi.mocked(provisionPreview).mock.calls[0][0]).toMatchObject({
           slackConfigurationToken: "rotated-by-other",
         });
+        expect(rotateConfigToken).not.toHaveBeenCalled();
         expect(addEnvironmentVariables).not.toHaveBeenCalled();
         expect(printed()).toContain(
           "Using the configuration token another build rotated",
         );
       });
 
-      it("waits for the other build to save it", async () => {
-        vi.mocked(getEnvironmentVariable)
-          .mockResolvedValueOnce("config-token")
-          .mockResolvedValueOnce("config-token")
-          .mockResolvedValueOnce("rotated-by-other");
+      it("uses it even without a refresh token of its own", async () => {
+        vi.mocked(getEnvironmentVariable).mockResolvedValue("rotated-by-other");
 
-        await executeBuild(withRefresh());
+        await executeBuild(createParams());
 
-        expect(wait).toHaveBeenCalledTimes(2);
         expect(vi.mocked(provisionPreview).mock.calls[0][0]).toMatchObject({
           slackConfigurationToken: "rotated-by-other",
         });
+      });
+
+      it("rotates when the project still has the token this build started with", async () => {
+        vi.mocked(getEnvironmentVariable).mockResolvedValue("config-token");
+
+        await executeBuild(withRefresh());
+
+        expect(rotateConfigToken).toHaveBeenCalledTimes(1);
+        expect(wait).not.toHaveBeenCalled();
+        expect(vi.mocked(provisionPreview).mock.calls[0][0]).toMatchObject({
+          slackConfigurationToken: "new-config-token",
+        });
+      });
+
+      it("rotates when the project's token can't be read", async () => {
+        vi.mocked(getEnvironmentVariables).mockRejectedValue(new Error("500"));
+
+        await executeBuild(withRefresh());
+
+        expect(rotateConfigToken).toHaveBeenCalledTimes(1);
       });
 
       it("ignores a branch's own token, and one that isn't for previews", async () => {
@@ -565,37 +600,66 @@ describe("executeBuild", () => {
         ]);
         vi.mocked(getEnvironmentVariable).mockResolvedValue("rotated-by-other");
 
-        await expect(executeBuild(withRefresh())).rejects.toThrow(
-          "refresh token may be invalid",
-        );
+        await executeBuild(withRefresh());
 
         expect(getEnvironmentVariable).not.toHaveBeenCalled();
-      });
-
-      it("says the refresh token may be invalid when no working token turns up", async () => {
-        vi.mocked(getEnvironmentVariable).mockResolvedValue("config-token");
-
-        const error = await executeBuild(withRefresh()).catch((e: Error) => e);
-
-        expect(error?.message).toContain(
-          "Failed to rotate configuration token — refresh token may be invalid.",
-        );
-        expect(error?.cause).toMatchObject({ code: "invalid_refresh_token" });
-        expect(getEnvironmentVariables).toHaveBeenCalledTimes(5);
-        expect(wait).toHaveBeenCalledTimes(4);
-        expect(addEnvironmentVariables).not.toHaveBeenCalled();
-        expect(provisionPreview).not.toHaveBeenCalled();
+        expect(rotateConfigToken).toHaveBeenCalledTimes(1);
       });
 
       it("doesn't use a saved token Slack refuses too", async () => {
         vi.mocked(getEnvironmentVariable).mockResolvedValue("also-expired");
         vi.mocked(authTest).mockRejectedValue(expired());
 
-        await expect(executeBuild(withRefresh())).rejects.toThrow(
-          "refresh token may be invalid",
-        );
+        await executeBuild(withRefresh());
 
-        expect(provisionPreview).not.toHaveBeenCalled();
+        expect(rotateConfigToken).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(provisionPreview).mock.calls[0][0]).toMatchObject({
+          slackConfigurationToken: "new-config-token",
+        });
+      });
+
+      // Slack stops accepting a refresh token soon after it's used, and the
+      // build that used it saves the new token right after.
+      describe("and Slack refuses the refresh token", () => {
+        beforeEach(() => {
+          vi.mocked(rotateConfigToken).mockRejectedValue(
+            new SlackAPIError("tooling.tokens.rotate", "invalid_refresh_token"),
+          );
+        });
+
+        it("waits for the other build to save its token", async () => {
+          vi.mocked(getEnvironmentVariable)
+            .mockResolvedValueOnce("config-token")
+            .mockResolvedValueOnce("config-token")
+            .mockResolvedValueOnce("config-token")
+            .mockResolvedValueOnce("rotated-by-other");
+
+          await executeBuild(withRefresh());
+
+          expect(rotateConfigToken).toHaveBeenCalledTimes(1);
+          expect(wait).toHaveBeenCalledTimes(2);
+          expect(vi.mocked(provisionPreview).mock.calls[0][0]).toMatchObject({
+            slackConfigurationToken: "rotated-by-other",
+          });
+        });
+
+        it("says the refresh token may be invalid when no working token turns up", async () => {
+          vi.mocked(getEnvironmentVariable).mockResolvedValue("config-token");
+
+          const error = await executeBuild(withRefresh()).catch(
+            (e: Error) => e,
+          );
+
+          expect(error?.message).toContain(
+            "Failed to rotate configuration token — refresh token may be invalid.",
+          );
+          expect(error?.cause).toMatchObject({ code: "invalid_refresh_token" });
+          // Once before rotating, then five times after.
+          expect(getEnvironmentVariables).toHaveBeenCalledTimes(6);
+          expect(wait).toHaveBeenCalledTimes(4);
+          expect(addEnvironmentVariables).not.toHaveBeenCalled();
+          expect(provisionPreview).not.toHaveBeenCalled();
+        });
       });
     });
   });

@@ -54,15 +54,17 @@ const vercelAccess = (params: PreviewParams) => ({
 });
 
 /**
- * The configuration token another build saved after rotating it. Slack's
- * refresh tokens are single-use, so of the builds that start together with an
- * expired token, like one per Dependabot pull request, only the first can
- * rotate it. The others wait for the token it saves.
+ * The configuration token another build saved after rotating it: one in the
+ * Vercel project that isn't the token this build started with, and that Slack
+ * accepts. A build gets its variables when its deployment is created, so one
+ * that waited in the queue, like the last of a batch of Dependabot pull
+ * requests, still has the expired token after an earlier build replaced it.
  */
 async function savedConfigToken(
   params: PreviewParams,
+  attempts: number,
 ): Promise<string | undefined> {
-  for (let attempt = 0; attempt < SAVED_TOKEN_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) await wait(SAVED_TOKEN_WAIT_MS);
     try {
       const envs = await getEnvironmentVariables(vercelAccess(params));
@@ -85,8 +87,9 @@ async function savedConfigToken(
 }
 
 /**
- * Saves rotated tokens where the old ones were stored. Without them the
- * stored refresh token is spent, so try a few times.
+ * Saves rotated tokens where the old ones were stored. Slack stops accepting
+ * the stored refresh token soon after it's used, so without the new one the
+ * project is left with tokens that don't work: try a few times.
  */
 async function saveRotatedTokens(
   params: PreviewParams,
@@ -166,6 +169,15 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
         { cause: error },
       );
     }
+    // Each rotation revokes older tokens, and Slack keeps a used refresh
+    // token working only for a short grace period. So use a token another
+    // build already rotated before rotating again.
+    const saved = await savedConfigToken(params, 1);
+    if (saved) {
+      params.slackConfigurationToken = saved;
+      log.success("Using the configuration token another build rotated");
+      return;
+    }
     if (!params.slackConfigRefreshToken) {
       throw new Error(
         "Slack configuration token is invalid or expired. Provide SLACK_CONFIG_REFRESH_TOKEN for automatic rotation, or generate a new token:\nhttps://api.slack.com/apps",
@@ -187,7 +199,10 @@ async function ensureConfigToken(params: PreviewParams): Promise<void> {
         { cause: rotateError },
       );
     }
-    const saved = await savedConfigToken(params);
+    // Slack refused the refresh token, as it does once another build has
+    // used it and the grace period is over. That build saves its new token
+    // right after rotating, so give it a moment.
+    const saved = await savedConfigToken(params, SAVED_TOKEN_ATTEMPTS);
     if (!saved) {
       throw new Error(
         "Failed to rotate configuration token — refresh token may be invalid. Generate new tokens:\nhttps://api.slack.com/apps",

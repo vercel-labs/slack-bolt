@@ -9,6 +9,9 @@ import { installApp, removeSlackApp, upsertSlackApp } from "./slack";
 import { addEnvironmentVariables, updateProtectionBypass } from "./vercel";
 import type { CreateProjectEnv } from "./vercel/types";
 
+/** The variables saved as Sensitive in Vercel. */
+const SENSITIVE_KEYS = new Set(["SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET"]);
+
 export type ProvisionOptions = {
   /** Print progress, as the `vercel-slack` CLI does. */
   cli?: boolean;
@@ -140,7 +143,11 @@ export async function provisionPreview(
   const branchEnv = (key: string, value: string): CreateProjectEnv => ({
     key,
     value,
-    type: "encrypted",
+    // Sensitive variables can't be read back from Vercel, in the dashboard or
+    // through the API. Nothing here reads the app's secrets again, so they
+    // are stored that way. SLACK_APP_ID stays readable: cleanup needs it to
+    // find the app.
+    type: SENSITIVE_KEYS.has(key) ? "sensitive" : "encrypted",
     target: ["preview"],
     gitBranch: branch,
     comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,

@@ -5,7 +5,8 @@ export class HTTPError extends Error {
     public statusText: string,
     public body?: string,
   ) {
-    const parts = [`${message}: ${status} ${statusText}`];
+    // HTTP/2 responses have no status text.
+    const parts = [`${message}: ${status} ${statusText}`.trimEnd()];
     if (body) parts.push(body);
     super(parts.join(" - "));
   }

@@ -185,7 +185,6 @@ describe("a branch's first preview", () => {
     });
     for (const env of envs) {
       expect(env).toMatchObject({
-        type: "encrypted",
         target: ["preview"],
         gitBranch: "feat/thing",
       });
@@ -195,6 +194,22 @@ describe("a branch's first preview", () => {
       expect(call.url.searchParams.get("teamId")).toBe("team_456");
       expect(call.url.searchParams.get("upsert")).toBe("true");
     }
+  });
+
+  // Vercel never shows a Sensitive variable's value again. Cleanup reads
+  // SLACK_APP_ID back to find the app, so that one can't be.
+  it("saves the app's secrets as Sensitive, and the rest readable", async () => {
+    await preview({ ...params, automationBypassSecret: BYPASS });
+
+    expect(Object.fromEntries(savedEnvs().map((e) => [e.key, e.type]))).toEqual(
+      {
+        SLACK_APP_ID: "encrypted",
+        SLACK_CLIENT_ID: "encrypted",
+        SLACK_CLIENT_SECRET: "sensitive",
+        SLACK_SIGNING_SECRET: "sensitive",
+        SLACK_BOT_TOKEN: "encrypted",
+      },
+    );
   });
 
   it("saves the app-level and user tokens when Slack issues them", async () => {
