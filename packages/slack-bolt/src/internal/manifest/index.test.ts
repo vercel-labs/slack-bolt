@@ -388,6 +388,23 @@ describe("createNewManifest", () => {
       );
     });
 
+    it("should not leave a separator dangling where the branch was cut", () => {
+      const manifest = baseManifest();
+      (manifest.features!.bot_user as { display_name: string }).display_name =
+        "Bolt Preview E2E";
+
+      const result = createNewManifest({
+        originalManifest: manifest,
+        ...defaultParams,
+        branch: "e2e/a-very-long-branch-name-that-cannot-fit",
+      });
+
+      // Cut to fit, "e2e-a-very-long-" would end on its hyphen.
+      expect(result.display_information.name).toBe(
+        "Bolt Preview E2E (e2e-a-very-long)",
+      );
+    });
+
     it("should hard-truncate when app name alone leaves no room for branch", () => {
       const manifest = baseManifest();
       const longName = "A".repeat(33);

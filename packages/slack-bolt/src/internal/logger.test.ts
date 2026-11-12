@@ -368,6 +368,16 @@ describe("registered secrets", () => {
     expect(error.message).toContain("Failed to create deployment: 400");
   });
 
+  it("keeps every line of a message indented under its step", () => {
+    log.info(
+      "Slack refused the token. Generate a new one:\nhttps://example.com",
+    );
+
+    expect(lines(printed)).toBe(
+      "  Slack refused the token. Generate a new one:\n  https://example.com",
+    );
+  });
+
   it("go as a whole when one contains another", () => {
     registerSecret("inner-secret-value", "outer-inner-secret-value-outer");
 

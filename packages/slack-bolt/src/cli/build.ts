@@ -331,10 +331,11 @@ export async function executeBuild(
   // got installed.
   if (result.changedEnv.length === 0) return;
   const saved = `Saved ${result.changedEnv.join(", ")} for ${params.branch}`;
+  const applies = `${result.changedEnv.length === 1 ? "It applies" : "They apply"} from the branch's next deployment.`;
 
   if (!params.deploymentId) {
     log.warning(
-      `${saved}, but VERCEL_DEPLOYMENT_ID isn't set, so this deployment can't be replaced. They apply from the branch's next deployment.`,
+      `${saved}, but VERCEL_DEPLOYMENT_ID isn't set, so this deployment can't be replaced. ${applies}`,
     );
     return;
   }
@@ -349,7 +350,7 @@ export async function executeBuild(
       );
     }
     log.warning(
-      `${saved}, but this deployment already replaced one for the same reason. They apply from the branch's next deployment.`,
+      `${saved}, but this deployment already replaced one for the same reason. ${applies}`,
     );
     return;
   }

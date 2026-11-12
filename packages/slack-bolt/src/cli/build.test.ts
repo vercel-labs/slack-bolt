@@ -194,7 +194,7 @@ describe("executeBuild", () => {
       expect(createDeployment).not.toHaveBeenCalled();
       expect(cancelDeployment).not.toHaveBeenCalled();
       expect(printed()).toContain(
-        "Saved SLACK_APP_ID, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN for feat/thing, but VERCEL_DEPLOYMENT_ID isn't set",
+        "Saved SLACK_APP_ID, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN for feat/thing, but VERCEL_DEPLOYMENT_ID isn't set, so this deployment can't be replaced. They apply from the branch's next deployment.",
       );
     });
 
@@ -241,7 +241,7 @@ describe("executeBuild", () => {
         expect(createDeployment).not.toHaveBeenCalled();
         expect(cancelDeployment).not.toHaveBeenCalled();
         expect(printed()).toContain(
-          "Saved SLACK_BOT_TOKEN for feat/thing, but this deployment already replaced one for the same reason",
+          "Saved SLACK_BOT_TOKEN for feat/thing, but this deployment already replaced one for the same reason. It applies from the branch's next deployment.",
         );
       });
     });

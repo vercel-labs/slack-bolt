@@ -59,7 +59,8 @@ function createManifestDescription(params: {
     const availableForBranch = maxDisplayName - prefix.length - suffix.length;
     displayName =
       availableForBranch > 0
-        ? `${prefix}${cleanBranch.slice(0, availableForBranch)}${suffix}`
+        ? // Cut at the limit, then drop a separator left dangling at the cut.
+          `${prefix}${cleanBranch.slice(0, availableForBranch).replace(/[-._]+$/, "")}${suffix}`
         : displayName.slice(0, maxDisplayName);
   }
 

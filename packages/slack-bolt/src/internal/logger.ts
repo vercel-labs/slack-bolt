@@ -76,7 +76,9 @@ const text = (value: unknown) =>
 export const log = {
   step: (msg: string) => console.log(scrub(`  ${msg} ...`)),
   success: (msg: string) => console.log(`${GREEN}✓${RESET} ${scrub(msg)}`),
-  info: (msg: string) => console.log(scrub(`  ${msg}`)),
+  // Indented under the step it belongs to, each line of it.
+  info: (msg: string) =>
+    console.log(scrub(`  ${msg}`.replace(/\n(?=.)/g, "\n  "))),
   warning: (msg: string) => console.log(`${YELLOW}⚠${RESET} ${scrub(msg)}`),
   error: (...args: unknown[]) =>
     console.error(...args.map((arg) => scrub(text(arg)))),
