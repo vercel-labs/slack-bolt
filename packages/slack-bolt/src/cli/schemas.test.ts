@@ -67,6 +67,13 @@ describe("validateAndBuildParams", () => {
     });
   });
 
+  // Joined to the working directory, an empty path names the directory.
+  it("defaults the manifest path when MANIFEST_PATH is empty", () => {
+    expect(
+      validateAndBuildParams({ ...env, MANIFEST_PATH: "" }).manifestPath,
+    ).toBe("manifest.json");
+  });
+
   it("names the missing Vercel system variables", () => {
     expect(() =>
       validateAndBuildParams(without("VERCEL_GIT_COMMIT_REF", "VERCEL_URL")),

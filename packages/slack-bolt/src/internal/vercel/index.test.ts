@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HTTPError } from "../http-error";
 import {
   addEnvironmentVariables,
+  createDeployment,
   getActiveBranches,
+  getDeploymentMeta,
   getProject,
   updateProtectionBypass,
 } from "./index";
@@ -669,6 +671,151 @@ describe("addEnvironmentVariables", () => {
 
     await expect(addEnvironmentVariables(defaultArgs)).rejects.toThrow(
       TypeError,
+    );
+  });
+});
+
+describe("addEnvironmentVariables, when Vercel refuses the request", () => {
+  const args = {
+    projectId: "prj_123",
+    token: "tok_abc",
+    envs: [
+      {
+        key: "SLACK_APP_ID",
+        value: "A123-secret-value",
+        type: "encrypted",
+        target: ["preview"],
+        gitBranch: "feat/gone",
+      },
+    ],
+  };
+
+  // What Vercel answers for a branch that isn't in the connected repository.
+  it("should name the refused variables and the field at fault, without Vercel's message", async () => {
+    mockFetch.mockResolvedValueOnce(
+      errorResponse(400, "Bad Request", {
+        error: {
+          code: "BAD_REQUEST",
+          message: 'Branch "feat/gone" not found, value A123-secret-value',
+        },
+        failed: [
+          {
+            error: {
+              code: "BAD_REQUEST",
+              message: 'Branch "feat/gone" not found, value A123-secret-value',
+              key: "gitBranch",
+              envVarKey: "SLACK_APP_ID",
+            },
+          },
+        ],
+      }),
+    );
+
+    const error = await addEnvironmentVariables(args).catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(HTTPError);
+    expect((error as Error).message).toBe(
+      "Failed to create environment variables: 400 Bad Request (code: BAD_REQUEST): SLACK_APP_ID (BAD_REQUEST: gitBranch)",
+    );
+    expect((error as Error).message).not.toContain("A123-secret-value");
+  });
+
+  it.each([
+    ["has no list of refused variables", { error: { code: "forbidden" } }],
+    ["isn't JSON", undefined],
+  ])(
+    "should still fail with the status when the answer %s",
+    async (_, body) => {
+      mockFetch.mockResolvedValueOnce(errorResponse(403, "Forbidden", body));
+
+      await expect(addEnvironmentVariables(args)).rejects.toThrow(
+        "Failed to create environment variables: 403 Forbidden",
+      );
+    },
+  );
+});
+
+describe("createDeployment", () => {
+  const args = {
+    deploymentId: "dpl_current",
+    projectId: "prj_123",
+    token: "tok_abc",
+    teamId: "team_456",
+  };
+
+  it("should redeploy the given deployment, and return the new one", async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({ id: "dpl_next", url: "next.vercel.app" }),
+    );
+
+    const result = await createDeployment(args);
+
+    expect(result).toEqual({ id: "dpl_next", url: "next.vercel.app" });
+    const [input, init] = mockFetch.mock.calls[0];
+    const url = new URL(input);
+    expect(url.pathname).toBe("/v13/deployments");
+    expect(url.searchParams.get("teamId")).toBe("team_456");
+    expect(url.searchParams.get("forceNew")).toBe("1");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      deploymentId: "dpl_current",
+      name: "prj_123",
+      project: "prj_123",
+    });
+  });
+
+  it("should send the metadata to add to the new deployment", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ id: "dpl_next", url: "" }));
+
+    await createDeployment({ ...args, meta: { startedBy: "dpl_current" } });
+
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).meta).toEqual({
+      startedBy: "dpl_current",
+    });
+  });
+
+  it("should throw HTTPError when Vercel refuses", async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse(403, "Forbidden"));
+
+    await expect(createDeployment(args)).rejects.toThrow(
+      "Failed to create deployment: 403 Forbidden",
+    );
+  });
+});
+
+describe("getDeploymentMeta", () => {
+  const args = {
+    deploymentId: "dpl/odd id",
+    token: "tok_abc",
+    teamId: "team_456",
+  };
+
+  it("should return the deployment's metadata", async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({ id: "dpl_1", meta: { originalDeploymentId: "dpl_0" } }),
+    );
+
+    expect(await getDeploymentMeta(args)).toEqual({
+      originalDeploymentId: "dpl_0",
+    });
+    const [input, init] = mockFetch.mock.calls[0];
+    const url = new URL(input);
+    expect(url.pathname).toBe("/v13/deployments/dpl%2Fodd%20id");
+    expect(url.searchParams.get("teamId")).toBe("team_456");
+    expect(init.headers.Authorization).toBe("Bearer tok_abc");
+  });
+
+  it("should return no metadata for a deployment without any", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ id: "dpl_1" }));
+
+    expect(await getDeploymentMeta(args)).toEqual({});
+  });
+
+  it("should throw HTTPError when Vercel refuses", async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse(404, "Not Found"));
+
+    await expect(getDeploymentMeta(args)).rejects.toThrow(
+      "Failed to fetch deployment: 404 Not Found",
     );
   });
 });

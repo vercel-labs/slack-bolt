@@ -80,6 +80,50 @@ describe("vercel-slack build", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // Slack's errors sit on the call that failed, which a message saying what
+  // to do can wrap.
+  it("prints the problems Slack found when they're on a cause", async () => {
+    vi.mocked(executeBuild).mockRejectedValue(
+      new Error("Couldn't set up the Slack app.", {
+        cause: Object.assign(
+          new Error("Slack's apps.manifest.update failed: invalid_manifest"),
+          {
+            errors: [
+              {
+                message: "must be less than 36 characters",
+                pointer: "/display_information/name",
+              },
+            ],
+          },
+        ),
+      }),
+    );
+
+    await run("0.0.0");
+
+    expect(vi.mocked(console.error).mock.calls.map(([line]) => line)).toEqual([
+      "Couldn't set up the Slack app.",
+      "  Caused by: Slack's apps.manifest.update failed: invalid_manifest",
+      "  /display_information/name: must be less than 36 characters",
+    ]);
+  });
+
+  it("gives the build its environment, with the command's flags applied", async () => {
+    vi.mocked(executeBuild).mockResolvedValue();
+    vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-from-env");
+    vi.stubEnv("SLACK_APP_ID", "A_FROM_ENV");
+    process.argv.push("--slack-app-id", "A_FROM_FLAG", "--cleanup");
+
+    await run("0.0.0");
+
+    const [, options] = vi.mocked(executeBuild).mock.calls[0];
+    expect(options?.cleanup).toBe(true);
+    expect(options?.env).toMatchObject({
+      SLACK_BOT_TOKEN: "xoxb-from-env",
+      SLACK_APP_ID: "A_FROM_FLAG",
+    });
+  });
+
   it("exits with code 1 when required env vars are missing", async () => {
     vi.mocked(validateAndBuildParams).mockImplementationOnce(() => {
       throw new Error("Missing VERCEL_API_TOKEN");

@@ -73,7 +73,9 @@ export function validateAndBuildParams(
     slackConfigurationToken: slackResult.data.SLACK_CONFIGURATION_TOKEN,
     slackConfigRefreshToken: slackResult.data.SLACK_CONFIG_REFRESH_TOKEN,
     slackServiceToken: slackResult.data.SLACK_SERVICE_TOKEN,
-    manifestPath: slackResult.data.MANIFEST_PATH,
+    // An empty MANIFEST_PATH, like one left blank in the project's settings,
+    // would name the working directory itself.
+    manifestPath: slackResult.data.MANIFEST_PATH || "manifest.json",
     vercelApiToken: vercelResult.data.VERCEL_API_TOKEN,
   };
 }

@@ -62,31 +62,32 @@ export function run(version: string): Promise<void> {
     }
 
     const params = validateAndBuildParams(env);
-    await executeBuild(params, { cleanup });
+    await executeBuild(params, { cleanup, env });
   });
 
   return program.parseAsync().then(
     () => {},
     (error: unknown) => {
       log.error(error instanceof Error ? error.message : String(error));
-      // Slack rejects a manifest with one entry per problem and where it is.
-      const problems = (error as { errors?: unknown }).errors;
-      if (Array.isArray(problems)) {
-        for (const problem of problems as {
-          message?: string;
-          pointer?: string;
-        }[]) {
-          log.error(`  ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
-        }
-      }
-      // The message says what to do; the cause says what went wrong, like
+      // The message says what to do; each cause says what went wrong, like
       // the status Vercel or Slack answered with.
       for (
-        let cause = error instanceof Error ? error.cause : undefined;
-        cause instanceof Error;
-        cause = cause.cause
+        let failure: unknown = error;
+        failure instanceof Error;
+        failure = failure.cause
       ) {
-        log.error(`  Caused by: ${cause.message}`);
+        if (failure !== error) log.error(`  Caused by: ${failure.message}`);
+        // Slack rejects a manifest with one entry per problem and where it
+        // is, on the error for the call that sent it.
+        const problems = (failure as { errors?: unknown }).errors;
+        if (Array.isArray(problems)) {
+          for (const problem of problems as {
+            message?: string;
+            pointer?: string;
+          }[]) {
+            log.error(`  ${problem.pointer ?? ""}: ${problem.message ?? ""}`);
+          }
+        }
       }
       console.log();
       // Fail the build, so `vercel-slack build && next build` doesn't deploy

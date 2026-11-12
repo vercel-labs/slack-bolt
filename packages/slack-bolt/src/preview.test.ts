@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { VercelReceiver } from "./index";
 import type { Manifest } from "./internal/manifest/types";
+import { provisionPreview } from "./internal/provision";
 import type { CreateProjectEnv } from "./internal/vercel/types";
 import { type PreviewParams, preview } from "./preview";
 
@@ -101,6 +102,7 @@ beforeEach(() => {
     "apps.manifest.export": () => json({ ok: true, manifest }),
     "apps.manifest.update": () =>
       json({ ok: true, app_id: "A_OLD", permissions_updated: false }),
+    "apps.manifest.delete": () => json({ ok: true }),
     "apps.developerInstall": () =>
       json({ ok: true, app_id: "A_NEW", api_access_tokens: { bot: "xoxb-1" } }),
     "/env": () => json({ created: [], failed: [] }),
@@ -290,22 +292,177 @@ describe("a branch's first preview", () => {
     ).toBe("my-app-git-feat-thing.vercel.app");
   });
 
-  it("fails when Vercel doesn't save every credential", async () => {
+  describe("when Vercel doesn't save every credential", () => {
+    beforeEach(() => {
+      answers["/env"] = () =>
+        json({
+          created: [],
+          failed: [
+            {
+              error: {
+                code: "BAD_REQUEST",
+                message: "no",
+                key: "SLACK_APP_ID",
+              },
+            },
+          ],
+        });
+    });
+
+    // Without SLACK_APP_ID the next build can't find the app, and creates
+    // another one next to it.
+    it("deletes the app it just created, and fails", async () => {
+      const error = await preview({
+        ...params,
+        automationBypassSecret: BYPASS,
+      }).catch((e: Error) => e);
+
+      expect((error as Error).message).toContain(
+        "couldn't save its credentials to Vercel, so deleted it again",
+      );
+      expect(((error as Error).cause as Error).message).toBe(
+        "Failed to create environment variables: SLACK_APP_ID (BAD_REQUEST)",
+      );
+      expect(callsTo("apps.manifest.delete").map((c) => c.body)).toEqual([
+        { app_id: "A_NEW" },
+      ]);
+      expect(callsTo("apps.developerInstall")).toEqual([]);
+    });
+
+    it("says to delete the app by hand when it can't", async () => {
+      answers["apps.manifest.delete"] = () => json({}, 503);
+
+      const error = await preview({
+        ...params,
+        automationBypassSecret: BYPASS,
+      }).catch((e: Error) => e);
+
+      expect((error as Error).message).toContain(
+        "couldn't save its credentials to Vercel or delete it again",
+      );
+      expect((error as Error).message).toContain(
+        "https://api.slack.com/apps/A_NEW",
+      );
+    });
+  });
+
+  // What Vercel answers when the branch isn't in the connected repository.
+  it("names the variables Vercel refused when it refuses them all", async () => {
     answers["/env"] = () =>
-      json({
-        created: [],
-        failed: [
-          {
-            error: { code: "BAD_REQUEST", message: "no", key: "SLACK_APP_ID" },
+      json(
+        {
+          error: {
+            code: "BAD_REQUEST",
+            message: 'Branch "feat/thing" not found',
           },
-        ],
+          failed: [
+            {
+              error: {
+                code: "BAD_REQUEST",
+                message: 'Branch "feat/thing" not found',
+                key: "gitBranch",
+                envVarKey: "SLACK_APP_ID",
+              },
+            },
+          ],
+        },
+        400,
+      );
+
+    const error = await preview({
+      ...params,
+      automationBypassSecret: BYPASS,
+    }).catch((e: Error) => e);
+
+    const cause = ((error as Error).cause as Error).message;
+    expect(cause).toContain("SLACK_APP_ID (BAD_REQUEST: gitBranch)");
+    // Vercel's message can echo what was sent, so it isn't repeated.
+    expect(cause).not.toContain("not found");
+  });
+
+  describe("when Slack doesn't install the app", () => {
+    // What a free workspace that already has 10 apps answers.
+    it("says why, with Slack's error code", async () => {
+      answers["apps.developerInstall"] = () =>
+        json({ ok: false, error: "service_limits_exceeded" });
+
+      const result = await preview({
+        ...params,
+        automationBypassSecret: BYPASS,
       });
 
-    await expect(
-      preview({ ...params, automationBypassSecret: BYPASS }),
-    ).rejects.toThrow(
-      "Failed to create environment variables: SLACK_APP_ID (BAD_REQUEST)",
+      expect(result).toMatchObject({
+        isNew: true,
+        installStatus: "unknown_error",
+        installError: "service_limits_exceeded",
+      });
+      expect(savedEnvs().map((e) => e.key)).not.toContain("SLACK_BOT_TOKEN");
+    });
+
+    it("tells the CLI's user what to do about a full workspace", async () => {
+      answers["apps.developerInstall"] = () =>
+        json({ ok: false, error: "service_limits_exceeded" });
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await preview({ ...params, automationBypassSecret: BYPASS }, "cli");
+
+      const printed = log.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(printed).toContain(
+        "Slack didn't install the app: service_limits_exceeded",
+      );
+      expect(printed).toContain("The workspace has reached its app limit");
+    });
+
+    it("leaves installError out when the app was installed", async () => {
+      const result = await preview({
+        ...params,
+        automationBypassSecret: BYPASS,
+      });
+
+      expect(result).not.toHaveProperty("installError");
+      expect(result).not.toHaveProperty("changedEnv");
+    });
+  });
+
+  describe("with a manifest it can't use", () => {
+    const write = (content: string) =>
+      fs.writeFileSync(path.join(dir, "manifest.json"), content);
+
+    it("fails before creating anything when the manifest isn't valid JSON", async () => {
+      write("{ not json");
+
+      const error = await preview(params).catch((e: Error) => e);
+
+      expect((error as Error).message).toBe(
+        "Couldn't parse the manifest at manifest.json.",
+      );
+      expect((error as Error).cause).toBeInstanceOf(SyntaxError);
+      expect(calls).toEqual([]);
+    });
+
+    it.each([
+      ["has no display_information", "{}"],
+      ["has no name", '{"display_information":{}}'],
+      ["has an empty name", '{"display_information":{"name":""}}'],
+      ["is empty", "null"],
+    ])(
+      "fails before creating anything when the manifest %s",
+      async (_, content) => {
+        write(content);
+
+        await expect(preview(params)).rejects.toThrow(
+          "The manifest at manifest.json needs a display_information.name",
+        );
+        expect(calls).toEqual([]);
+      },
     );
+
+    it("fails before creating anything when the manifest is missing", async () => {
+      await expect(
+        preview({ ...params, manifestPath: "missing.json" }),
+      ).rejects.toThrow("No manifest found at missing.json.");
+      expect(calls).toEqual([]);
+    });
   });
 });
 
@@ -323,6 +480,76 @@ describe("a branch's later previews", () => {
     expect(callsTo("apps.manifest.update")[0].body).toMatchObject({
       app_id: "A_OLD",
     });
+    expect(savedEnvs().map((e) => e.key)).not.toContain("SLACK_APP_ID");
+    expect(savedEnvs().map((e) => e.key)).not.toContain("SLACK_SIGNING_SECRET");
+  });
+
+  // The first build's install may not go through: the app can be waiting
+  // for approval, the workspace full, or the service token added later.
+  it("saves the tokens of an app that only now got installed", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({
+        ok: true,
+        api_access_tokens: { bot: "xoxb-late", app_level: "xapp-late" },
+      });
+
+    await preview({
+      ...params,
+      automationBypassSecret: BYPASS,
+      slackAppId: "A_OLD",
+    });
+
+    expect(savedEnvs()).toEqual([
+      expect.objectContaining({
+        key: "SLACK_BOT_TOKEN",
+        value: "xoxb-late",
+        target: ["preview"],
+        gitBranch: "feat/thing",
+      }),
+      expect.objectContaining({
+        key: "SLACK_APP_LEVEL_TOKEN",
+        value: "xapp-late",
+      }),
+    ]);
+  });
+
+  it("saves nothing when the app still isn't installed", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({ ok: false, error: "app_approval_request_pending" });
+
+    const result = await preview({
+      ...params,
+      automationBypassSecret: BYPASS,
+      slackAppId: "A_OLD",
+    });
+
+    expect(result.installStatus).toBe("app_approval_request_pending");
+    expect(savedEnvs()).toEqual([]);
+  });
+
+  // The app is there, so a second one wouldn't fix the manifest, and would
+  // leave the first behind.
+  it("fails instead of creating a second app when Slack rejects the updated manifest", async () => {
+    answers["apps.manifest.update"] = () =>
+      json({
+        ok: false,
+        error: "invalid_manifest",
+        errors: [{ message: "too long", pointer: "/display_information/name" }],
+      });
+
+    const error = await preview({
+      ...params,
+      automationBypassSecret: BYPASS,
+      slackAppId: "A_OLD",
+    }).catch((e: Error) => e);
+
+    expect((error as Error).message).toBe(
+      "Slack's apps.manifest.update failed: invalid_manifest",
+    );
+    expect((error as { errors?: unknown }).errors).toEqual([
+      { message: "too long", pointer: "/display_information/name" },
+    ]);
+    expect(callsTo("apps.manifest.create")).toEqual([]);
     expect(savedEnvs()).toEqual([]);
   });
 
@@ -355,6 +582,74 @@ describe("a branch's later previews", () => {
 
     expect(callsTo("apps.manifest.create")).toEqual([]);
     expect(savedEnvs()).toEqual([]);
+  });
+});
+
+describe("for the build that runs it", () => {
+  const provision = (
+    currentEnv: Record<string, string | undefined>,
+    overrides: Partial<PreviewParams> = {},
+  ) =>
+    provisionPreview(
+      { ...params, automationBypassSecret: BYPASS, ...overrides },
+      { currentEnv },
+    );
+
+  it("lists every variable of a new app as missing from the build", async () => {
+    const { changedEnv } = await provision({});
+
+    expect(changedEnv).toEqual([
+      "SLACK_APP_ID",
+      "SLACK_CLIENT_ID",
+      "SLACK_CLIENT_SECRET",
+      "SLACK_SIGNING_SECRET",
+      "SLACK_BOT_TOKEN",
+    ]);
+  });
+
+  it("doesn't save a token the build already has", async () => {
+    const { changedEnv } = await provision(
+      { SLACK_APP_ID: "A_OLD", SLACK_BOT_TOKEN: "xoxb-1" },
+      { slackAppId: "A_OLD" },
+    );
+
+    expect(changedEnv).toEqual([]);
+    expect(savedEnvs()).toEqual([]);
+  });
+
+  it("saves a token the build doesn't have, and lists it", async () => {
+    const { changedEnv } = await provision(
+      { SLACK_APP_ID: "A_OLD" },
+      { slackAppId: "A_OLD" },
+    );
+
+    expect(changedEnv).toEqual(["SLACK_BOT_TOKEN"]);
+    expect(savedEnvs().map((e) => [e.key, e.value])).toEqual([
+      ["SLACK_BOT_TOKEN", "xoxb-1"],
+    ]);
+  });
+
+  // The project can have a token for every preview, like a shared
+  // development app's. The branch's own app needs its own.
+  it("saves the branch's token over a different one the build has", async () => {
+    const { changedEnv } = await provision(
+      { SLACK_APP_ID: "A_OLD", SLACK_BOT_TOKEN: "xoxb-shared" },
+      { slackAppId: "A_OLD" },
+    );
+
+    expect(changedEnv).toEqual(["SLACK_BOT_TOKEN"]);
+  });
+
+  it("lists nothing when the app isn't installed", async () => {
+    answers["apps.developerInstall"] = () =>
+      json({ ok: false, error: "service_limits_exceeded" });
+
+    const { changedEnv } = await provision(
+      { SLACK_APP_ID: "A_OLD" },
+      { slackAppId: "A_OLD" },
+    );
+
+    expect(changedEnv).toEqual([]);
   });
 });
 
