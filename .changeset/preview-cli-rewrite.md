@@ -30,4 +30,5 @@ Rewrite `preview` and the `vercel-slack` CLI. Preview apps that v1 created keep 
 - A deployment the CLI started never starts another, and the running one is only canceled once Vercel names the deployment that replaces it.
 - A save to Vercel that collides with another build's is sent again, instead of failing the build.
 - When Sensitive configuration tokens were rotated by another build, the error says to redeploy instead of to generate new tokens.
+- A rotation only replaces the token pair of the build's own environment, and saves it as Sensitive when either of its variables is, so it never copies one environment's token into another's or makes a Sensitive token readable.
 - Requests time out after 30 seconds and are retried when that's safe. Tokens and secrets are taken out of everything printed or thrown.

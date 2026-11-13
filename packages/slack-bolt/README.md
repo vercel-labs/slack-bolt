@@ -457,7 +457,9 @@ With `--no-sensitive` the secrets are saved readable too, for `vercel env pull` 
 
 #### Token rotation
 
-A configuration token expires after 12 hours. With `SLACK_CONFIG_REFRESH_TOKEN` set, a build that finds it expired trades the refresh token for a new pair and saves both over the stored ones, in the environments and with the type each has. You set the two once.
+A configuration token expires after 12 hours. With `SLACK_CONFIG_REFRESH_TOKEN` set, a build that finds it expired trades the refresh token for a new pair and saves both over the stored ones. You set the two once.
+
+You can keep one pair for every environment, or a pair for each. A build only uses, and only replaces, the pair for its own environment: a production build never touches Preview's tokens, or the other way around. A rotated pair is saved with the type its variables have, and as Sensitive when either of them is, so a rotation never makes a Sensitive token readable. Outside a deployment, like `vercel-slack cleanup` in a terminal, a project with a pair for each environment isn't rotated, since there's no telling which pair the tokens belong to.
 
 Slack accepts a refresh token once. When two builds start with the same expired token, one rotates it, and the other picks up the token the first one saved. That needs the configuration token to be readable, so store `SLACK_CONFIGURATION_TOKEN` and `SLACK_CONFIG_REFRESH_TOKEN` as regular variables, not Sensitive ones. As Sensitive variables they still rotate, but the second of two such builds fails, saying to redeploy, and a redeploy picks up the new tokens.
 

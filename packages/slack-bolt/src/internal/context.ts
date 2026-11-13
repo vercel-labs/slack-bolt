@@ -23,6 +23,8 @@ export interface Project {
   slackConfigRefreshToken?: string;
   /** The environment this run sees, which is what its deployment was built with. */
   env: Env;
+  /** The deployment's environment, like `production`, when this runs in one. */
+  environment?: string;
   log: Log;
 }
 
@@ -96,6 +98,7 @@ function resolveProject(options: ProjectOptions, env: Env): Project {
       pick(options.slackConfigRefreshToken, env, "SLACK_CONFIG_REFRESH_TOKEN"),
     ),
     env,
+    environment: environmentOf(env) || undefined,
     log: logTo(options.logger),
   };
 }

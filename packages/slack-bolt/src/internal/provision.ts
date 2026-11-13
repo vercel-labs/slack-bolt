@@ -186,6 +186,7 @@ export async function provision(ctx: PreviewContext): Promise<PreviewApp> {
     vercel,
     log,
     envs,
+    environment: ctx.environment,
     token: ctx.slackConfigToken,
     refreshToken: ctx.slackConfigRefreshToken,
   });

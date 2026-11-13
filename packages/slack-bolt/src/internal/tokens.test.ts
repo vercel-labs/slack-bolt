@@ -36,7 +36,7 @@ const config = (value: string | null, target = ["production", "preview"]) => ({
 /** Asks for a usable token, in a project that answers from `answers`. */
 async function usable(
   answers: Record<string, unknown> = {},
-  own: { token?: string; refreshToken?: string } = {
+  own: { token?: string; refreshToken?: string; environment?: string } = {
     token: OWN,
     refreshToken: "xoxe-1-own-refresh",
   },
@@ -118,7 +118,7 @@ describe("a token Slack refuses", () => {
     ]);
   });
 
-  it("is saved over the stored pair, in its environments and with its types", async () => {
+  it("is saved over the stored pair, in its environments, and Sensitive when either is", async () => {
     const { result, api } = await usable({
       "auth.test": EXPIRED,
       [LIST]: {
@@ -145,8 +145,9 @@ describe("a token Slack refuses", () => {
 
     await result;
 
+    // A token from a Sensitive pair is never saved readable.
     expect(api.savedEnv()).toEqual([
-      { key: CONFIG, value: ROTATED, type: "encrypted", target: ["preview"] },
+      { key: CONFIG, value: ROTATED, type: "sensitive", target: ["preview"] },
       {
         key: REFRESH,
         value: "xoxe-1-rotated-refresh",
@@ -392,17 +393,144 @@ describe("more than one stored token", () => {
     ]);
   });
 
-  it("means nothing when Slack refuses that one too: the run rotates", async () => {
+  it("stops a run outside a deployment before rotating, when it can't tell which pair is its own", async () => {
     const { result, api } = await usable({ ...both, "auth.test": EXPIRED });
 
+    await expect(result).rejects.toThrow(
+      "The project keeps a SLACK_CONFIGURATION_TOKEN for each of several environments, and this run can't tell which pair its own tokens belong to\nNothing was rotated.",
+    );
+    expect(api.calls()).not.toContain("tooling.tokens.rotate");
+    expect(api.calls()).not.toContain(SAVE);
+  });
+});
+
+describe("a pair for each environment", () => {
+  // Production's pair is Sensitive, Preview's readable.
+  const PAIRS = {
+    [LIST]: {
+      envs: [
+        stored(CONFIG, { id: "env_config_prod", target: ["production"] }),
+        stored(REFRESH, { id: "env_refresh_prod", target: ["production"] }),
+        stored(CONFIG, {
+          type: "encrypted",
+          id: "env_config_preview",
+          target: ["preview"],
+        }),
+        stored(REFRESH, {
+          type: "encrypted",
+          id: "env_refresh_preview",
+          target: ["preview"],
+        }),
+      ],
+    },
+    "GET /v1/projects/prj_1/env/env_config_prod": { type: "sensitive" },
+    "GET /v1/projects/prj_1/env/env_refresh_prod": { type: "sensitive" },
+    "GET /v1/projects/prj_1/env/env_config_preview": {
+      type: "encrypted",
+      value: OWN,
+    },
+    "GET /v1/projects/prj_1/env/env_refresh_preview": {
+      type: "encrypted",
+      value: "xoxe-1-preview-refresh",
+    },
+  };
+  const reads = (api: { calls: () => string[] }) =>
+    api.calls().filter((call) => call.startsWith("GET /v1/"));
+
+  it("keeps a production rotation to Production's variables, Sensitive", async () => {
+    const { result, api } = await usable(
+      { ...PAIRS, "auth.test": EXPIRED },
+      {
+        token: "xoxe.xoxp-1-production-token",
+        refreshToken: "xoxe-1-production-refresh",
+        environment: "production",
+      },
+    );
+
     await expect(result).resolves.toBe(ROTATED);
-    // Saved over each of them, where it is.
-    expect(
-      api
-        .savedEnv()
-        .filter((env) => env.key === CONFIG)
-        .map((env) => env.target),
-    ).toEqual([["preview"], ["production"]]);
+    // Production's own refresh token, never Preview's readable one.
+    expect(api.body("tooling.tokens.rotate")).toEqual({
+      refresh_token: "xoxe-1-production-refresh",
+    });
+    expect(reads(api)).toEqual([
+      "GET /v1/projects/prj_1/env/env_config_prod",
+      "GET /v1/projects/prj_1/env/env_refresh_prod",
+    ]);
+    expect(api.savedEnv()).toEqual([
+      {
+        key: CONFIG,
+        value: ROTATED,
+        type: "sensitive",
+        target: ["production"],
+      },
+      {
+        key: REFRESH,
+        value: "xoxe-1-rotated-refresh",
+        type: "sensitive",
+        target: ["production"],
+      },
+    ]);
+  });
+
+  it("keeps a preview rotation to Preview's variables, as they are", async () => {
+    const { result, api } = await usable(
+      { ...PAIRS, "auth.test": EXPIRED },
+      { token: OWN, environment: "preview" },
+    );
+
+    await expect(result).resolves.toBe(ROTATED);
+    expect(api.body("tooling.tokens.rotate")).toEqual({
+      refresh_token: "xoxe-1-preview-refresh",
+    });
+    expect(reads(api)).not.toContain(
+      "GET /v1/projects/prj_1/env/env_config_prod",
+    );
+    expect(api.savedEnv()).toEqual([
+      { key: CONFIG, value: ROTATED, type: "encrypted", target: ["preview"] },
+      {
+        key: REFRESH,
+        value: "xoxe-1-rotated-refresh",
+        type: "encrypted",
+        target: ["preview"],
+      },
+    ]);
+  });
+
+  it("saves a readable refresh token's pair only where that variable is", async () => {
+    // Outside a deployment: the readable variable says which pair it is.
+    const { result, api } = await usable(
+      { ...PAIRS, "auth.test": EXPIRED },
+      { token: "xoxe.xoxp-1-someone-elses" },
+    );
+
+    await expect(result).resolves.toBe(ROTATED);
+    expect(api.savedEnv().map((env) => env.target)).toEqual([
+      ["preview"],
+      ["preview"],
+    ]);
+  });
+
+  it("saves tokens no variable holds as Sensitive, for its environment only", async () => {
+    // In a deployment, they may come from a Sensitive shared variable.
+    const { result, api } = await usable(
+      { "auth.test": EXPIRED },
+      {
+        token: OWN,
+        refreshToken: "xoxe-1-own-refresh",
+        environment: "preview",
+      },
+    );
+
+    await expect(result).resolves.toBe(ROTATED);
+    expect(api.savedEnv()).toEqual([
+      { key: CONFIG, value: ROTATED, type: "sensitive", target: ["preview"] },
+      {
+        key: REFRESH,
+        value: "xoxe-1-rotated-refresh",
+        type: "sensitive",
+        target: ["preview"],
+      },
+    ]);
   });
 });
 

@@ -175,6 +175,7 @@ export async function cleanUp(ctx: CleanupContext): Promise<CleanupResult> {
         vercel,
         log,
         envs,
+        environment: ctx.environment,
         token: ctx.slackConfigToken,
         refreshToken: ctx.slackConfigRefreshToken,
       });

@@ -16,21 +16,119 @@ const APPS = "https://api.slack.com/apps";
 const LOOKS = 5;
 const LOOK_EVERY_MS = 1500;
 
-/** The stored variables for a token: project-wide ones, a preview's first. */
-const recordsOf = (envs: StoredEnv[], key: string): StoredEnv[] =>
-  envs
-    .filter((env) => env.key === key && !env.gitBranch)
-    .sort(
-      (a, b) =>
-        Number(b.target.includes("preview")) -
-        Number(a.target.includes("preview")),
-    );
+/** The environments a variable can be saved for. */
+const TARGETS = new Set(["production", "preview", "development"]);
 
-/** The value of the first of the variables that Vercel shows. */
+/**
+ * The stored variables of the token pair a run uses.
+ *
+ * In a deployment, the ones for its environment: a project can keep a pair
+ * for each, and Production's must never be read or written for Preview, or
+ * the other way around. Elsewhere, or when none are for its environment,
+ * every project-wide one, a preview's first, and `bound` is false: which
+ * pair the run's own tokens belong to is unknown.
+ */
+interface Pair {
+  config: StoredEnv[];
+  refresh: StoredEnv[];
+  bound: boolean;
+}
+
+function pairOf(envs: StoredEnv[], environment: string | undefined): Pair {
+  const all = (key: string) =>
+    envs
+      .filter(
+        (env) => env.key === key && !env.gitBranch && env.target.length > 0,
+      )
+      .sort(
+        (a, b) =>
+          Number(b.target.includes("preview")) -
+          Number(a.target.includes("preview")),
+      );
+  const config = all(CONFIG);
+  const refresh = all(REFRESH);
+  if (environment) {
+    const mine = (list: StoredEnv[]) =>
+      list.filter((env) => env.target.includes(environment));
+    const pair = { config: mine(config), refresh: mine(refresh), bound: true };
+    if (pair.config.length > 0 || pair.refresh.length > 0) return pair;
+  }
+  return { config, refresh, bound: false };
+}
+
+const sameTargets = (a: StoredEnv, b: StoredEnv) =>
+  a.target.length === b.target.length &&
+  a.target.every((target) => b.target.includes(target));
+
+/** Where a rotated pair goes, and as what. */
+interface Destination {
+  config: StoredEnv[];
+  refresh: StoredEnv[];
+  /** For a token that has no variable yet. */
+  target: string[];
+  type: "encrypted" | "sensitive";
+}
+
+/**
+ * Where to save the pair that replaces the one `source` holds, or that the
+ * run's own refresh token belongs to when it's `undefined`. Worked out before
+ * rotating, which spends the refresh token: a pair that can't be saved where
+ * it came from mustn't be rotated at all.
+ *
+ * The new pair only replaces the variables the old one came from. It's
+ * Sensitive when any of them is, or when its source can't be listed, so a
+ * rotation never makes a token readable that wasn't.
+ *
+ * @throws When the run's own refresh token can't be told apart from the
+ * pairs of several environments.
+ */
+function destinationOf(
+  pair: Pair,
+  source: StoredEnv | undefined,
+  environment: string | undefined,
+): Destination {
+  let config: StoredEnv[];
+  let refresh: StoredEnv[];
+  if (source) {
+    config = pair.config.filter((env) => sameTargets(env, source));
+    refresh = pair.refresh.filter((env) => sameTargets(env, source));
+  } else if (pair.bound) {
+    ({ config, refresh } = pair);
+  } else {
+    // One variable for each token is one pair, whatever their environments.
+    if (pair.config.length > 1 || pair.refresh.length > 1) {
+      throw problem(
+        `The project keeps a ${CONFIG} for each of several environments, and this run can't tell which pair its own tokens belong to`,
+        `Nothing was rotated. Run it in a deployment of the environment whose token expired, or with a ${CONFIG} that works.`,
+      );
+    }
+    ({ config, refresh } = pair);
+  }
+
+  const records = [...config, ...refresh];
+  const fallback =
+    environment && TARGETS.has(environment)
+      ? [environment]
+      : ["production", "preview"];
+  return {
+    config,
+    refresh,
+    target: (source ?? records[0])?.target ?? fallback,
+    // In a deployment, tokens no listed variable holds came from somewhere
+    // else, like a team's shared variable, which may be Sensitive.
+    type:
+      records.some((env) => env.type === "sensitive") ||
+      (records.length === 0 && environment !== undefined)
+        ? "sensitive"
+        : "encrypted",
+  };
+}
+
+/** The first of the variables that Vercel shows the value of, and the value. */
 async function valueOf(
   vercel: Vercel,
   records: StoredEnv[],
-): Promise<string | undefined> {
+): Promise<{ value: string; record: StoredEnv } | undefined> {
   for (const record of records) {
     const value =
       record.value ??
@@ -39,40 +137,27 @@ async function valueOf(
         if (isTransient(error)) throw error;
         return null;
       }));
-    if (value) return secret(value);
+    if (value) return { value: secret(value), record };
   }
   return undefined;
 }
 
-/**
- * Saves a rotated pair over the stored one, in the environments and with the
- * type each variable has: rotating never copies a token kept to Preview into
- * Production, or makes a Sensitive one readable. Tokens that aren't stored
- * yet are saved for Production and Preview, where this package runs.
- */
+/** Saves a rotated pair where `destination` says. */
 async function save(
   vercel: Vercel,
-  envs: StoredEnv[],
+  destination: Destination,
   rotated: { token: string; refreshToken: string },
 ): Promise<void> {
-  const pairs: [string, string][] = [
-    [CONFIG, rotated.token],
-    [REFRESH, rotated.refreshToken],
+  const pairs: [string, string, StoredEnv[]][] = [
+    [CONFIG, rotated.token, destination.config],
+    [REFRESH, rotated.refreshToken, destination.refresh],
   ];
-  const variables = pairs.flatMap(([key, value]): EnvVar[] => {
-    const stored = recordsOf(envs, key).filter((env) => env.target.length > 0);
-    if (stored.length === 0) {
-      return [
-        { key, value, type: "encrypted", target: ["production", "preview"] },
-      ];
-    }
-    return stored.map((env) => ({
-      key,
-      value,
-      type: env.type === "sensitive" ? "sensitive" : "encrypted",
-      target: env.target,
-    }));
-  });
+  const variables = pairs.flatMap(([key, value, stored]): EnvVar[] =>
+    (stored.length > 0
+      ? stored.map((env) => env.target)
+      : [destination.target]
+    ).map((target) => ({ key, value, type: destination.type, target })),
+  );
 
   try {
     await vercel.saveEnv(variables);
@@ -91,12 +176,14 @@ async function save(
  * one stored in the project, or one this run rotates to and saves.
  *
  * @param envs The project's variables, as just listed.
+ * @param environment The deployment's environment, when this runs in one.
  */
 export async function usableConfigToken({
   slack,
   vercel,
   log,
   envs,
+  environment,
   token,
   refreshToken,
 }: {
@@ -104,6 +191,7 @@ export async function usableConfigToken({
   vercel: Vercel;
   log: Log;
   envs: StoredEnv[];
+  environment?: string;
   token?: string;
   refreshToken?: string;
 }): Promise<string> {
@@ -133,7 +221,8 @@ export async function usableConfigToken({
    * fine, and rotating would spend its refresh token.
    */
   const newer = async (list: StoredEnv[]): Promise<string | undefined> => {
-    const stored = await valueOf(vercel, recordsOf(list, CONFIG));
+    const stored = (await valueOf(vercel, pairOf(list, environment).config))
+      ?.value;
     if (!stored || stored === token) return undefined;
     try {
       await slack.authTest(stored);
@@ -168,12 +257,12 @@ export async function usableConfigToken({
   }
 
   // The stored refresh token is the newest there is.
-  const storedRefresh = recordsOf(envs, REFRESH);
-  const readable = await beforeRotating(() => valueOf(vercel, storedRefresh));
-  const refresh = readable ?? refreshToken;
+  const pair = pairOf(envs, environment);
+  const readable = await beforeRotating(() => valueOf(vercel, pair.refresh));
+  const refresh = readable?.value ?? refreshToken;
   // Vercel won't show a Sensitive one, so this run has to go with what its
   // deployment was created with, which another run may have spent since.
-  const unreadable = !readable && storedRefresh.length > 0;
+  const unreadable = !readable && pair.refresh.length > 0;
   if (!refresh) {
     throw token
       ? problem(
@@ -186,6 +275,8 @@ export async function usableConfigToken({
           `Generate a configuration token and save it in Vercel, with its refresh token as ${REFRESH}: ${APPS}`,
         );
   }
+
+  const destination = destinationOf(pair, readable?.record, environment);
 
   let rotated: { token: string; refreshToken: string };
   try {
@@ -226,7 +317,7 @@ export async function usableConfigToken({
         );
   }
 
-  await save(vercel, envs, rotated);
+  await save(vercel, destination, rotated);
   log.ok(`Rotated ${CONFIG} and saved it to Vercel`);
   return rotated.token;
 }
