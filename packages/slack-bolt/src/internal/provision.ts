@@ -1,377 +1,395 @@
-import fs from "node:fs";
-import path from "node:path";
-import type { PreviewParams, PreviewResult } from "../preview";
-import { log, registerSecret } from "./logger";
-import { createNewManifest } from "./manifest";
-import { parseManifest, stringifyManifest } from "./manifest/parse";
-import type { Manifest } from "./manifest/types";
-import { installApp, removeSlackApp, upsertSlackApp } from "./slack";
-import type { InstallResult } from "./slack/types";
-import { assertToken } from "./tokens";
-import { addEnvironmentVariables, updateProtectionBypass } from "./vercel";
-import type { CreateProjectEnv } from "./vercel/types";
+import type { Installation, PreviewApp } from "../preview";
+import type { PreviewContext } from "./context";
+import { replaceDeployment } from "./deploy";
+import {
+  isAppUnreachable,
+  isTokenRefused,
+  isTransient,
+  messageOf,
+  problem,
+  RETRY,
+  SlackError,
+} from "./errors";
+import type { Log } from "./log";
+import { loadManifest, previewManifest } from "./manifest";
+import {
+  APP_ID,
+  appIdOf,
+  listVariables,
+  TOKEN_KEYS,
+  variable,
+  variablesOf,
+} from "./records";
+import {
+  type AppTokens,
+  type CreatedApp,
+  createSlack,
+  type Slack,
+} from "./slack";
+import { usableConfigToken } from "./tokens";
+import { createVercel } from "./vercel";
 
-/** The variables saved as Sensitive in Vercel. */
-const SENSITIVE_KEYS = new Set([
-  "SLACK_CLIENT_SECRET",
-  "SLACK_SIGNING_SECRET",
-  "SLACK_BOT_TOKEN",
-  "SLACK_APP_LEVEL_TOKEN",
-  "SLACK_USER_TOKEN",
-]);
-
-export type ProvisionOptions = {
-  /** Print progress, as the `vercel-slack` CLI does. */
-  cli?: boolean;
-  /**
-   * The environment the branch's current deployment was built with. A token
-   * it already has isn't saved again, and `changedEnv` lists what it lacks.
-   */
-  currentEnv?: Record<string, string | undefined>;
-};
-
-export type Provisioned = PreviewResult & {
-  /**
-   * The variables saved for the branch with values `currentEnv` doesn't
-   * have: what a deployment built with `currentEnv` is missing.
-   */
-  changedEnv: string[];
-};
-
-const MANIFEST_DOCS = "https://docs.slack.dev/reference/manifests";
+const SETTINGS = "https://api.slack.com/apps";
 const SERVICE_TOKEN_DOCS =
   "https://docs.slack.dev/authentication/tokens/#service";
 
-/** The error for a manifest that isn't where it's expected. */
-export const noManifest = (manifestPath: string) =>
-  `No manifest at ${manifestPath}\nCreate one, or set MANIFEST_PATH to where yours is: ${MANIFEST_DOCS}`;
+type NotInstalled = Extract<Installation, { installed: false }>;
 
-/** Reads and parses the manifest, with errors that name the file. */
-function readManifest(manifestPath: string): Manifest {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(path.join(process.cwd(), manifestPath), "utf8");
-  } catch (error) {
-    throw new Error(noManifest(manifestPath), { cause: error });
-  }
-
-  let manifest: Manifest | null;
-  try {
-    manifest = parseManifest(raw, manifestPath);
-  } catch (error) {
-    throw new Error(`Couldn't parse ${manifestPath}`, { cause: error });
-  }
-
-  // The app's name is the one field the rewrite needs.
-  const name = manifest?.display_information?.name;
-  if (typeof name !== "string" || name === "") {
-    throw new Error(
-      `${manifestPath} has no display_information.name\nSlack requires one: ${MANIFEST_DOCS}`,
-    );
-  }
-  return manifest as Manifest;
-}
-
-const NEW_SERVICE_TOKEN = `Generate a new SLACK_SERVICE_TOKEN: ${SERVICE_TOKEN_DOCS}`;
-
-/** What to do about an install Slack refused, by its error code. */
-const INSTALL_HINTS: Record<string, string> = {
-  service_limits_exceeded:
-    "The workspace is at its app limit (10 on Slack's free plan). Remove an app or upgrade, then redeploy.",
-  invalid_auth: NEW_SERVICE_TOKEN,
-  not_authed: NEW_SERVICE_TOKEN,
-  token_expired: NEW_SERVICE_TOKEN,
-  token_revoked: NEW_SERVICE_TOKEN,
-  account_inactive: NEW_SERVICE_TOKEN,
+/** Slack's codes for an app that waits on a workspace admin. */
+const APPROVAL: Record<
+  string,
+  { reason: NotInstalled["reason"]; why: string; next?: string }
+> = {
+  app_approval_request_eligible: {
+    reason: "approval_required",
+    why: "a workspace admin has to approve it first",
+    next: "Ask an admin to approve it, then redeploy.",
+  },
+  app_approval_request_pending: {
+    reason: "approval_pending",
+    why: "it's waiting for a workspace admin's approval",
+    next: "Redeploy once it's approved.",
+  },
+  app_approval_request_denied: {
+    reason: "approval_denied",
+    why: "a workspace admin denied its approval request",
+  },
 };
 
-/**
- * Why this build didn't install the app, and what to do about it. `install`
- * is the line that says where to install it by hand, when that would help.
- */
-export function installAdvice(
-  status: Exclude<InstallResult["status"], "installed">,
-  reason: string | undefined,
-  appId: string,
-  install: string | undefined,
-): { headline: string; details: (string | undefined)[] } {
-  switch (status) {
-    case "missing_service_token":
-      return {
-        headline: "Skipped installing the app: SLACK_SERVICE_TOKEN is not set",
-        details: [
-          install,
-          `To have builds install it, add a service token: ${SERVICE_TOKEN_DOCS}`,
-        ],
-      };
-    case "app_approval_request_eligible":
-      return {
-        headline:
-          "Couldn't install the app: a workspace admin has to approve it first",
-        details: ["Ask an admin to approve it, then redeploy."],
-      };
-    case "app_approval_request_pending":
-      return {
-        headline:
-          "Couldn't install the app: it's waiting for a workspace admin's approval",
-        details: ["Redeploy once it's approved."],
-      };
-    case "app_approval_request_denied":
-      return {
-        headline:
-          "Couldn't install the app: a workspace admin denied its approval request",
-        details: [],
-      };
-    case "no_access":
-      return {
-        headline: `Couldn't install the app: SLACK_SERVICE_TOKEN can't access app ${appId}`,
-        details: [
-          `Create the service token and the configuration token as the same Slack user: ${SERVICE_TOKEN_DOCS}`,
-        ],
-      };
-    case "invalid_app_id":
-      return {
-        headline: `Couldn't install the app: Slack doesn't recognize app ${appId}`,
-        details: [
-          "This is likely a bug in @vercel/slack-bolt. Please report it: https://github.com/vercel-labs/slack-bolt/issues",
-        ],
-      };
-    // Slack answered with an HTTP error, which says nothing about the app.
-    case "slack_api_error":
-      return {
-        headline: `Couldn't install the app: Slack answered ${reason ?? "with an error"}`,
-        details: ["Redeploy to try again."],
-      };
-    case "unknown_error":
-      // Say what Slack answered, so the cause can be fixed.
-      return {
-        headline: `Couldn't install the app: Slack answered ${reason ?? "with an unknown error"}`,
-        details: [(reason && INSTALL_HINTS[reason]) || install],
-      };
+/** An error for a manifest call Slack refused, saying what to do about it. */
+function appFailure(error: unknown, action: string, from: string): Error {
+  if (error instanceof SlackError && error.code === "invalid_manifest") {
+    const found = error.problems
+      .map(({ pointer, message }) =>
+        [pointer, message].filter(Boolean).join(": "),
+      )
+      .filter(Boolean)
+      .map((line) => `\n- ${line}`)
+      .join("");
+    return problem(
+      `Slack rejected ${from}${found}`,
+      "Fix the manifest, then redeploy.",
+      error,
+    );
   }
+  return problem(
+    `Couldn't ${action}: ${messageOf(error)}`,
+    error instanceof SlackError && !isTransient(error)
+      ? `Slack describes its error codes at https://docs.slack.dev/reference/methods/${error.method}`
+      : RETRY,
+    error,
+  );
 }
 
 /**
- * Creates or updates the branch's Slack app, saves what the branch's
- * deployments need as environment variables, and installs the app. `preview`
- * and the `vercel-slack` CLI both run this.
+ * Installs the app in the service token's workspace, and says how it went.
+ * Never throws: an app that couldn't be installed still exists, and can be
+ * installed by hand.
  */
-export async function provisionPreview(
-  params: PreviewParams,
-  { cli = false, currentEnv }: ProvisionOptions = {},
-): Promise<Provisioned> {
-  const {
-    branch,
-    projectId,
-    deploymentUrl,
-    teamId,
-    commitAuthor,
-    commitMessage: commitMsg,
-    commitSha,
-    slackAppId,
-    slackConfigurationToken,
-    slackServiceToken,
-    manifestPath,
-    vercelApiToken,
-  } = params;
+async function install(
+  slack: Slack,
+  log: Log,
+  app: {
+    id: string;
+    created: boolean;
+    installUrl: string;
+    botScopes: string[];
+  },
+  serviceToken: string | undefined,
+): Promise<{ installation: Installation; tokens: AppTokens }> {
+  const failed = (installation: NotInstalled) => ({ installation, tokens: {} });
 
-  const branchUrl = params.branchUrl ?? deploymentUrl;
-
-  // Read the manifest first, so one that can't be used fails before anything
-  // is created.
-  // Keep every secret this run handles out of what it prints and throws.
-  registerSecret(
-    params.automationBypassSecret,
-    slackConfigurationToken,
-    slackServiceToken,
-    vercelApiToken,
-  );
-
-  // The CLI checks its variables by name before this. A caller of `preview`
-  // gets the same answer here, in place of fetch's, which quotes the token.
-  assertToken("slackConfigurationToken", slackConfigurationToken);
-  assertToken("slackServiceToken", slackServiceToken);
-  assertToken("vercelApiToken", vercelApiToken);
-
-  if (cli) log.step(`Reading manifest from ${manifestPath}`);
-  const manifest = readManifest(manifestPath);
-
-  let bypassSecret = params.automationBypassSecret;
-  if (!bypassSecret) {
-    if (cli) log.step("Generating automation bypass secret");
-    bypassSecret = await updateProtectionBypass({
-      projectId,
-      token: vercelApiToken,
-      teamId,
-    });
-    if (cli) log.success("Automation bypass secret generated");
-  }
-  registerSecret(bypassSecret);
-
-  const newManifest = createNewManifest({
-    originalManifest: manifest,
-    branchUrl,
-    bypassSecret,
-    branch,
-    commitSha,
-    commitMessage: commitMsg,
-    commitAuthor,
-  });
-
-  // write new manifest so user-land imports of manifest.json see the updated version
-  fs.writeFileSync(
-    path.join(process.cwd(), manifestPath),
-    stringifyManifest(newManifest, manifestPath),
-    "utf8",
-  );
-  if (cli) log.success(`Rewrote ${manifestPath} for ${branchUrl}`);
-
-  if (cli) {
-    log.step(
-      slackAppId ? `Updating Slack app ${slackAppId}` : "Creating Slack app",
-    );
-  }
-  const { isNew, app } = await upsertSlackApp({
-    token: slackConfigurationToken,
-    appId: slackAppId,
-    manifest: newManifest,
-  });
-  if (isNew) {
-    registerSecret(
-      app.credentials?.client_secret,
-      app.credentials?.signing_secret,
-      app.credentials?.verification_token,
-    );
-  }
-
-  const branchEnv = (key: string, value: string): CreateProjectEnv => ({
-    key,
-    value,
-    // Sensitive variables can't be read back from Vercel, in the dashboard or
-    // through the API. Nothing here reads the app's secrets or tokens again,
-    // so they are stored that way. SLACK_APP_ID stays readable: cleanup needs
-    // it to find the app.
-    type: SENSITIVE_KEYS.has(key) ? "sensitive" : "encrypted",
-    target: ["preview"],
-    gitBranch: branch,
-    comment: `Created by @vercel/slack-bolt for app ${app.app_id} on branch ${branch}`,
-  });
-
-  const changedEnv: string[] = [];
-  const save = async (envs: CreateProjectEnv[]) => {
-    if (envs.length === 0) return;
-    await addEnvironmentVariables({
-      projectId,
-      token: vercelApiToken,
-      teamId,
-      envs,
-    });
-    for (const env of envs) {
-      if (currentEnv?.[env.key] !== env.value) changedEnv.push(env.key);
+  if (!serviceToken) {
+    // Said once, when the app is new: later builds can't tell whether
+    // someone has installed it since.
+    if (app.created) {
+      log.warn("The app isn't installed: SLACK_SERVICE_TOKEN is not set");
+      log.note(`Install it: ${app.installUrl}`);
+      log.note(
+        `To have builds install it, add a service token: ${SERVICE_TOKEN_DOCS}`,
+      );
     }
-  };
+    return failed({ installed: false, reason: "no_service_token" });
+  }
 
-  if (isNew) {
-    const credentials: [string, string | undefined][] = [
-      ["SLACK_APP_ID", app.app_id],
-      ["SLACK_CLIENT_ID", app.credentials?.client_id],
-      ["SLACK_CLIENT_SECRET", app.credentials?.client_secret],
-      ["SLACK_SIGNING_SECRET", app.credentials?.signing_secret],
-    ];
+  let error: unknown;
+  try {
+    const tokens = await slack.install(serviceToken, app.id, app.botScopes);
+    log.ok("Installed the app in the workspace");
+    return { installation: { installed: true }, tokens };
+  } catch (caught) {
+    error = caught;
+  }
+
+  if (!(error instanceof SlackError) || isTransient(error)) {
+    log.warn(`Couldn't install the app: ${messageOf(error)}`);
+    log.note(RETRY);
+    return failed({ installed: false, reason: "unavailable" });
+  }
+
+  const waiting = APPROVAL[error.code];
+  if (waiting) {
+    log.warn(`The app isn't installed: ${waiting.why}`);
+    if (waiting.next) log.note(waiting.next);
+    return failed({ installed: false, reason: waiting.reason });
+  }
+
+  // The app was just created or updated, so it exists. Slack answers
+  // `invalid_app_id` for an app the service token's user can't see.
+  if (
+    error.code === "invalid_app_id" &&
+    !(await slack.appExists(serviceToken, app.id).catch(() => false))
+  ) {
+    log.warn(
+      `The app isn't installed: SLACK_SERVICE_TOKEN's user can't see app ${app.id}`,
+    );
+    log.note(
+      `Create the service token and the configuration token as the same Slack user: ${SERVICE_TOKEN_DOCS}`,
+    );
+    return failed({ installed: false, reason: "no_access" });
+  }
+
+  log.warn(`Couldn't install the app: ${messageOf(error)}`);
+  log.note(
+    isTokenRefused(error)
+      ? `Generate a new SLACK_SERVICE_TOKEN: ${SERVICE_TOKEN_DOCS}`
+      : `Install it yourself: ${app.installUrl}`,
+  );
+  return failed({ installed: false, reason: "refused", code: error.code });
+}
+
+/**
+ * Sets up a branch's preview app: creates it, or updates the one the branch
+ * has, saves what its deployments need, installs it, and replaces this
+ * deployment when it was built without any of that.
+ */
+export async function provision(ctx: PreviewContext): Promise<PreviewApp> {
+  const { log, branch, env } = ctx;
+
+  // Before any request, so a manifest that can't be used changes nothing.
+  const { manifest: source, from } = loadManifest(ctx.manifest, ctx.cwd);
+
+  const slack = createSlack(log);
+  const vercel = createVercel({
+    token: ctx.vercelToken,
+    projectId: ctx.projectId,
+    teamId: ctx.teamId,
+    log,
+  });
+
+  // Vercel first: rotating the configuration token spends its refresh token,
+  // and the new pair can only be saved with a Vercel token that works.
+  const envs = await listVariables(vercel);
+  const stored = variablesOf(envs, branch);
+  const configToken = await usableConfigToken({
+    slack,
+    vercel,
+    log,
+    envs,
+    token: ctx.slackConfigToken,
+    refreshToken: ctx.slackConfigRefreshToken,
+  });
+
+  const record = stored.find((item) => item.key === APP_ID);
+  let appId: string | undefined;
+  if (record) {
+    let shown: string | null;
     try {
-      await save(
-        credentials.flatMap(([key, value]) =>
-          value ? [branchEnv(key, value)] : [],
-        ),
-      );
+      shown = await appIdOf(vercel, record);
     } catch (error) {
-      // Without SLACK_APP_ID the branch's next build can't find this app and
-      // creates another, and Slack only shows an app's secrets when it's
-      // created. So take the app back out; the next build starts over.
-      const removed = await removeSlackApp({
-        token: slackConfigurationToken,
-        appId: app.app_id,
-      });
-      throw new Error(
-        removed.status === "failed"
-          ? `Created Slack app ${app.app_id}, but couldn't save its credentials to Vercel or delete it again\nDelete it yourself, or it's left behind when the branch's next build creates another: https://api.slack.com/apps/${app.app_id}`
-          : `Created Slack app ${app.app_id}, but couldn't save its credentials to Vercel, so deleted it again\nThe branch's next build creates a new one.`,
-        { cause: error },
+      throw problem(
+        `Couldn't read ${branch}'s ${APP_ID} from Vercel: ${messageOf(error)}`,
+        RETRY,
+        error,
+      );
+    }
+    // A Sensitive value isn't shown, but a deployment created since the
+    // variable was saved has it.
+    appId = shown ?? (env[APP_ID] || undefined);
+    if (!appId) {
+      // A second app would leave the first with nothing pointing at it.
+      throw problem(
+        `Vercel doesn't show the value of ${branch}'s ${APP_ID}, and this deployment was built without it`,
+        `Redeploy the branch. If that doesn't help, delete the branch's SLACK_ variables in Vercel and its app (${SETTINGS}) to start over.`,
       );
     }
   }
 
-  if (cli) {
-    if (isNew && slackAppId) {
-      log.info(
-        `Slack has no app ${slackAppId} for this configuration token, so the branch gets a new one`,
+  let bypassSecret = ctx.bypassSecret;
+  if (!bypassSecret) {
+    try {
+      bypassSecret = await vercel.createBypassSecret();
+    } catch (error) {
+      throw problem(
+        `Couldn't create a Protection Bypass for Automation secret: ${messageOf(error)}`,
+        "Create one in the project's Deployment Protection settings, then redeploy.",
+        error,
       );
     }
-    log.success(`${isNew ? "Created" : "Updated"} Slack app ${app.app_id}`);
+    log.ok(
+      "Created a Protection Bypass for Automation secret, so Slack can reach protected previews",
+    );
   }
 
-  if (cli) log.step("Installing Slack app");
-  const {
-    status,
-    error: installError,
-    botToken,
-    appLevelToken,
-    userToken,
-  } = await installApp({
-    serviceToken: slackServiceToken,
-    appId: app.app_id,
-    botScopes: manifest.oauth_config?.scopes?.bot ?? [],
+  const manifest = previewManifest(source, {
+    host: ctx.host,
+    branch,
+    bypassSecret,
+    commit: ctx.commit,
   });
-  registerSecret(botToken, appLevelToken, userToken);
+  const name = manifest.display_information.name;
 
-  // Save the tokens on later builds too: a branch whose first install didn't
-  // go through, like one waiting for approval, gets them once it does. Skip
-  // the ones the branch's deployment already has.
-  const tokens: [string, string | undefined][] = [
-    ["SLACK_BOT_TOKEN", botToken],
-    ["SLACK_APP_LEVEL_TOKEN", appLevelToken],
-    ["SLACK_USER_TOKEN", userToken],
-  ];
-  await save(
-    tokens.flatMap(([key, value]) =>
-      value && (isNew || currentEnv?.[key] !== value)
-        ? [branchEnv(key, value)]
+  /** The names of the variables this run saved. */
+  const saved: string[] = [];
+  const save = async (
+    id: string,
+    values: [string, string | undefined][],
+  ): Promise<void> => {
+    const variables = values.flatMap(([key, value]) =>
+      value
+        ? [variable(key, value, { id, branch, sensitive: ctx.sensitive })]
         : [],
-    ),
+    );
+    await vercel.saveEnv(variables);
+    saved.push(...variables.map((item) => item.key));
+  };
+
+  // A branch's app is only ever replaced when Slack says this token can't
+  // manage it: it was deleted, or belongs to another user. An outage, a
+  // refused token, a rejected manifest or an answer this code doesn't know
+  // all stop the run instead, and the next one tries again.
+  let replaced: string | undefined;
+  if (appId) {
+    try {
+      await slack.updateApp(configToken, appId, manifest);
+      log.ok(`Updated Slack app ${appId} (${name})`);
+    } catch (error) {
+      if (!isAppUnreachable(error)) {
+        throw appFailure(error, `update Slack app ${appId}`, from);
+      }
+      replaced = appId;
+      appId = undefined;
+    }
+  }
+
+  let created: CreatedApp | undefined;
+  if (!appId) {
+    try {
+      created = await slack.createApp(configToken, manifest);
+    } catch (error) {
+      throw appFailure(error, "create the Slack app", from);
+    }
+    appId = created.id;
+
+    try {
+      await save(appId, [
+        [APP_ID, appId],
+        ["SLACK_CLIENT_ID", created.clientId],
+        ["SLACK_CLIENT_SECRET", created.clientSecret],
+        ["SLACK_SIGNING_SECRET", created.signingSecret],
+      ]);
+    } catch (error) {
+      // Slack shows an app's secrets once, when it's created, and
+      // SLACK_APP_ID is how the branch's next run finds the app. Unsaved,
+      // the app can't be used and nothing points at it, so take it back out.
+      const removed = await slack.deleteApp(configToken, appId).then(
+        () => true,
+        () => false,
+      );
+      throw problem(
+        `Created Slack app ${appId}, but couldn't save its variables to Vercel: ${messageOf(error)}`,
+        removed
+          ? "Deleted the app again. Check that VERCEL_API_TOKEN can write environment variables, then redeploy."
+          : `Couldn't delete the app again either. Delete it yourself: ${SETTINGS}/${appId}`,
+        error,
+      );
+    }
+    log.ok(`Created Slack app ${appId} (${name})`);
+    if (replaced) {
+      log.note(
+        `Slack app ${replaced} is deleted or belongs to another Slack user, so the branch has a new one.`,
+      );
+    }
+
+    // Tokens the branch still has belong to an app it had before.
+    const stale = stored.filter((item) => TOKEN_KEYS.includes(item.key));
+    try {
+      await vercel.deleteEnv(stale.map((item) => item.id));
+    } catch (error) {
+      log.warn(
+        `Couldn't delete the tokens of the branch's earlier app (${stale.map((item) => item.key).join(", ")}): ${messageOf(error)}`,
+      );
+    }
+  }
+
+  const installUrl =
+    created?.installUrl ?? `${SETTINGS}/${appId}/install-on-team`;
+  const { installation, tokens } = await install(
+    slack,
+    log,
+    {
+      id: appId,
+      created: created !== undefined,
+      installUrl,
+      botScopes: manifest.oauth_config?.scopes?.bot ?? [],
+    },
+    ctx.slackServiceToken,
   );
 
-  if (cli) {
-    const appUrl = `https://api.slack.com/apps/${app.app_id}`;
-    if (status === "installed") {
-      log.success(`Installed Slack app ${app.app_id}`);
-      log.info(`View app: ${appUrl}`);
-    } else {
-      // Slack only gives a new app's install link. A build that has a bot
-      // token belongs to an app that was installed before, so it gets none.
-      // Without one there's no telling: the app may be installed by hand.
-      const installUrl = (isNew && app.oauth_authorize_url) || appUrl;
-      const install = currentEnv?.SLACK_BOT_TOKEN
-        ? undefined
-        : `Install it yourself if you haven't: ${installUrl}`;
-      const { headline, details } = installAdvice(
-        status,
-        installError,
-        app.app_id,
-        install,
-      );
-      log.warning(headline);
-      for (const detail of details) if (detail) log.info(detail);
-      if (!details.some((detail) => detail?.endsWith(`: ${appUrl}`))) {
-        log.info(`View app: ${appUrl}`);
-      }
-    }
+  // A new app's tokens are always saved. An existing app's are saved when
+  // this deployment doesn't have them: its first install may not have gone
+  // through, like one that waited for an admin's approval.
+  const fresh: [string, string | undefined][] = [
+    ["SLACK_BOT_TOKEN", tokens.bot],
+    ["SLACK_APP_LEVEL_TOKEN", tokens.appLevel],
+    ["SLACK_USER_TOKEN", tokens.user],
+  ];
+  try {
+    await save(
+      appId,
+      fresh.filter(([key, value]) => created || env[key] !== value),
+    );
+  } catch (error) {
+    throw problem(
+      `Installed Slack app ${appId}, but couldn't save its tokens to Vercel: ${messageOf(error)}`,
+      RETRY,
+      error,
+    );
   }
+  if (saved.length > 0) log.ok(`Saved ${saved.join(", ")} for ${branch}`);
 
-  return {
-    isNew,
-    installStatus: status,
-    ...(installError && { installError }),
-    app,
-    changedEnv,
+  const result: PreviewApp = {
+    status: "ready",
+    branch,
+    app: {
+      id: appId,
+      name,
+      created: created !== undefined,
+      ...(replaced && { replaced }),
+      url: `${SETTINGS}/${appId}`,
+      installUrl,
+    },
+    installation,
+    saved,
   };
+  if (!ctx.deploymentId) return result;
+
+  // What the branch has that this deployment was built without: everything
+  // just saved, and all of an existing app's variables when the deployment
+  // is older than they are.
+  const missing = new Set(saved);
+  if (!created && env[APP_ID] !== appId) {
+    for (const item of stored) missing.add(item.key);
+  }
+  if (missing.size === 0) return result;
+
+  const deployment = await replaceDeployment(
+    vercel,
+    ctx.deploymentId,
+    [...missing],
+    log,
+  );
+  return deployment
+    ? { ...result, status: "redeployed", deployment }
+    : { ...result, status: "outdated" };
 }

@@ -7,7 +7,10 @@ describe("public exports", () => {
     expect(Object.keys(await import("./index"))).toEqual(["VercelReceiver"]);
   });
 
-  it("exports only preview from ./preview", async () => {
-    expect(Object.keys(await import("./preview"))).toEqual(["preview"]);
+  it("exports only preview and cleanup from ./preview", async () => {
+    expect(Object.keys(await import("./preview")).sort()).toEqual([
+      "cleanup",
+      "preview",
+    ]);
   });
 });

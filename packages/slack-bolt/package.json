@@ -67,8 +67,7 @@
   "dependencies": {
     "@vercel/functions": "^3.10.6",
     "commander": "^14.0.3",
-    "yaml": "^2.9.1",
-    "zod": "^4.6.7"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
