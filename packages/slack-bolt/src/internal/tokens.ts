@@ -33,7 +33,12 @@ async function valueOf(
 ): Promise<string | undefined> {
   for (const record of records) {
     const value =
-      record.value ?? (await vercel.readEnv(record.id).catch(() => null));
+      record.value ??
+      (await vercel.readEnv(record.id).catch((error: unknown) => {
+        // An outage doesn't mean there's no value: only a refusal does.
+        if (isTransient(error)) throw error;
+        return null;
+      }));
     if (value) return secret(value);
   }
   return undefined;
@@ -121,22 +126,42 @@ export async function usableConfigToken({
     }
   }
 
-  /** A stored token that isn't this run's, when Slack accepts it. */
+  /**
+   * A stored token that isn't this run's, when Slack accepts it.
+   *
+   * @throws When Slack or Vercel gives no verdict: the stored token may be
+   * fine, and rotating would spend its refresh token.
+   */
   const newer = async (list: StoredEnv[]): Promise<string | undefined> => {
     const stored = await valueOf(vercel, recordsOf(list, CONFIG));
     if (!stored || stored === token) return undefined;
     try {
       await slack.authTest(stored);
       return stored;
-    } catch {
+    } catch (error) {
+      if (isTransient(error)) throw error;
       return undefined;
+    }
+  };
+
+  /** Runs a check that has to finish before rotating, or stops the run. */
+  const beforeRotating = async <T>(check: () => Promise<T>): Promise<T> => {
+    try {
+      return await check();
+    } catch (error) {
+      if (!isTransient(error)) throw error;
+      throw problem(
+        `Couldn't check the stored ${CONFIG}: ${messageOf(error)}`,
+        RETRY,
+        error,
+      );
     }
   };
 
   // A run gets its variables when its deployment is created. One that
   // waited in the queue, like the last of a batch of dependency updates,
   // can start with tokens an earlier run has replaced since.
-  const found = await newer(envs);
+  const found = await beforeRotating(() => newer(envs));
   if (found) {
     if (token) log.ok(`Using the ${CONFIG} another build rotated to`);
     return found;
@@ -144,7 +169,7 @@ export async function usableConfigToken({
 
   // The stored refresh token is the newest there is.
   const storedRefresh = recordsOf(envs, REFRESH);
-  const readable = await valueOf(vercel, storedRefresh);
+  const readable = await beforeRotating(() => valueOf(vercel, storedRefresh));
   const refresh = readable ?? refreshToken;
   // Vercel won't show a Sensitive one, so this run has to go with what its
   // deployment was created with, which another run may have spent since.

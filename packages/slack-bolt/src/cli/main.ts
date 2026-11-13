@@ -76,19 +76,26 @@ async function build(flags: BuildFlags): Promise<number> {
     }
   }
 
+  let failure: unknown;
   try {
-    await preview({
+    const result = await preview({
       logger,
       manifest: flags.manifest,
       sensitive: flags.sensitive,
     });
-    return 0;
+    if (result.status !== "outdated") return 0;
+    // It would go live with an earlier app's credentials, or none, and
+    // nothing will replace it: a failure like any other.
+    failure = new Error(
+      "This deployment doesn't have the variables of the branch's Slack app, so it can't serve the app",
+    );
   } catch (error) {
-    printError(error, { debug });
-    if (!flags.allowFailure) return 1;
-    console.error("  Carrying on without it: --allow-failure is set.");
-    return 0;
+    failure = error;
   }
+  printError(failure, { debug });
+  if (!flags.allowFailure) return 1;
+  console.error("  Carrying on without it: --allow-failure is set.");
+  return 0;
 }
 
 interface CleanupFlags {

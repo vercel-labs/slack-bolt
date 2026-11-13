@@ -197,6 +197,43 @@ describe("a token Slack refuses", () => {
   });
 });
 
+describe("a stored token that can't be checked", () => {
+  it("stops the run when Slack gives no verdict on it, rather than rotate", async () => {
+    const { result, api } = await usable({
+      ...config(NEWER),
+      "auth.test": [EXPIRED, refuse("service_unavailable")],
+    });
+
+    await expect(result).rejects.toThrow(
+      "Couldn't check the stored SLACK_CONFIGURATION_TOKEN: Slack answered auth.test with service_unavailable\nRedeploy to try again.",
+    );
+    expect(api.calls()).not.toContain("tooling.tokens.rotate");
+  });
+
+  it("stops the run when Vercel can't be asked for it, rather than rotate", async () => {
+    const { result, api } = await usable({
+      ...config(NEWER),
+      "auth.test": EXPIRED,
+      "GET /v1/projects/prj_1/env/env_config": offline,
+    });
+
+    await expect(result).rejects.toThrow(
+      "Couldn't check the stored SLACK_CONFIGURATION_TOKEN: Vercel couldn't be reached\nRedeploy to try again.",
+    );
+    expect(api.calls()).not.toContain("tooling.tokens.rotate");
+  });
+
+  it("is passed over when Slack refuses it", async () => {
+    const { result, api } = await usable({
+      ...config(NEWER),
+      "auth.test": EXPIRED,
+    });
+
+    await expect(result).resolves.toBe(ROTATED);
+    expect(api.to("tooling.tokens.rotate")).toHaveLength(1);
+  });
+});
+
 describe("a refresh token Slack refuses", () => {
   it("means another build used it: its token is picked up once it's saved", async () => {
     const stale = config(OWN);

@@ -101,6 +101,31 @@ describe("vercel-slack build", () => {
     ]);
   });
 
+  it("exits with 1 when a deployment it started still lacks the app's variables", async () => {
+    // A replacement whose branch got a new app since: it has the old one's.
+    inBuild({ SLACK_APP_ID: "A_OLD", SLACK_SERVICE_TOKEN: "" });
+    const replacement = {
+      "GET /v13/deployments/dpl_1": {
+        meta: { vercelSlackRedeployOf: "dpl_0", originalDeploymentId: "dpl_0" },
+      },
+    };
+    fakeApis(replacement);
+
+    expect(await run("build")).toBe(1);
+    expect(output.lines.slice(-3)).toEqual([
+      "⚠ This deployment was built without SLACK_APP_ID, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, and it was started to pick them up",
+      "  Not starting another. Redeploy the branch yourself.",
+      "✗ This deployment doesn't have the variables of the branch's Slack app, so it can't serve the app",
+    ]);
+
+    fakeApis(replacement);
+    output.lines.length = 0;
+    expect(await run("build", "--allow-failure")).toBe(0);
+    expect(output.lines.at(-1)).toBe(
+      "  Carrying on without it: --allow-failure is set.",
+    );
+  });
+
   it("does nothing and exits with 0 outside a preview deployment", async () => {
     inBuild({
       VERCEL_ENV: "production",

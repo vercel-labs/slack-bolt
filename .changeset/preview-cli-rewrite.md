@@ -6,7 +6,7 @@ Rewrite `preview` and the `vercel-slack` CLI. Preview apps that v1 created keep 
 
 **Breaking**
 
-- `vercel-slack build` exits with code 1 when the branch's Slack app can't be set up, so `vercel-slack build && next build` stops there. Pass `--allow-failure` to exit with 0, as v1 did.
+- `vercel-slack build` exits with code 1 when the branch's Slack app can't be set up, or when a deployment it started still lacks the app's variables, so `vercel-slack build && next build` stops there. Pass `--allow-failure` to exit with 0, as v1 did.
 - The flags that mirrored environment variables, like `--slack-configuration-token`, are removed: set the variables. `--manifest-path` is now `--manifest`.
 - `preview()` takes one optional object whose options default to a Vercel build's environment variables, so `await preview()` is enough in a build. Options are renamed (`manifest`, `url`, `vercelToken`, `slackConfigToken`, `bypassSecret`, `commit`), `slackAppId` and the `"cli"` argument are removed, and the result is `{ status, branch, app, installation, saved, deployment }`. It no longer returns the app's secrets.
 - `preview()` now also rotates an expired configuration token and replaces a deployment that was built without the app's variables, which only the CLI did.
@@ -26,7 +26,7 @@ Rewrite `preview` and the `vercel-slack` CLI. Preview apps that v1 created keep 
 - A branch never gets a second Slack app because Slack was unreachable, rate limiting or rejected the manifest. Its app is only replaced when Slack says it's deleted or owned by another user.
 - A new app is deleted again when Vercel doesn't save its credentials.
 - Cleanup deletes nothing unless Vercel's list of active branches is one it can trust, deletes a branch's app before its variables, and never touches the branch being built.
-- An expired configuration token isn't rotated when Slack couldn't be reached to check it, and a build picks up the token another build rotated to.
+- An expired configuration token isn't rotated when Slack or Vercel couldn't be reached to check it or the stored one, and a build picks up the token another build rotated to.
 - A deployment the CLI started never starts another, and the running one is only canceled once Vercel names the deployment that replaces it.
 - A save to Vercel that collides with another build's is sent again, instead of failing the build.
 - When Sensitive configuration tokens were rotated by another build, the error says to redeploy instead of to generate new tokens.

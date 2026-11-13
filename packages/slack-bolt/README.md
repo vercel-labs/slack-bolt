@@ -516,7 +516,7 @@ Everything else comes from environment variables: the ones in [step 3](#3-config
 
 Setting `VERCEL_SLACK_DEBUG=1` does what `--debug` does, without changing the build script.
 
-**Exit codes.** `build` exits with 0 when the branch has its app, or there was nothing to do, and with 1 when the app couldn't be set up. `cleanup` exits with 1 when it couldn't tell which branches are gone, or left a branch with something. Both exit with 1 for a command or option they don't have.
+**Exit codes.** `build` exits with 0 when the branch has its app, or there was nothing to do, and with 1 when the app couldn't be set up, or when a deployment the CLI started still doesn't have the app's variables (like when the branch got a new app while it was building), since nothing will replace it. `cleanup` exits with 1 when it couldn't tell which branches are gone, or left a branch with something. Both exit with 1 for a command or option they don't have.
 
 ## Migrating from v1
 
