@@ -11,7 +11,7 @@
     "@slack/bolt": "^5.1.0",
     "@upstash/redis": "^1.41.0",
     "@vercel/slack-bolt": "^2.0.0-0",
-    "hono": "^4.13.16"
+    "hono": "^4.13.19"
   },
   "devDependencies": {
     "@slack/cli-hooks": "^2.0.0",
