@@ -1,5 +1,11 @@
 # @vercel/slack-bolt
 
+## 1.7.6
+
+### Patch Changes
+
+- 8c24df5: Update `@vercel/functions` and refresh package test tooling.
+
 ## 1.7.5
 
 ### Patch Changes
