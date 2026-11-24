@@ -1,1640 +1,902 @@
-import { type App, ReceiverMultipleAckError } from "@slack/bolt";
-import { LogLevel } from "@slack/logger";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type App,
+  AppInitializationError,
+  HTTPReceiverDeferredRequestError,
+  type HTTPReceiverOptions,
+  type ReceiverEvent,
+} from "@slack/bolt";
 import { waitUntil } from "@vercel/functions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHandler, VercelReceiver } from "./index";
+import { VercelReceiver, type VercelReceiverOptions } from "./index";
 
-vi.mock("@slack/logger", () => ({
-  // A regular function, not an arrow, so the mock can be called with `new`.
-  ConsoleLogger: vi.fn(function () {
-    return {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      setLevel: vi.fn(),
-      getLevel: vi.fn(),
+const superCalls = vi.hoisted((): unknown[] => []);
+
+// Stub HTTPReceiver so only our subclass logic runs. Like Bolt's, init()
+// stores the app it is given (Bolt then calls `this.app.processEvent`), and
+// the logger defaults when none is passed, and there's an installer when
+// clientId and clientSecret are set; the constructor records what our
+// subclass passes to super(). requestListener answers with the method and URL
+// it received.
+vi.mock("@slack/bolt", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@slack/bolt")>();
+  class HTTPReceiver {
+    public app: unknown;
+    public logger: unknown;
+    public installer: unknown;
+    public requestListener = (req: IncomingMessage, res: ServerResponse) => {
+      res.writeHead(200).end(`${req.method} ${req.url}`);
     };
-  }),
-  LogLevel: {
-    ERROR: 0,
-    WARN: 1,
-    INFO: 2,
-    DEBUG: 3,
+    public constructor(options: HTTPReceiverOptions) {
+      superCalls.push(options);
+      this.logger = options.logger ?? { error: vi.fn() };
+      if (options.clientId && options.clientSecret)
+        this.installer = {
+          handleInstallPath: async () => {},
+          handleCallback: async () => {},
+        };
+    }
+    public init(app: unknown): void {
+      this.app = app;
+    }
+  }
+  return { ...actual, HTTPReceiver };
+});
+
+vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
+
+type ErrorHandler = NonNullable<
+  HTTPReceiverOptions["processEventErrorHandler"]
+>;
+
+const INIT_FAILED =
+  "app.init() failed, so this event wasn't processed. It runs again on the next event.";
+
+const MISSING_STORE =
+  "Missing installationStore. OAuth needs one that saves installations somewhere lasting, like a database, because Bolt's default keeps them in memory.";
+
+const MISSING_CLIENT_SECRET =
+  "Missing clientSecret. OAuth needs it whenever clientId is set.";
+
+const MISSING_STATE_SECRET =
+  "Missing stateSecret. OAuth needs it to sign the state parameter whenever clientId is set, unless you pass installerOptions.stateStore or set installerOptions.stateVerification to false.";
+
+// What the receiver passes Bolt as installerOptions when none are given.
+const BOLT_PATHS = {
+  installerOptions: {
+    installPath: "/slack/install",
+    redirectUriPath: "/slack/oauth_redirect",
   },
-}));
+};
 
-vi.mock("@vercel/functions", () => ({
-  waitUntil: vi.fn(),
-}));
+const oauth: VercelReceiverOptions = {
+  signingSecret: "secret",
+  clientId: "id",
+  clientSecret: "secret",
+  stateSecret: "state",
+  installationStore: {
+    storeInstallation: async () => {},
+    fetchInstallation: async () => ({}) as never,
+  },
+};
 
-describe("VercelReceiver", () => {
-  describe("constructor", () => {
-    let originalSigningSecret: string | undefined;
-    let originalClientId: string | undefined;
-    let originalClientSecret: string | undefined;
-    let originalStateSecret: string | undefined;
+const MISSING_SECRET =
+  "Missing signing secret. Set the SLACK_SIGNING_SECRET environment variable or pass the signingSecret option.";
+const MISSING_OPTION_SECRET =
+  "Missing signing secret. The signingSecret option is empty. Check that the environment variable you pass as signingSecret is set.";
 
-    beforeEach(() => {
-      originalSigningSecret = process.env.SLACK_SIGNING_SECRET;
-      originalClientId = process.env.SLACK_CLIENT_ID;
-      originalClientSecret = process.env.SLACK_CLIENT_SECRET;
-      originalStateSecret = process.env.SLACK_STATE_SECRET;
-    });
+const makeEvent = () =>
+  ({ body: {}, ack: async () => {} }) as unknown as ReceiverEvent;
 
-    afterEach(() => {
-      for (const [key, val] of Object.entries({
-        SLACK_SIGNING_SECRET: originalSigningSecret,
-        SLACK_CLIENT_ID: originalClientId,
-        SLACK_CLIENT_SECRET: originalClientSecret,
-        SLACK_STATE_SECRET: originalStateSecret,
-      })) {
-        if (val !== undefined) {
-          process.env[key] = val;
-        } else {
-          delete process.env[key];
-        }
-      }
-    });
+/** Inits a receiver with `app` and returns the app HTTPReceiver now holds. */
+function initWith(app: Partial<App>, options: VercelReceiverOptions = {}): App {
+  const receiver = new VercelReceiver({ signingSecret: "secret", ...options });
+  receiver.init(app as App);
+  return (receiver as unknown as { app: App }).app;
+}
 
-    it("should assign signingSecret from options", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+/** The promise passed to the nth waitUntil call. */
+const keptAlive = (n = 0) => vi.mocked(waitUntil).mock.calls[n][0];
 
-      expect(receiver).toHaveProperty("signingSecret", "test-secret");
-    });
+/** Whether `promise` has settled once pending callbacks have run. */
+async function isSettled(promise: Promise<unknown>): Promise<boolean> {
+  let settled = false;
+  const mark = () => {
+    settled = true;
+  };
+  void promise.then(mark, mark);
+  await new Promise((resolve) => setImmediate(resolve));
+  return settled;
+}
 
-    it("should assign signingSecret from environment variable when not provided", () => {
-      process.env.SLACK_SIGNING_SECRET = "env-secret";
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
-      const receiver = new VercelReceiver();
+beforeEach(() => {
+  vi.stubEnv("SLACK_SIGNING_SECRET", undefined);
+  superCalls.length = 0;
+  vi.mocked(waitUntil).mockClear();
+});
 
-      expect(receiver).toHaveProperty("signingSecret", "env-secret");
-    });
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
-    it("should assign signatureVerification to true by default", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+describe("constructor", () => {
+  it("reads the signing secret from SLACK_SIGNING_SECRET", () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "env-signing");
 
-      expect(receiver).toHaveProperty("signatureVerification", true);
-    });
+    new VercelReceiver();
 
-    it("should assign signatureVerification from options when provided", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
+    expect(superCalls).toEqual([
+      {
+        signingSecret: "env-signing",
+        endpoints: "/slack/events",
+        ...BOLT_PATHS,
+      },
+    ]);
+  });
+
+  it("prefers the signingSecret option over the environment variable", () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "env-signing");
+
+    new VercelReceiver({ signingSecret: "opt-signing" });
+
+    expect(superCalls).toEqual([
+      {
+        signingSecret: "opt-signing",
+        endpoints: "/slack/events",
+        ...BOLT_PATHS,
+      },
+    ]);
+  });
+
+  it("passes every other option to HTTPReceiver unchanged", () => {
+    const options: VercelReceiverOptions = {
+      signingSecret: "secret",
+      unhandledRequestTimeoutMillis: 1000,
+      processBeforeResponse: true,
+      logger: { info: vi.fn() } as unknown as HTTPReceiverOptions["logger"],
+    };
+
+    new VercelReceiver(options);
+
+    expect(superCalls).toEqual([
+      { ...options, endpoints: "/slack/events", ...BOLT_PATHS },
+    ]);
+  });
+
+  it("does not require a secret when signatureVerification is false", () => {
+    new VercelReceiver({ signatureVerification: false });
+
+    expect(superCalls).toEqual([
+      {
         signatureVerification: false,
-      });
-
-      expect(receiver).toHaveProperty("signatureVerification", false);
-    });
-
-    it("should assign ackTimeoutMs to default value of 3001", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      expect(receiver).toHaveProperty("ackTimeoutMs", 3001);
-    });
-
-    it("should assign ackTimeoutMs from options when provided", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        ackTimeoutMs: 5000,
-      });
-
-      expect(receiver).toHaveProperty("ackTimeoutMs", 5000);
-    });
-
-    it("should assign customPropertiesExtractor from options when provided", () => {
-      const extractor = () => ({ custom: "property" });
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        customPropertiesExtractor: extractor,
-      });
-
-      expect(receiver).toHaveProperty("customPropertiesExtractor", extractor);
-    });
-
-    it("should assign customPropertiesExtractor to undefined when not provided", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      expect(receiver).toHaveProperty("customPropertiesExtractor", undefined);
-    });
-
-    it("should throw error when signingSecret is not provided", () => {
-      expect(() => new VercelReceiver()).toThrow(
-        "SLACK_SIGNING_SECRET is required for VercelReceiver",
-      );
-    });
-
-    it("should create installer when clientId, clientSecret, and stateSecret are all provided", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-        stateSecret: "ssec",
-        scopes: ["chat:write"],
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-      });
-
-      expect(receiver.installer).toBeDefined();
-    });
-
-    it("should create installer using process.env defaults for OAuth credentials", () => {
-      process.env.SLACK_CLIENT_ID = "env-cid";
-      process.env.SLACK_CLIENT_SECRET = "env-csec";
-      process.env.SLACK_STATE_SECRET = "env-ssec";
-
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        scopes: ["chat:write"],
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-      });
-
-      expect(receiver.installer).toBeDefined();
-    });
-
-    it("should not create installer when clientId is missing", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientSecret: "csec",
-        stateSecret: "ssec",
-      });
-
-      expect(receiver.installer).toBeUndefined();
-    });
-
-    it("should not create installer when clientSecret is missing", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        stateSecret: "ssec",
-      });
-
-      expect(receiver.installer).toBeUndefined();
-    });
-
-    it("should not create installer when stateSecret is missing and no stateStore or stateVerification override", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-      });
-
-      expect(receiver.installer).toBeUndefined();
-    });
-
-    it("should create installer when stateVerification is false even without stateSecret", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-        scopes: ["chat:write"],
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-        installerOptions: { stateVerification: false },
-      });
-
-      expect(receiver.installer).toBeDefined();
-    });
-
-    it("handleInstall should throw when OAuth is not configured", async () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      await expect(
-        receiver.handleInstall(new Request("https://example.com/install")),
-      ).rejects.toThrow("OAuth is not configured");
-    });
-
-    it("handleCallback should throw when OAuth is not configured", async () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      await expect(
-        receiver.handleCallback(
-          new Request("https://example.com/oauth_redirect?code=abc"),
-        ),
-      ).rejects.toThrow("OAuth is not configured");
-    });
-
-    it("should accept scopes as a static array", () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-        stateSecret: "ssec",
-        scopes: ["chat:write", "channels:read"],
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-      });
-
-      expect(receiver.installer).toBeDefined();
-      expect(receiver).toHaveProperty("installUrlOptions");
-      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
-      expect((receiver as any).installUrlOptions?.scopes).toEqual([
-        "chat:write",
-        "channels:read",
-      ]);
-    });
-
-    it("should accept scopes as a resolver function", () => {
-      const scopesResolver = vi.fn().mockResolvedValue(["chat:write"]);
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-        stateSecret: "ssec",
-        scopes: scopesResolver,
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-      });
-
-      expect(receiver.installer).toBeDefined();
-      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
-      expect((receiver as any).scopesResolver).toBe(scopesResolver);
-      // When using a resolver, installUrlOptions.scopes starts empty
-      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
-      expect((receiver as any).installUrlOptions?.scopes).toEqual([]);
-    });
-
-    it("should call scopes resolver with request during handleInstall", async () => {
-      const scopesResolver = vi
-        .fn()
-        .mockResolvedValue(["chat:write", "users:read"]);
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-        stateSecret: "ssec",
-        scopes: scopesResolver,
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-      });
-
-      // Mock the installer's handleInstallPath to capture the options passed
-      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
-      let capturedInstallUrlOptions: any;
-      vi.spyOn(receiver.installer!, "handleInstallPath").mockImplementation(
-        async (_req, res, _pathOpts, urlOpts) => {
-          capturedInstallUrlOptions = urlOpts;
-          res.writeHead(302, { Location: "https://slack.com/oauth" });
-          res.end();
-        },
-      );
-
-      const request = new Request("https://example.com/install?team=T123");
-      await receiver.handleInstall(request);
-
-      expect(scopesResolver).toHaveBeenCalledTimes(1);
-      expect(scopesResolver).toHaveBeenCalledWith(expect.any(Request));
-      expect(capturedInstallUrlOptions?.scopes).toEqual([
-        "chat:write",
-        "users:read",
-      ]);
-    });
-
-    it("should use static scopes array without calling resolver", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        clientId: "cid",
-        clientSecret: "csec",
-        stateSecret: "ssec",
-        scopes: ["chat:write"],
-        installationStore: {
-          storeInstallation: async () => {},
-          fetchInstallation: async () => ({}) as never,
-        },
-      });
-
-      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
-      let capturedInstallUrlOptions: any;
-      vi.spyOn(receiver.installer!, "handleInstallPath").mockImplementation(
-        async (_req, res, _pathOpts, urlOpts) => {
-          capturedInstallUrlOptions = urlOpts;
-          res.writeHead(302, { Location: "https://slack.com/oauth" });
-          res.end();
-        },
-      );
-
-      const request = new Request("https://example.com/install");
-      await receiver.handleInstall(request);
-
-      // oxlint-disable-next-line typescript/no-explicit-any -- accessing private property for test
-      expect((receiver as any).scopesResolver).toBeUndefined();
-      expect(capturedInstallUrlOptions?.scopes).toEqual(["chat:write"]);
-    });
+        signingSecret: "",
+        endpoints: "/slack/events",
+        ...BOLT_PATHS,
+      },
+    ]);
   });
 
-  describe("getLogger", () => {
-    it("should return the logger instance", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
+  it.each<[string, VercelReceiverOptions, string | undefined]>([
+    ["neither the option nor the env var is set", {}, undefined],
+    ["the env var is an empty string", {}, ""],
+    [
+      "signatureVerification is true",
+      { signatureVerification: true },
+      undefined,
+    ],
+  ])("throws before calling HTTPReceiver when %s", (_, options, env) => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", env);
 
-      const logger = receiver.getLogger();
-
-      expect(logger).toBeDefined();
-      expect(logger).toHaveProperty("debug");
-      expect(logger).toHaveProperty("info");
-      expect(logger).toHaveProperty("warn");
-      expect(logger).toHaveProperty("error");
-      expect(logger).toHaveProperty("setLevel");
-      expect(logger).toHaveProperty("getLevel");
-    });
-
-    it("should return the same logger instance on multiple calls", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      const logger1 = receiver.getLogger();
-      const logger2 = receiver.getLogger();
-
-      expect(logger1).toBe(logger2);
-    });
-
-    it("should return a scoped logger with correct prefix", () => {
-      const mockLogger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        setLevel: vi.fn(),
-        getLevel: vi.fn(),
-        setName: vi.fn(),
-      };
-
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        logger: mockLogger,
-      });
-
-      const logger = receiver.getLogger();
-      logger.info("test message");
-
-      // The scoped logger should call the original logger with the prefix
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        "[@vercel/slack-bolt]",
-        "test message",
-      );
-    });
+    expect(() => new VercelReceiver(options)).toThrow(
+      new AppInitializationError(MISSING_SECRET),
+    );
+    expect(superCalls).toEqual([]);
   });
 
-  describe("init", () => {
-    it("should assign the app instance to this.app", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-      const mockApp = { processEvent: vi.fn() } as unknown as App;
+  // Like `signingSecret: process.env.MY_SIGNING_SECRET` with that var unset.
+  // An empty string doesn't fall back to SLACK_SIGNING_SECRET, even when set.
+  it.each<[string, VercelReceiverOptions, string | undefined]>([
+    ["undefined", { signingSecret: undefined }, undefined],
+    ["an empty string", { signingSecret: "" }, undefined],
+    [
+      "an empty string and SLACK_SIGNING_SECRET is set",
+      { signingSecret: "" },
+      "env-secret",
+    ],
+  ])(
+    "points at the app's own env var when the option is %s",
+    (_, options, env) => {
+      vi.stubEnv("SLACK_SIGNING_SECRET", env);
 
-      receiver.init(mockApp);
-
-      expect(receiver).toHaveProperty("app", mockApp);
-    });
-
-    it("should log debug message when log level is debug", () => {
-      const mockLogger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        setLevel: vi.fn(),
-        getLevel: vi.fn(),
-        setName: vi.fn(),
-      };
-
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        logger: mockLogger,
-        logLevel: LogLevel.DEBUG,
-      });
-
-      const mockApp = { processEvent: vi.fn() } as unknown as App;
-
-      receiver.init(mockApp);
-
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        "[@vercel/slack-bolt]",
-        "App initialized in VercelReceiver",
+      expect(() => new VercelReceiver(options)).toThrow(
+        new AppInitializationError(MISSING_OPTION_SECRET),
       );
-    });
+      expect(superCalls).toEqual([]);
+    },
+  );
+});
 
-    it("should not throw error when called multiple times", () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-      const mockApp1 = { processEvent: vi.fn() } as unknown as App;
-      const mockApp2 = { processEvent: vi.fn() } as unknown as App;
+describe("OAuth options", () => {
+  /** The installerOptions our receiver passed to HTTPReceiver. */
+  function installerOptionsFor(options: VercelReceiverOptions) {
+    new VercelReceiver({ ...oauth, ...options });
+    const [passed] = superCalls as HTTPReceiverOptions[];
+    return passed.installerOptions;
+  }
 
-      expect(() => {
-        receiver.init(mockApp1);
-        receiver.init(mockApp2);
-      }).not.toThrow();
+  it("passes other installer options through", () => {
+    const beforeRedirection = async () => true;
 
-      // Should have the latest app instance
-      expect(receiver).toHaveProperty("app", mockApp2);
-    });
-  });
-
-  describe("start", () => {
-    it("should return a VercelHandler function", async () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      const handler = await receiver.start();
-
-      expect(handler).toBeDefined();
-      expect(typeof handler).toBe("function");
-      expect(handler.length).toBe(1); // Should accept one parameter (Request)
-    });
-
-    it("should log debug message when log level is debug", async () => {
-      const mockLogger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        setLevel: vi.fn(),
-        getLevel: vi.fn(),
-        setName: vi.fn(),
-      };
-
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        logger: mockLogger,
-        logLevel: LogLevel.DEBUG,
-      });
-
-      await receiver.start();
-
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        "[@vercel/slack-bolt]",
-        "VercelReceiver started",
-      );
-    });
-
-    it("should return the same handler as toHandler", async () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      const startHandler = await receiver.start();
-      const toHandler = receiver.toHandler();
-
-      // Both should be functions with the same signature
-      expect(typeof startHandler).toBe("function");
-      expect(typeof toHandler).toBe("function");
-      expect(startHandler.length).toBe(toHandler.length);
-    });
-
-    it("should return a handler that can be called multiple times", async () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      const handler1 = await receiver.start();
-      const handler2 = await receiver.start();
-
-      expect(handler1).toBeDefined();
-      expect(handler2).toBeDefined();
-      expect(typeof handler1).toBe("function");
-      expect(typeof handler2).toBe("function");
-    });
-  });
-
-  describe("stop", () => {
-    it("should return a void promise", async () => {
-      const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-      const result = await receiver.stop();
-
-      expect(result).toBeUndefined();
-    });
-
-    it("should log debug message when log level is debug", async () => {
-      const mockLogger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        setLevel: vi.fn(),
-        getLevel: vi.fn(),
-        setName: vi.fn(),
-      };
-
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        logger: mockLogger,
-        logLevel: LogLevel.DEBUG,
-      });
-
-      await receiver.stop();
-
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        "[@vercel/slack-bolt]",
-        "VercelReceiver stopped",
-      );
-    });
-  });
-
-  describe("toHandler", () => {
-    describe("Signature Verification", () => {
-      it("should call verifyRequest when it defaults to true", async () => {
-        const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the verifyRequest method
-        const verifyRequestSpy = vi.spyOn(receiver as any, "verifyRequest");
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-signature": "v0=test-signature",
-            "x-slack-request-timestamp": "1234567890",
-          },
-        });
-
-        try {
-          await handler(request);
-        } catch (_error) {
-          // Ignore verification errors for this test
-        }
-
-        expect(verifyRequestSpy).toHaveBeenCalled();
-      });
-
-      it("should call verifyRequest when explicitly set to true", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: true,
-        });
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the verifyRequest method
-        const verifyRequestSpy = vi.spyOn(receiver as any, "verifyRequest");
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-signature": "v0=test-signature",
-            "x-slack-request-timestamp": "1234567890",
-          },
-        });
-
-        try {
-          await handler(request);
-        } catch (_error) {
-          // Ignore verification errors for this test
-        }
-
-        expect(verifyRequestSpy).toHaveBeenCalled();
-      });
-
-      it("should not call verifyRequest when set to false", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the verifyRequest method
-        const verifyRequestSpy = vi.spyOn(receiver as any, "verifyRequest");
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        await handler(request);
-
-        expect(verifyRequestSpy).not.toHaveBeenCalled();
-      });
-    });
-
-    it("should call parseRequestBody with request and raw body", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        signatureVerification: false,
-      });
-      // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the parseRequestBody method
-      const parseRequestBodySpy = vi.spyOn(receiver as any, "parseRequestBody");
-
-      const handler = receiver.toHandler();
-      const testBody = JSON.stringify({ type: "event" });
-      const request = new Request("http://localhost", {
-        method: "POST",
-        body: testBody,
-        headers: {
-          "content-type": "application/json",
+    expect(
+      installerOptionsFor({
+        installerOptions: {
+          directInstall: true,
+          installPathOptions: { beforeRedirection },
         },
-      });
-
-      try {
-        await handler(request);
-      } catch (_error) {
-        // Ignore parsing errors for this test
-      }
-
-      expect(parseRequestBodySpy).toHaveBeenCalledWith(request, testBody);
-    });
-
-    describe("URL Verification Challenge", () => {
-      it("should respond with challenge when body.type is url_verification", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const handler = receiver.toHandler();
-        const challenge = "test-challenge-value";
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({
-            type: "url_verification",
-            challenge: challenge,
-          }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(200);
-        const body = await response.json();
-        expect(body.challenge).toBe(challenge);
-      });
-
-      it("should return early when body.type is url_verification", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const handleSlackEventSpy = vi.spyOn(
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          receiver as any,
-          "handleSlackEvent",
-        );
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({
-            type: "url_verification",
-            challenge: "test-challenge",
-          }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(200);
-        expect(handleSlackEventSpy).not.toHaveBeenCalled();
-      });
-    });
-
-    describe("verifyRequest", () => {
-      it("should return 401 when x-slack-signature header is missing", async () => {
-        const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-request-timestamp": "1234567890",
-            // Missing x-slack-signature
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(401);
-        const body = await response.json();
-        expect(body.error).toContain(
-          "Missing required header: x-slack-signature",
-        );
-      });
-
-      it("should return 401 when x-slack-request-timestamp header is missing", async () => {
-        const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-signature": "v0=test-signature",
-            // Missing x-slack-request-timestamp
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(401);
-        const body = await response.json();
-        expect(body.error).toContain(
-          "Missing required header: x-slack-request-timestamp",
-        );
-      });
-
-      it("should return 401 when signature verification fails", async () => {
-        const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-        const handler = receiver.toHandler();
-        const currentTimestamp = Math.floor(Date.now() / 1000).toString();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-signature": "v0=invalid-signature",
-            "x-slack-request-timestamp": currentTimestamp,
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(401);
-      });
-
-      it("should return 401 when timestamp is stale (over 5 minutes old)", async () => {
-        const receiver = new VercelReceiver({ signingSecret: "test-secret" });
-
-        const handler = receiver.toHandler();
-        // Create a timestamp that's 5 minutes and 1 second old
-        const staleTimestamp = Math.floor(
-          (Date.now() - 5 * 60 * 1000 - 1000) / 1000,
-        ).toString();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-signature": "v0=valid-signature-format",
-            "x-slack-request-timestamp": staleTimestamp,
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(401);
-      });
-
-      it("should proceed normally when signature verification is disabled", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event" }),
-          headers: {
-            "content-type": "application/json",
-            // No signature headers required when verification is disabled
-          },
-        });
-
-        const response = await handler(request);
-
-        // Should not be 401 - signature verification is disabled
-        expect(response.status).not.toBe(401);
-      });
-    });
-
-    describe("parseRequestBody", () => {
-      it("should warn and attempt JSON parse for unexpected content-type, success case", async () => {
-        const mockLogger = {
-          debug: vi.fn(),
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-          setLevel: vi.fn(),
-          getLevel: vi.fn(),
-          setName: vi.fn(),
-        };
-
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the logger
-          logger: mockLogger as any,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        let capturedBody: any;
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          async (_req: unknown, body: any) => {
-            capturedBody = body;
-            return new Response("", { status: 200 });
-          },
-        );
-
-        const handler = receiver.toHandler();
-        const payload = { type: "event_callback", ok: true };
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify(payload),
-          headers: {
-            "content-type": "text/plain",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        expect(capturedBody).toEqual(payload);
-        expect(mockLogger.warn).toHaveBeenCalledWith(
-          "[@vercel/slack-bolt]",
-          "Unexpected content-type detected: text/plain",
-        );
-      });
-
-      it("should warn and return 400 for unexpected content-type with invalid JSON", async () => {
-        const mockLogger = {
-          debug: vi.fn(),
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-          setLevel: vi.fn(),
-          getLevel: vi.fn(),
-          setName: vi.fn(),
-        };
-
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the logger
-          logger: mockLogger as any,
-        });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: "{invalid",
-          headers: {
-            "content-type": "text/plain",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(400);
-        const body = await response.json();
-        expect(body.type).toBe("RequestParsingError");
-        expect(body.error).toContain("text/plain");
-        expect(mockLogger.warn).toHaveBeenCalledWith(
-          "[@vercel/slack-bolt]",
-          "Unexpected content-type detected: text/plain",
-        );
-      });
-      it("should parse application/json and pass object to handleSlackEvent", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        let capturedBody: any;
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          async (_req: unknown, body: any) => {
-            capturedBody = body;
-            return new Response("", { status: 200 });
-          },
-        );
-
-        const requestBody = { type: "event_callback", hello: "world" };
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify(requestBody),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        expect(capturedBody).toEqual(requestBody);
-      });
-
-      it("should return 400 RequestParsingError for invalid JSON body", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          // malformed JSON
-          body: '{"type": "event_callback", invalid}',
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(400);
-        const body = await response.json();
-        expect(body.type).toBe("RequestParsingError");
-        expect(body.error).toContain("Failed to parse body as JSON data");
-        expect(body.error).toContain("application/json");
-      });
-      it("should parse x-www-form-urlencoded with JSON payload", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        let capturedBody: any;
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          async (_req: unknown, body: any) => {
-            capturedBody = body;
-            return new Response("", { status: 200 });
-          },
-        );
-
-        const payload = { type: "block_actions", foo: "bar" };
-        const form = new URLSearchParams({ payload: JSON.stringify(payload) });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: form.toString(),
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        expect(capturedBody).toEqual(payload);
-      });
-
-      it("should parse x-www-form-urlencoded without payload as key/value map", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        let capturedBody: any;
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        vi.spyOn(receiver as any, "handleSlackEvent").mockImplementation(
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          async (_req: unknown, body: any) => {
-            capturedBody = body;
-            return new Response("", { status: 200 });
-          },
-        );
-
-        const form = new URLSearchParams({ token: "x", team_id: "T123" });
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: form.toString(),
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        expect(capturedBody).toEqual({ token: "x", team_id: "T123" });
-      });
-
-      it("should return 400 for x-www-form-urlencoded when payload is invalid JSON", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const handler = receiver.toHandler();
-        const form = new URLSearchParams({ payload: "{invalid" });
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: form.toString(),
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(400);
-        const body = await response.json();
-        expect(body.type).toBe("RequestParsingError");
-        expect(body.error).toContain("application/x-www-form-urlencoded");
-      });
-    });
-
-    describe("handleSlackEvent", () => {
-      it("should return 500 when app is not initialized", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        // Don't call receiver.init() - app remains undefined
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(500);
-        const body = await response.json();
-        expect(body.error).toBe("App not initialized");
-      });
-
-      it("should respond 200 with empty body when ack(undefined) is called", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            await event.ack(undefined);
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(200);
-        const text = await response.text();
-        expect(text).toBe("");
-      });
-
-      it("should respond 200 with string body when ack(string) is called", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            await event.ack("ok");
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(200);
-        const text = await response.text();
-        expect(text).toBe("ok");
-      });
-
-      it("should respond 200 with JSON string when ack(object) is called", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        const ackBody = { success: true, data: { a: 1 } };
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            await event.ack(ackBody);
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(200);
-        const text = await response.text();
-        expect(JSON.parse(text)).toEqual(ackBody);
-      });
-
-      it("should create ReceiverEvent with body and retry headers", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
-        let capturedEvent: any;
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            capturedEvent = event;
-            await event.ack();
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-
-        const handler = receiver.toHandler();
-        const requestBody = { type: "event_callback", foo: "bar" };
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify(requestBody),
-          headers: {
-            "content-type": "application/json",
-            "x-slack-retry-num": "2",
-            "x-slack-retry-reason": "http_error",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        expect(capturedEvent).toBeDefined();
-        expect(typeof capturedEvent.ack).toBe("function");
-        expect(capturedEvent.body).toEqual(requestBody);
-        expect(capturedEvent.retryNum).toBe(2);
-        expect(capturedEvent.retryReason).toBe("http_error");
-        expect(capturedEvent.customProperties).toEqual({});
-      });
-
-      it("should respond from ack while event continues processing in background", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-        });
-
-        let resolveDeferred!: () => void;
-        let backgroundPending = false;
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            await event.ack("ok");
-            backgroundPending = true;
-            await new Promise<void>((resolve) => {
-              resolveDeferred = resolve;
-            });
-            backgroundPending = false;
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: { "content-type": "application/json" },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        const text = await response.text();
-        expect(text).toBe("ok");
-        // The background work should still be pending at this point
-        expect(backgroundPending).toBe(true);
-        // Clean up: allow background to finish
-        resolveDeferred();
-      });
-
-      it("should log background error and resolve the background promise when it rejects", async () => {
-        const mockLogger = {
-          debug: vi.fn(),
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-          setLevel: vi.fn(),
-          getLevel: vi.fn(),
-        };
-
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the logger
-          logger: mockLogger as any,
-        });
-
-        let bgDone!: () => void;
-        const bgPromise = new Promise<void>((resolve) => {
-          bgDone = resolve;
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the waitUntil function
-        (waitUntil as any).mockImplementation(async (p: any) => {
-          try {
-            await p;
-          } finally {
-            bgDone();
-          }
-        });
-
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            await event.ack("ok");
-            throw new Error("boom");
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: { "content-type": "application/json" },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-
-        await bgPromise;
-        expect(mockLogger.error).toHaveBeenCalled();
-      });
-
-      it("should include customProperties from customPropertiesExtractor", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          customPropertiesExtractor: (req) => ({
-            ua: req.headers.get("user-agent") || "",
-            tag: "test",
-          }),
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
-        let capturedEvent: any;
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            capturedEvent = event;
-            await event.ack();
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-
-        const handler = receiver.toHandler();
-        const requestBody = { type: "event_callback" };
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify(requestBody),
-          headers: {
-            "content-type": "application/json",
-            "user-agent": "vitest",
-          },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(200);
-        expect(capturedEvent).toBeDefined();
-        expect(capturedEvent.customProperties).toEqual({
-          ua: "vitest",
-          tag: "test",
-        });
-      });
-
-      it("should return 408 when ack is not called within timeout", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          ackTimeoutMs: 10,
-        });
-
-        const mockApp = {
-          processEvent: vi.fn(async () => {
-            // Simulate long-running background work without calling ack
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: { "content-type": "application/json" },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(408);
-        const body = await response.json();
-        expect(body.error).toBe("Request timeout");
-      });
-
-      it("should throw ReceiverMultipleAckError when ack is called after timeout", async () => {
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          ackTimeoutMs: 10,
-        });
-
-        let ackError: Error | null = null;
-        const mockApp = {
-          processEvent: vi.fn(async (event) => {
-            // Wait for timeout to fire
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            // Now try to ack after timeout has already rejected
-            try {
-              await event.ack("late response");
-            } catch (error) {
-              ackError = error as Error;
-            }
-          }),
-        } as unknown as App;
-
-        receiver.init(mockApp);
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: { "content-type": "application/json" },
-        });
-
-        const response = await handler(request);
-        expect(response.status).toBe(408);
-
-        // Wait for background processing to complete
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        // Late ack should throw an error indicating it was too late
-        expect(ackError).toBeInstanceOf(ReceiverMultipleAckError);
-      });
-    });
-
-    describe("beforeProcess", () => {
-      it("should call beforeProcess with request and parsed body", async () => {
-        const beforeProcess = vi.fn();
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          beforeProcess,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        vi.spyOn(receiver as any, "handleSlackEvent").mockResolvedValue(
-          new Response("", { status: 200 }),
-        );
-
-        const handler = receiver.toHandler();
-        const payload = { type: "event_callback", team_id: "T123" };
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify(payload),
-          headers: { "content-type": "application/json" },
-        });
-
-        await handler(request);
-
-        expect(beforeProcess).toHaveBeenCalledTimes(1);
-        expect(beforeProcess).toHaveBeenCalledWith(
-          expect.any(Request),
-          payload,
-        );
-      });
-
-      it("should short-circuit when beforeProcess returns a Response", async () => {
-        const customResponse = new Response("intercepted", { status: 202 });
-        const beforeProcess = vi.fn().mockResolvedValue(customResponse);
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          beforeProcess,
-        });
-
-        const handleSlackEventSpy = vi.spyOn(
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          receiver as any,
-          "handleSlackEvent",
-        );
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: { "content-type": "application/json" },
-        });
-
-        const response = await handler(request);
-
-        expect(response.status).toBe(202);
-        expect(await response.text()).toBe("intercepted");
-        expect(handleSlackEventSpy).not.toHaveBeenCalled();
-      });
-
-      it("should continue to handleSlackEvent when beforeProcess returns void", async () => {
-        const beforeProcess = vi.fn().mockResolvedValue(undefined);
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          beforeProcess,
-        });
-
-        const handleSlackEventSpy = vi
-          // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-          .spyOn(receiver as any, "handleSlackEvent")
-          .mockResolvedValue(new Response("", { status: 200 }));
-
-        const handler = receiver.toHandler();
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify({ type: "event_callback" }),
-          headers: { "content-type": "application/json" },
-        });
-
-        await handler(request);
-
-        expect(beforeProcess).toHaveBeenCalled();
-        expect(handleSlackEventSpy).toHaveBeenCalled();
-      });
-
-      it("should provide a request with readable body to beforeProcess", async () => {
-        let capturedBody: string | undefined;
-        const beforeProcess = vi
-          .fn()
-          .mockImplementation(async (req: Request) => {
-            capturedBody = await req.text();
-            return undefined;
-          });
-
-        const receiver = new VercelReceiver({
-          signingSecret: "test-secret",
-          signatureVerification: false,
-          beforeProcess,
-        });
-
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the handleSlackEvent method
-        vi.spyOn(receiver as any, "handleSlackEvent").mockResolvedValue(
-          new Response("", { status: 200 }),
-        );
-
-        const handler = receiver.toHandler();
-        const payload = { type: "event_callback", team_id: "T123" };
-        const request = new Request("http://localhost", {
-          method: "POST",
-          body: JSON.stringify(payload),
-          headers: { "content-type": "application/json" },
-        });
-
-        await handler(request);
-
-        expect(capturedBody).toBe(JSON.stringify(payload));
-      });
-    });
-  });
-  describe("integration", () => {
-    it("should handle request via createHandler with parsed body and ack", async () => {
-      const receiver = new VercelReceiver({
-        signingSecret: "test-secret",
-        signatureVerification: false,
-      });
-
-      // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
-      let capturedEvent: any;
-      const app = {
-        init: vi.fn(async () => {}),
-        // oxlint-disable-next-line typescript/no-explicit-any -- we're mocking the processEvent method
-        processEvent: vi.fn(async (event: any) => {
-          capturedEvent = event;
-          await event.ack({ ok: true });
-        }),
-      } as unknown as App;
-
-      const handler = createHandler(app, receiver);
-
-      const payload = { type: "event_callback", hello: "world" };
-      const request = new Request("http://localhost", {
-        method: "POST",
-        body: JSON.stringify(payload),
-        headers: { "content-type": "application/json" },
-      });
-
-      const response = await handler(request);
-
-      expect(response.status).toBe(200);
-      const text = await response.text();
-      expect(JSON.parse(text)).toEqual({ ok: true });
-      expect(capturedEvent?.body).toEqual(payload);
-      expect(app.processEvent).toHaveBeenCalledTimes(1);
-      expect(app.init).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it("falls back to console.error when createHandler init fails", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const receiver = new VercelReceiver({
-      signingSecret: "test-secret",
-      signatureVerification: false,
-    });
-
-    const app = {
-      init: vi.fn(async () => {
-        throw new Error("boom");
       }),
-    } as unknown as App;
+    ).toEqual({
+      directInstall: true,
+      installPathOptions: { beforeRedirection },
+      ...BOLT_PATHS.installerOptions,
+    });
+  });
 
-    const handler = createHandler(app, receiver);
+  it("derives redirectUriPath from redirectUri", () => {
+    expect(
+      installerOptionsFor({
+        redirectUri: "https://example.com/api/slack/oauth",
+      }),
+    ).toEqual({
+      installPath: "/slack/install",
+      redirectUriPath: "/api/slack/oauth",
+    });
+  });
 
-    const request = new Request("http://localhost", {
-      method: "POST",
-      body: JSON.stringify({ type: "event_callback" }),
-      headers: { "content-type": "application/json" },
+  it("rejects a redirectUri query before calling HTTPReceiver without logging its value", () => {
+    expect(
+      () =>
+        new VercelReceiver({
+          ...oauth,
+          redirectUri: "https://example.com/api/slack/oauth?token=private",
+        }),
+    ).toThrow(
+      new AppInitializationError(
+        "redirectUri must not include a query string or fragment. Use a URL like https://example.com/api/slack/oauth.",
+      ),
+    );
+    expect(superCalls).toEqual([]);
+  });
+
+  // Like an unset SLACK_REDIRECT_URI= in a .env file.
+  it("treats an empty redirectUri as unset", () => {
+    new VercelReceiver({ ...oauth, redirectUri: "" });
+
+    const [passed] = superCalls as HTTPReceiverOptions[];
+    expect(passed).not.toHaveProperty("redirectUri");
+    expect(passed.installerOptions).toEqual(BOLT_PATHS.installerOptions);
+  });
+
+  // URL trims whitespace, but Bolt and Slack would get it.
+  it.each([
+    " https://example.com/api/slack/oauth",
+    "\thttps://example.com/api/slack/oauth",
+    "https://example.com/api/slack/oauth\n",
+  ])(
+    "throws before calling HTTPReceiver when redirectUri %j has whitespace at either end",
+    (redirectUri) => {
+      expect(() => new VercelReceiver({ ...oauth, redirectUri })).toThrow(
+        new AppInitializationError(
+          `redirectUri must not start or end with whitespace, but it's ${JSON.stringify(redirectUri)}.`,
+        ),
+      );
+      expect(superCalls).toEqual([]);
+    },
+  );
+
+  it("moves the install page off the callback's path", () => {
+    expect(
+      installerOptionsFor({ redirectUri: "https://example.com/slack/install" }),
+    ).toEqual({
+      installPath: "/slack/events",
+      redirectUriPath: "/slack/install",
+    });
+  });
+
+  it("keeps Bolt's paths even if JavaScript passes them", () => {
+    expect(
+      installerOptionsFor({
+        installerOptions: {
+          // @ts-expect-error fetch serves the install page at any path
+          installPath: "/install",
+          redirectUriPath: "/redirect",
+        },
+      }),
+    ).toEqual(BOLT_PATHS.installerOptions);
+  });
+
+  it("doesn't accept installer options for Bolt's own server", () => {
+    const options: VercelReceiverOptions["installerOptions"][] = [
+      // @ts-expect-error fetch serves the install page at any path
+      { installPath: "/i" },
+      // @ts-expect-error fetch serves the callback at any path
+      { redirectUriPath: "/r" },
+      // @ts-expect-error port doesn't apply to fetch
+      { port: 3000 },
+    ];
+    expect(options).toHaveLength(3);
+  });
+
+  it("throws before calling HTTPReceiver when clientId has no installationStore", () => {
+    expect(
+      () => new VercelReceiver({ ...oauth, installationStore: undefined }),
+    ).toThrow(new AppInitializationError(MISSING_STORE));
+    expect(superCalls).toEqual([]);
+  });
+
+  it.each<[string, VercelReceiverOptions]>([
+    ["is missing", { clientSecret: undefined }],
+    ["is an empty string", { clientSecret: "" }],
+  ])(
+    "throws before calling HTTPReceiver when clientSecret %s",
+    (_, options) => {
+      expect(() => new VercelReceiver({ ...oauth, ...options })).toThrow(
+        new AppInitializationError(MISSING_CLIENT_SECRET),
+      );
+      expect(superCalls).toEqual([]);
+    },
+  );
+
+  it.each<[string, VercelReceiverOptions]>([
+    ["is missing", { stateSecret: undefined }],
+    ["is an empty string", { stateSecret: "" }],
+  ])("throws before calling HTTPReceiver when stateSecret %s", (_, options) => {
+    expect(() => new VercelReceiver({ ...oauth, ...options })).toThrow(
+      new AppInitializationError(MISSING_STATE_SECRET),
+    );
+    expect(superCalls).toEqual([]);
+  });
+
+  it.each<[string, VercelReceiverOptions["installerOptions"]]>([
+    [
+      "a stateStore",
+      {
+        stateStore: {
+          generateStateParam: async () => "state",
+          verifyStateParam: async () => ({}) as never,
+        },
+      },
+    ],
+    ["stateVerification turned off", { stateVerification: false }],
+  ])("doesn't need stateSecret with %s", (_, installerOptions) => {
+    expect(
+      () =>
+        new VercelReceiver({
+          ...oauth,
+          stateSecret: undefined,
+          installerOptions,
+        }),
+    ).not.toThrow();
+    expect(superCalls).toHaveLength(1);
+  });
+
+  it("throws before calling HTTPReceiver when redirectUri isn't an absolute URL", () => {
+    expect(
+      () => new VercelReceiver({ ...oauth, redirectUri: "/api/slack/oauth" }),
+    ).toThrow(
+      new AppInitializationError(
+        'redirectUri must be an absolute URL, like https://example.com/api/slack, but it\'s "/api/slack/oauth".',
+      ),
+    );
+    expect(superCalls).toEqual([]);
+  });
+});
+
+describe("processEventErrorHandler", () => {
+  /** The handler our receiver passed to HTTPReceiver. */
+  function wrap(handler: ErrorHandler): ErrorHandler {
+    new VercelReceiver({
+      signingSecret: "secret",
+      processEventErrorHandler: handler,
+    });
+    const [options] = superCalls as HTTPReceiverOptions[];
+    return options.processEventErrorHandler as ErrorHandler;
+  }
+
+  it("calls a custom handler and keeps it alive with waitUntil until it settles", async () => {
+    const handled = deferred<boolean>();
+    const handler = vi.fn<ErrorHandler>(() => handled.promise);
+    const args = {} as Parameters<ErrorHandler>[0];
+
+    const result = wrap(handler)(args);
+
+    expect(handler).toHaveBeenCalledExactlyOnceWith(args);
+    expect(result).toBe(handled.promise);
+    expect(waitUntil).toHaveBeenCalledOnce();
+    expect(await isSettled(keptAlive())).toBe(false);
+    handled.resolve(true);
+    expect(await isSettled(keptAlive())).toBe(true);
+  });
+
+  it("never rejects the promise kept alive", async () => {
+    const error = new Error("reporting failed");
+    const handler = vi.fn<ErrorHandler>(() => Promise.reject(error));
+
+    await expect(wrap(handler)({} as Parameters<ErrorHandler>[0])).rejects.toBe(
+      error,
+    );
+    await expect(keptAlive()).resolves.toBeUndefined();
+  });
+
+  it("accepts a handler that returns a boolean instead of a promise", async () => {
+    const handler = (() => true) as unknown as ErrorHandler;
+
+    expect(wrap(handler)({} as Parameters<ErrorHandler>[0])).toBe(true);
+    expect(await isSettled(keptAlive())).toBe(true);
+  });
+});
+
+describe("customPropertiesExtractor", () => {
+  type Extractor = NonNullable<
+    HTTPReceiverOptions["customPropertiesExtractor"]
+  >;
+  const req = {} as Parameters<Extractor>[0];
+
+  /** The extractor our receiver passed to HTTPReceiver. */
+  function wrap(extractor: Extractor): Extractor {
+    new VercelReceiver({
+      signingSecret: "secret",
+      customPropertiesExtractor: extractor,
+    });
+    const [options] = superCalls as HTTPReceiverOptions[];
+    return options.customPropertiesExtractor as Extractor;
+  }
+
+  it("passes the extractor's properties through", () => {
+    const properties = { tenant: "acme" };
+    const extractor = vi.fn<Extractor>(() => properties);
+
+    expect(wrap(extractor)(req)).toBe(properties);
+    expect(extractor).toHaveBeenCalledExactlyOnceWith(req);
+  });
+
+  // Bolt calls the extractor outside any try, so a throw would be an
+  // unhandled rejection.
+  it("rejects the event with what the extractor threw, without processing it", async () => {
+    const error = new Error("no tenant");
+    const extracted = wrap(() => {
+      throw error;
+    })(req);
+    const logger = { error: vi.fn() };
+    // Not initialized yet, as with deferInitialization.
+    const app = {
+      initialized: false,
+      init: vi.fn(async () => {}),
+      processEvent: vi.fn<App["processEvent"]>(async () => {}),
+    };
+    const wrapped = initWith(app as unknown as Partial<App>, {
+      logger: logger as unknown as HTTPReceiverOptions["logger"],
     });
 
-    const response = await handler(request);
+    await expect(
+      wrapped.processEvent({ ...makeEvent(), customProperties: extracted }),
+    ).rejects.toBe(error);
+    expect(app.init).not.toHaveBeenCalled();
+    expect(app.processEvent).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+      "customPropertiesExtractor threw, so this event wasn't processed.",
+      error,
+    );
+  });
+
+  // Bolt 4's default processEventErrorHandler runs `"code" in error`.
+  it("rejects with an Error when the extractor throws something else", async () => {
+    const extracted = wrap(() => {
+      throw "no tenant";
+    })(req);
+    const wrapped = initWith({ processEvent: vi.fn() } as Partial<App>, {
+      logger: { error: vi.fn() } as unknown as HTTPReceiverOptions["logger"],
+    });
+
+    const rejection = wrapped
+      .processEvent({ ...makeEvent(), customProperties: extracted })
+      .catch((error: unknown) => error);
+
+    expect(await rejection).toEqual(
+      expect.objectContaining({ message: "no tenant", cause: "no tenant" }),
+    );
+    expect(await rejection).toBeInstanceOf(Error);
+  });
+});
+
+describe("processEvent", () => {
+  it("calls the app's processEvent on the app and returns its promise", () => {
+    const processing = Promise.resolve();
+    const app = { processEvent: vi.fn<App["processEvent"]>(() => processing) };
+    const event = makeEvent();
+
+    const result = initWith(app).processEvent(event);
+
+    expect(app.processEvent).toHaveBeenCalledOnce();
+    expect(app.processEvent.mock.calls[0][0]).toBe(event);
+    expect(app.processEvent.mock.contexts[0]).toBe(app);
+    expect(result).toBe(processing);
+  });
+
+  it("keeps processing alive with waitUntil until it settles", async () => {
+    const processing = deferred();
+    const wrapped = initWith({ processEvent: () => processing.promise });
+
+    void wrapped.processEvent(makeEvent());
+
+    // Synchronously, so waitUntil resolves the current request's context.
+    expect(waitUntil).toHaveBeenCalledOnce();
+    expect(await isSettled(keptAlive())).toBe(false);
+    processing.resolve();
+    expect(await isSettled(keptAlive())).toBe(true);
+  });
+
+  it("handles concurrent events independently", async () => {
+    const first = deferred();
+    const second = deferred();
+    const app = {
+      processEvent: vi
+        .fn<App["processEvent"]>()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise),
+    };
+    const wrapped = initWith(app);
+    const [a, b] = [makeEvent(), makeEvent()];
+
+    expect(wrapped.processEvent(a)).toBe(first.promise);
+    expect(wrapped.processEvent(b)).toBe(second.promise);
+    expect(app.processEvent.mock.calls[1][0]).toBe(b);
+    expect(waitUntil).toHaveBeenCalledTimes(2);
+
+    second.resolve();
+    expect(await isSettled(keptAlive(0))).toBe(false);
+    expect(await isSettled(keptAlive(1))).toBe(true);
+  });
+
+  it("rejects to the caller but never rejects the promise kept alive", async () => {
+    const error = new Error("listener failed");
+    const wrapped = initWith({ processEvent: () => Promise.reject(error) });
+
+    await expect(wrapped.processEvent(makeEvent())).rejects.toBe(error);
+    await expect(keptAlive()).resolves.toBeUndefined();
+  });
+});
+
+describe("deferred initialization", () => {
+  /** An App created with deferInitialization: true, whose init waits for `initializing`. */
+  function deferredApp(initializing: () => Promise<void>) {
+    const app = {
+      initialized: false,
+      // Like Bolt's, it marks itself initialized up front and resets on failure.
+      init: vi.fn(async () => {
+        app.initialized = true;
+        try {
+          await initializing();
+        } catch (error) {
+          app.initialized = false;
+          throw error;
+        }
+      }),
+      processEvent: vi.fn<App["processEvent"]>(async () => {}),
+    };
+    return app;
+  }
+
+  it("runs app.init() once, before the first events, and keeps it alive", async () => {
+    const initialized = deferred();
+    const app = deferredApp(() => initialized.promise);
+    const wrapped = initWith(app as unknown as Partial<App>);
+    const [a, b] = [makeEvent(), makeEvent()];
+
+    const results = [wrapped.processEvent(a), wrapped.processEvent(b)];
+
+    expect(app.init).toHaveBeenCalledOnce();
+    expect(app.init.mock.contexts[0]).toBe(app);
+    expect(waitUntil).toHaveBeenCalledTimes(2);
+    expect(await isSettled(keptAlive(0))).toBe(false);
+    expect(app.processEvent).not.toHaveBeenCalled();
+
+    initialized.resolve();
+    await Promise.all(results);
+    expect(app.processEvent.mock.calls.map(([event]) => event)).toEqual([a, b]);
+    expect(app.processEvent.mock.contexts).toEqual([app, app]);
+    expect(await isSettled(keptAlive(1))).toBe(true);
+  });
+
+  it("retries app.init() on the next event when it fails", async () => {
+    const error = new Error("auth.test failed");
+    const attempt = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce(undefined);
+    const app = deferredApp(attempt);
+    const wrapped = initWith(app as unknown as Partial<App>);
+
+    await expect(wrapped.processEvent(makeEvent())).rejects.toBe(error);
+    expect(app.processEvent).not.toHaveBeenCalled();
+
+    await wrapped.processEvent(makeEvent());
+    expect(app.init).toHaveBeenCalledTimes(2);
+    expect(app.processEvent).toHaveBeenCalledOnce();
+  });
+
+  it("logs why app.init() failed through the receiver's logger, once per attempt", async () => {
+    const error = new Error("invalid_auth");
+    const app = deferredApp(() => Promise.reject(error));
+    const logger = { error: vi.fn() };
+    const wrapped = initWith(app as unknown as Partial<App>, {
+      logger: logger as unknown as HTTPReceiverOptions["logger"],
+    });
+
+    const results = [
+      wrapped.processEvent(makeEvent()),
+      wrapped.processEvent(makeEvent()),
+    ];
+
+    await expect(results[0]).rejects.toBe(error);
+    await expect(results[1]).rejects.toBe(error);
+    expect(logger.error).toHaveBeenCalledExactlyOnceWith(INIT_FAILED, error);
+  });
+
+  it("doesn't call app.init() once the app is initialized", async () => {
+    const app = deferredApp(async () => {});
+    const wrapped = initWith(app as unknown as Partial<App>);
+
+    await wrapped.processEvent(makeEvent());
+    await wrapped.processEvent(makeEvent());
+
+    expect(app.init).toHaveBeenCalledOnce();
+    expect(app.processEvent).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("app proxy", () => {
+  it("leaves the app itself untouched", () => {
+    const processEvent = vi.fn<App["processEvent"]>();
+    const app = { processEvent };
+
+    initWith(app);
+
+    expect(app.processEvent).toBe(processEvent);
+  });
+
+  it("returns the app's own values for other properties", () => {
+    const client = { chat: {} };
+    const start = vi.fn();
+    const wrapped = initWith({
+      processEvent: vi.fn(),
+      client,
+      start,
+    } as unknown as Partial<App>);
+
+    expect(wrapped.client).toBe(client);
+    expect(wrapped.start).toBe(start);
+  });
+});
+
+describe("fetch", () => {
+  /** Sends a request through fetch and returns what requestListener saw. */
+  async function routed(
+    method: string,
+    url: string,
+    options: VercelReceiverOptions = {},
+  ) {
+    const receiver = new VercelReceiver({
+      signingSecret: "secret",
+      ...options,
+    });
+    const body = method === "POST" ? "{}" : undefined;
+    const response = await receiver.fetch(new Request(url, { method, body }));
+    return response.text();
+  }
+
+  it("sends POST requests at any path to the events endpoint", async () => {
+    await expect(routed("POST", "https://x/api/slack?a=1")).resolves.toBe(
+      "POST /slack/events?a=1",
+    );
+  });
+
+  it("keeps Bolt's endpoint even if JavaScript passes endpoints", () => {
+    new VercelReceiver({
+      signingSecret: "secret",
+      // @ts-expect-error endpoints is set by the receiver
+      endpoints: "/events",
+    });
+
+    expect(superCalls).toEqual([
+      expect.objectContaining({ endpoints: "/slack/events" }),
+    ]);
+  });
+
+  it("doesn't accept options for Bolt's own server", () => {
+    const signingSecret = "secret";
+    // @ts-expect-error customRoutes don't apply to fetch
+    new VercelReceiver({ signingSecret, customRoutes: [] });
+    // @ts-expect-error port doesn't apply to fetch
+    new VercelReceiver({ signingSecret, port: 3000 });
+    // @ts-expect-error dispatchErrorHandler doesn't apply to fetch
+    new VercelReceiver({ signingSecret, dispatchErrorHandler: () => {} });
+  });
+
+  it("sends other methods to the endpoint too, so Bolt answers them", async () => {
+    await expect(routed("GET", "https://x/api/slack?a=1")).resolves.toBe(
+      "GET /slack/events?a=1",
+    );
+  });
+
+  it("sends GET requests to the install page with the OAuth options", async () => {
+    await expect(routed("GET", "https://x/api/slack?a=1", oauth)).resolves.toBe(
+      "GET /slack/install?a=1",
+    );
+  });
+
+  // Without stateVerification, a user who cancels comes back with only error.
+  it.each([
+    "code=c&state=s",
+    "error=access_denied&state=s",
+    "code=c",
+    "error=access_denied",
+    "state=s",
+  ])("sends GET requests with %s to the OAuth callback", async (query) => {
+    await expect(
+      routed("GET", `https://x/api/slack?${query}`, oauth),
+    ).resolves.toBe(`GET /slack/oauth_redirect?${query}`);
+  });
+
+  it("sends the OAuth callback to the path redirectUri gives Bolt", async () => {
+    await expect(
+      routed("GET", "https://x/api/slack?code=c", {
+        ...oauth,
+        redirectUri: "https://x/api/slack",
+      }),
+    ).resolves.toBe("GET /api/slack?code=c");
+  });
+
+  // new URL("//[", base) throws, which srvx would log with every header.
+  it("routes a path that isn't a valid relative URL by its query", async () => {
+    await expect(routed("POST", "https://x//[?a=1")).resolves.toBe(
+      "POST /slack/events?a=1",
+    );
+    await expect(routed("GET", "https://x//[?code=c", oauth)).resolves.toBe(
+      "GET /slack/oauth_redirect?code=c",
+    );
+  });
+
+  it("still sends POST requests to the events endpoint with the OAuth options", async () => {
+    await expect(
+      routed("POST", "https://x/api/slack?code=c", oauth),
+    ).resolves.toBe("POST /slack/events?code=c");
+  });
+
+  it("restores the request's URL after Bolt has routed it", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const seen: (string | undefined)[] = [];
+    const listener = (receiver as unknown as { requestListener: unknown })
+      .requestListener as (req: IncomingMessage, res: ServerResponse) => void;
+    Object.assign(receiver, {
+      requestListener: (req: IncomingMessage, res: ServerResponse) => {
+        seen.push(req.url);
+        res.once("finish", () => seen.push(req.url));
+        listener(req, res);
+      },
+    });
+
+    await (await receiver.fetch(new Request("https://x/api/slack?a=1"))).text();
+
+    expect(seen).toEqual(["/slack/events?a=1", "/api/slack?a=1"]);
+  });
+
+  it("responds 404 with an empty body when Bolt defers the request", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    Object.assign(receiver, {
+      requestListener: (req: IncomingMessage, res: ServerResponse) => {
+        throw new HTTPReceiverDeferredRequestError("unhandled", req, res);
+      },
+    });
+
+    const response = await receiver.fetch(new Request("https://x/"));
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe("");
+  });
+
+  it("answers 500 and logs other errors through the receiver's logger", async () => {
+    const logger = { error: vi.fn() };
+    const receiver = new VercelReceiver({
+      signingSecret: "secret",
+      logger: logger as unknown as HTTPReceiverOptions["logger"],
+    });
+    const error = new Error("boom");
+    Object.assign(receiver, {
+      requestListener: () => {
+        throw error;
+      },
+    });
+
+    const response = await receiver.fetch(new Request("https://x/"));
 
     expect(response.status).toBe(500);
-    const json = await response.json();
-    expect(json).toHaveProperty("type", "HandlerError");
-
-    expect(consoleSpy).toHaveBeenCalledTimes(1);
-    const args = consoleSpy.mock.calls[0] ?? [];
-    expect(typeof args[0]).toBe("string");
-    expect(String(args[0])).toContain("createHandler");
-    expect(args[1]).toBeInstanceOf(Error);
-
-    consoleSpy.mockRestore();
+    await expect(response.text()).resolves.toBe("");
+    expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn't handle the Slack request.",
+      error,
+    );
   });
 
-  it("should recover after transient init failure", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("rejects a request whose body was already read", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const request = new Request("https://x/", { method: "POST", body: "{}" });
+    await request.text();
 
-    const receiver = new VercelReceiver({
-      signingSecret: "test-secret",
-      signatureVerification: false,
-    });
+    await expect(receiver.fetch(request)).rejects.toThrow(
+      new TypeError(
+        "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.",
+      ),
+    );
+  });
 
-    let initCallCount = 0;
-    const app = {
-      init: vi.fn(async () => {
-        initCallCount++;
-        if (initCallCount === 1) {
-          throw new Error("transient failure");
-        }
-        // Second call succeeds
-      }),
-      processEvent: vi.fn(async (event) => {
-        await event.ack({ ok: true });
-      }),
-    } as unknown as App;
+  // bodyUsed stays false until the reader reads. srvx would answer 500 and log
+  // the request with every header.
+  it("rejects a request whose body something holds a reader on", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const request = new Request("https://x/", { method: "POST", body: "{}" });
+    request.body?.getReader();
 
-    const handler = createHandler(app, receiver);
+    await expect(receiver.fetch(request)).rejects.toThrow(
+      new TypeError(
+        "Request body already read. Bolt needs the raw body to verify Slack's signature, so clone the request before you read it, read the original and pass the clone to fetch.",
+      ),
+    );
+  });
 
-    // First request - init fails
-    const request1 = new Request("http://localhost", {
+  it("works unbound", async () => {
+    const { fetch } = new VercelReceiver({ signingSecret: "secret" });
+
+    const response = await fetch(
+      new Request("https://x/api/slack", { method: "POST", body: "{}" }),
+    );
+
+    await expect(response.text()).resolves.toBe("POST /slack/events");
+  });
+
+  it("exposes POST as an unbound handler that calls fetch", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const fetch = vi.spyOn(receiver, "fetch");
+    const { POST } = receiver;
+    const request = new Request("https://x/api/slack", {
       method: "POST",
-      body: JSON.stringify({ type: "event_callback" }),
-      headers: { "content-type": "application/json" },
+      body: "{}",
     });
-    const response1 = await handler(request1);
-    expect(response1.status).toBe(500);
 
-    // Second request - should retry init and succeed
-    const request2 = new Request("http://localhost", {
-      method: "POST",
-      body: JSON.stringify({ type: "event_callback" }),
-      headers: { "content-type": "application/json" },
-    });
-    const response2 = await handler(request2);
+    const response = await POST(request);
 
-    // This should succeed because init should be retried
-    expect(response2.status).toBe(200);
-    expect(app.init).toHaveBeenCalledTimes(2);
+    await expect(response.text()).resolves.toBe("POST /slack/events");
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
+  });
 
-    consoleSpy.mockRestore();
+  it("exposes GET as an unbound handler that calls fetch", async () => {
+    const receiver = new VercelReceiver({ signingSecret: "secret" });
+    const fetch = vi.spyOn(receiver, "fetch");
+    const { GET } = receiver;
+    const request = new Request("https://x/api/slack");
+
+    const response = await GET(request);
+
+    await expect(response.text()).resolves.toBe("GET /slack/events");
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
   });
 });
