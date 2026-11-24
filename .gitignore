@@ -20,3 +20,6 @@ vercel-bolt-*.tgz
 # Tooling
 .agents
 .DS_Store
+
+# Agent worktrees
+.claude/worktrees
