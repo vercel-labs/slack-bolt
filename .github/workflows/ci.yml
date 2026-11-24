@@ -5,9 +5,6 @@ on:
     branches:
       - master
       - release/v2
-      # The v2 release lands as stacked pull requests, which target each
-      # other's branches until the one below them merges.
-      - "v2-*"
   push:
     branches:
       - master
