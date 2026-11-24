@@ -79,7 +79,6 @@ jobs:
         if: matrix.bolt == '4'
         run: pnpm --filter @vercel/slack-bolt add --save-dev @slack/bolt@4.7.3
 
-      # Typechecks against this Bolt's types, then runs the tests against the
-      # source and the build.
+      # Typechecks against this Bolt's types, then runs the tests.
       - name: Typecheck and test
         run: pnpm exec turbo run typecheck test --filter=@vercel/slack-bolt

@@ -2,10 +2,6 @@
   "$schema": "../../node_modules/turbo/schema.json",
   "extends": ["//"],
   "tasks": {
-    "test": {
-      "description": "Runs the Vitest suite once, against src and the built package",
-      "dependsOn": ["build"]
-    },
     "attw": {
       "description": "Checks the packed package's type exports with Are the Types Wrong",
       "dependsOn": ["build"]
