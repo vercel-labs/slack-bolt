@@ -48,8 +48,8 @@ importers:
         specifier: ^1.41.0
         version: 1.41.0
       '@vercel/slack-bolt':
-        specifier: workspace:*
-        version: link:../../packages/slack-bolt
+        specifier: ^1.7.6
+        version: 1.7.6(@slack/bolt@5.1.0(@types/express@5.0.3)(undici@7.30.1))(ws@8.21.3)
       next:
         specifier: 16.4.6
         version: 16.4.6(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -90,12 +90,6 @@ importers:
 
   packages/slack-bolt:
     dependencies:
-      '@slack/logger':
-        specifier: ^5.0.0
-        version: 5.0.0
-      '@slack/oauth':
-        specifier: 3.0.5
-        version: 3.0.5
       '@vercel/functions':
         specifier: ^3.11.3
         version: 3.11.3(ws@8.21.3)
@@ -127,6 +121,9 @@ importers:
       oxlint:
         specifier: 'catalog:'
         version: 1.94.0
+      srvx:
+        specifier: ~1.0.8
+        version: 1.0.8
       tsdown:
         specifier: ^0.23.7
         version: 0.23.7(@arethetypeswrong/core@0.18.5)(typescript@7.0.2)(unrun@0.2.34(@emnapi/core@2.0.0-beta.2)(@emnapi/runtime@2.0.0-beta.2))
@@ -1638,6 +1635,13 @@ packages:
     resolution: {integrity: sha512-LBNEPlKHv3ZAhOX2Dcj1hrxdmqYrdzxukGltouKbyjU8IeJvAFSuOHn5X0ZWg0qG2huANcgrHAb03giWeUyubQ==}
     engines: {node: '>= 20'}
 
+  '@vercel/slack-bolt@1.7.6':
+    resolution: {integrity: sha512-K6KgM6LkYg1bseidHlUYKs00Quuuosa5ml1NSFlg+6/PxiyV+4UBlg2eP18Dj2vIJyJvWUEqgl1ScxRD6uA8Kg==}
+    engines: {node: '>=22.0.0'}
+    hasBin: true
+    peerDependencies:
+      '@slack/bolt': ^4.4.0 || ^5.0.0
+
   '@vitest/coverage-v8@5.1.1':
     resolution: {integrity: sha512-xL4NkbVx/UqqDHaXSOyvB8qsSoLQ+dVNGR9H2Bh/4ggQtmaPFNPUC9gZQwKZePLOQ6WDcgwXVnPulFW9eCHt0w==}
     peerDependencies:
@@ -2803,6 +2807,11 @@ packages:
 
   sprintf-js@1.0.3:
     resolution: {integrity: sha512-D9cPgkvLlV3t3IzL0D0YLvGA9Ahk4PcvVwUbN0dSGr1aP0Nrt4AEnTUbuGvquEC0mA64Gqt1fzirlRs5ibXx8g==}
+
+  srvx@1.0.8:
+    resolution: {integrity: sha512-ngFS/J6St4PJfHRHGjr78xkPPtbyXtdMOLNE4x/XZunEK3OhV7aGUWMHf9WTUEy6wm1U0W4okkd82ZFFWRVQTw==}
+    engines: {node: '>=20.16.0'}
+    hasBin: true
 
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
@@ -4277,6 +4286,21 @@ snapshots:
       '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
 
+  '@vercel/slack-bolt@1.7.6(@slack/bolt@5.1.0(@types/express@5.0.3)(undici@7.30.1))(ws@8.21.3)':
+    dependencies:
+      '@slack/bolt': 5.1.0(@types/express@5.0.3)(undici@7.30.1)
+      '@slack/logger': 5.0.0
+      '@slack/oauth': 3.0.5
+      '@vercel/functions': 3.11.3(ws@8.21.3)
+      commander: 14.0.3
+      yaml: 2.9.1
+      zod: 4.6.7
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-web-identity'
+      - debug
+      - supports-color
+      - ws
+
   '@vitest/coverage-v8@5.1.1(vitest@5.1.1)':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
@@ -5470,6 +5494,8 @@ snapshots:
       signal-exit: 4.1.0
 
   sprintf-js@1.0.3: {}
+
+  srvx@1.0.8: {}
 
   statuses@2.0.2: {}
 
