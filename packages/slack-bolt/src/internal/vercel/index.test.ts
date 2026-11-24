@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HTTPError } from "./errors";
+import { HTTPError } from "../http-error";
 import {
   addEnvironmentVariables,
   getActiveBranches,
@@ -540,6 +540,43 @@ describe("addEnvironmentVariables", () => {
     const result = await addEnvironmentVariables(defaultArgs);
 
     expect(result).toEqual(payload);
+  });
+
+  it("should resolve when the response has no failed list", async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ created: [] }));
+
+    await expect(addEnvironmentVariables(defaultArgs)).resolves.toEqual({
+      created: [],
+    });
+  });
+
+  it("should throw when Vercel saved only some of the variables", async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({
+        created: [{ key: "SLACK_APP_ID" }],
+        failed: [
+          {
+            error: {
+              code: "ENV_CONFLICT",
+              message: "A variable with value xoxb-secret-value already exists",
+              envVarKey: "SLACK_BOT_TOKEN",
+            },
+          },
+          { error: { code: "BAD_REQUEST", message: "bad", key: "FOO" } },
+        ],
+      }),
+    );
+
+    const error = await addEnvironmentVariables(defaultArgs).catch(
+      (e: unknown) => e as Error,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Failed to create environment variables: SLACK_BOT_TOKEN (ENV_CONFLICT), FOO (BAD_REQUEST)",
+    );
+    // Vercel's message can echo what was submitted.
+    expect((error as Error).message).not.toContain("xoxb-secret-value");
   });
 
   it("should set Content-Type to application/json", async () => {

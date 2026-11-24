@@ -1,5 +1,5 @@
+import { HTTPError } from "../http-error";
 import type { Manifest } from "../manifest/types";
-import { HTTPError } from "../vercel/errors";
 import {
   SlackManifestCreateError,
   SlackManifestExportError,
@@ -135,6 +135,28 @@ export async function exportSlackApp({
   return data;
 }
 
+/** Slack error codes for a failure on Slack's side, not a verdict on the app. */
+const TRANSIENT_SLACK_ERRORS = new Set([
+  "ratelimited",
+  "internal_error",
+  "fatal_error",
+  "service_unavailable",
+  "request_timeout",
+]);
+
+/**
+ * Whether a failed export or update says nothing about the app itself: Slack
+ * was unreachable, overloaded or rate limiting.
+ */
+function isTransient(error: unknown): boolean {
+  if (error instanceof HTTPError) {
+    return error.status === 429 || error.status >= 500;
+  }
+  // fetch rejects with a TypeError when the request never got an answer.
+  if (error instanceof TypeError) return true;
+  return error instanceof Error && TRANSIENT_SLACK_ERRORS.has(error.message);
+}
+
 export async function upsertSlackApp({
   token,
   appId,
@@ -152,7 +174,11 @@ export async function upsertSlackApp({
       await exportSlackApp({ token, appId });
       const app = await updateSlackApp({ token, appId, manifest });
       return { isNew: false, app };
-    } catch {
+    } catch (error) {
+      // Creating a second app because Slack had an outage would orphan the
+      // branch's existing one: its SLACK_APP_ID gets overwritten, so cleanup
+      // never finds it again. Fail the build instead; the next one retries.
+      if (isTransient(error)) throw error;
       // App doesn't exist or isn't accessible — fall through to create
     }
   }
