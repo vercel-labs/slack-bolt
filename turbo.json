@@ -8,7 +8,6 @@
   },
   "global": {
     "ui": "tui",
-    "env": ["CI_NODE_VERSION"],
     "cacheMaxAge": "7d"
   },
   "tasks": {
