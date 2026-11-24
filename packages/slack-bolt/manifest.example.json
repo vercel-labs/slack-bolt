@@ -16,7 +16,7 @@
   "settings": {
     "event_subscriptions": {
       "bot_events": ["message.channels"],
-      "request_url": "https://<your-vercel-app-url>/api/events"
+      "request_url": "https://<your-vercel-app-url>/api/slack/events"
     },
     "socket_mode_enabled": false,
     "token_rotation_enabled": false

@@ -1,15 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { cleanupOrphanedApps } from "../cleanup";
-import { authTest, rotateConfigToken } from "../internal/slack";
+import { log } from "../internal/logger";
+import {
+  authTest,
+  type RotateTokenResult,
+  rotateConfigToken,
+} from "../internal/slack";
 import {
   addEnvironmentVariables,
   cancelDeployment,
   createDeployment,
   getProject,
 } from "../internal/vercel";
-import { log } from "../logger";
 import { type PreviewParams, preview } from "../preview";
+import { cleanupOrphanedApps } from "./cleanup";
 
 export async function executeBuild(
   params: PreviewParams,
@@ -32,13 +36,21 @@ export async function executeBuild(
     }
 
     log.step("Refreshing SLACK_CONFIGURATION_TOKEN");
+    let rotated: RotateTokenResult;
     try {
-      const rotated = await rotateConfigToken({
+      rotated = await rotateConfigToken({
         refreshToken: params.slackConfigRefreshToken,
       });
-      params.slackConfigurationToken = rotated.token;
-      params.slackConfigRefreshToken = rotated.refreshToken;
+    } catch (rotateError) {
+      throw new Error(
+        "Failed to rotate configuration token — refresh token may be invalid. Generate new tokens:\nhttps://api.slack.com/apps",
+        { cause: rotateError },
+      );
+    }
+    params.slackConfigurationToken = rotated.token;
+    params.slackConfigRefreshToken = rotated.refreshToken;
 
+    try {
       await addEnvironmentVariables({
         projectId: params.projectId,
         token: params.vercelApiToken,
@@ -58,13 +70,15 @@ export async function executeBuild(
           },
         ],
       });
-      log.success("Configuration token rotated and persisted");
-    } catch (rotateError) {
+    } catch (persistError) {
+      // Slack has issued new tokens by now, so say that saving them failed,
+      // not that the refresh token was bad.
       throw new Error(
-        "Failed to rotate configuration token — refresh token may be invalid. Generate new tokens:\nhttps://api.slack.com/apps",
-        { cause: rotateError },
+        "Rotated the Slack configuration token, but couldn't save the new tokens to your Vercel project, so the stored SLACK_CONFIG_REFRESH_TOKEN may no longer work. Check that VERCEL_API_TOKEN can write environment variables, then generate new tokens and update SLACK_CONFIGURATION_TOKEN and SLACK_CONFIG_REFRESH_TOKEN:\nhttps://api.slack.com/apps",
+        { cause: persistError },
       );
     }
+    log.success("Configuration token rotated and persisted");
   }
 
   if (params.slackServiceToken) {
