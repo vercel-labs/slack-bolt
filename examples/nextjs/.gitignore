@@ -1,2 +1,14 @@
+# Dependencies
+node_modules
+
+# Environment
+.env*
+!.env.example
+
+# Vercel
 .vercel
+
+# Next.js
+.next
 next-env.d.ts
+*.tsbuildinfo
