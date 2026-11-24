@@ -7,7 +7,7 @@ A custom [Slack Bolt](https://slack.dev/bolt-js/) receiver built for Vercel's [F
 
 ## Getting Started
 
-Visit our [template](https://vercel.com/templates/backend/slack-bolt-with-nitro) to get started building a Slack app. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve-examples/tree/main/eve-slack-agent-template).
+Start from the [Next.js example](#examples): a complete Slack app, with OAuth and a Redis installation store, that you can run locally and deploy to Vercel. If you are building an agent we recommend the [eve](https://eve.dev) framework. You can find the eve template [here](https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template).
 
 Upgrading from v1? See [Migrating from v1](#migrating-from-v1).
 
@@ -513,7 +513,7 @@ export async function POST(request: Request) {
 
 ## Examples
 
-Starter templates: [Next.js](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/nextjs), [Hono](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/hono), [Nitro](https://github.com/vercel-labs/slack-bolt/tree/examples/examples/nitro).
+Starter template: [Next.js](https://github.com/vercel-labs/slack-bolt/tree/master/examples/nextjs).
 
 ## Contributing
 
