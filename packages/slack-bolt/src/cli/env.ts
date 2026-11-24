@@ -18,6 +18,23 @@ export const ENV_KEYS = [
   "VERCEL_API_TOKEN",
 ] as const;
 
+/**
+ * The variables whose values are secrets: the ones the CLI is given, and the
+ * ones it stores for a branch, which the branch's later builds run with.
+ */
+export const SECRET_ENV_KEYS = [
+  "SLACK_CONFIGURATION_TOKEN",
+  "SLACK_CONFIG_REFRESH_TOKEN",
+  "SLACK_SERVICE_TOKEN",
+  "VERCEL_API_TOKEN",
+  "VERCEL_AUTOMATION_BYPASS_SECRET",
+  "SLACK_CLIENT_SECRET",
+  "SLACK_SIGNING_SECRET",
+  "SLACK_BOT_TOKEN",
+  "SLACK_APP_LEVEL_TOKEN",
+  "SLACK_USER_TOKEN",
+] as const;
+
 export function envKeyToFlag(key: string): string {
   return key.toLowerCase().replace(/_/g, "-");
 }
